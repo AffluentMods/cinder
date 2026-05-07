@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Cinder.Artifacts\Cinder.Artifacts.csproj" />
+    <ProjectReference Include="..\Cinder.Sidecar\Cinder.Sidecar.csproj" />
+    <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
+  </ItemGroup>
+</Project>

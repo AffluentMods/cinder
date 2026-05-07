@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             xmlns:hx="using:Cinder.Hex"
+             x:Class="Cinder.App.Views.HexView"
+             x:DataType="vm:HexViewModel">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0"
+                Background="{DynamicResource CinderBackground1Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='No file open'}"
+                           FontWeight="500"
+                           Foreground="{DynamicResource CinderForegroundBrush}"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding DetectedFormat, FallbackValue=''}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           VerticalAlignment="Center" />
+                <TextBlock Text="{Binding DetectedFormatBadge}"
+                           Foreground="{DynamicResource CinderWarnBrush}"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding DetectedFormatBadge, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                <TextBlock Text="{Binding QuickHashSha256, StringFormat='SHA-256: {0}'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           VerticalAlignment="Center"
+                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           IsVisible="{Binding QuickHashSha256, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+        </Border>
+        <ScrollViewer Grid.Row="1"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Background="{DynamicResource CinderBackground0Brush}">
+            <hx:HexViewer Buffer="{Binding Buffer}"
+                          ScrollOffset="{Binding ScrollOffset, Mode=TwoWay}"
+                          CaretOffset="{Binding CaretOffset, Mode=TwoWay}"
+                          BytesPerRow="{Binding BytesPerRow}"
+                          MinHeight="600" />
+        </ScrollViewer>
+    </Grid>
+</UserControl>

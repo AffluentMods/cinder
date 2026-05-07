@@ -1,0 +1,87 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Cinder design tokens — see docs/plan.md §5.
+        Theme variants: Dark (default), Light. Tokens are exposed under semantic keys
+        (CinderBackground0/1/2, CinderForeground, CinderAccent, etc.) so views never
+        reference raw hex values.
+    -->
+
+    <ResourceDictionary.ThemeDictionaries>
+
+        <!-- ============================ DARK ============================ -->
+        <ResourceDictionary x:Key="Dark">
+            <Color x:Key="CinderBackground0Color">#0E0F12</Color>
+            <Color x:Key="CinderBackground1Color">#16181D</Color>
+            <Color x:Key="CinderBackground2Color">#1E2128</Color>
+            <Color x:Key="CinderBorderColor">#2A2D35</Color>
+            <Color x:Key="CinderBorderStrongColor">#3A3D47</Color>
+
+            <Color x:Key="CinderForegroundColor">#ECEDEE</Color>
+            <Color x:Key="CinderForegroundMutedColor">#9CA0AB</Color>
+            <Color x:Key="CinderForegroundDisabledColor">#5A5E6A</Color>
+
+            <Color x:Key="CinderAccentColor">#FF7A1A</Color>
+            <Color x:Key="CinderAccentHoverColor">#FF8E3D</Color>
+            <Color x:Key="CinderAccentDimColor">#B4540F</Color>
+
+            <Color x:Key="CinderOkColor">#3DD68C</Color>
+            <Color x:Key="CinderWarnColor">#FFB347</Color>
+            <Color x:Key="CinderDangerColor">#E5484D</Color>
+            <Color x:Key="CinderInfoColor">#5EAEFF</Color>
+        </ResourceDictionary>
+
+        <!-- ============================ LIGHT =========================== -->
+        <ResourceDictionary x:Key="Light">
+            <Color x:Key="CinderBackground0Color">#FAFAFA</Color>
+            <Color x:Key="CinderBackground1Color">#F2F3F5</Color>
+            <Color x:Key="CinderBackground2Color">#E7E9ED</Color>
+            <Color x:Key="CinderBorderColor">#D5D8DE</Color>
+            <Color x:Key="CinderBorderStrongColor">#B6BAC4</Color>
+
+            <Color x:Key="CinderForegroundColor">#16181D</Color>
+            <Color x:Key="CinderForegroundMutedColor">#5A5E6A</Color>
+            <Color x:Key="CinderForegroundDisabledColor">#9CA0AB</Color>
+
+            <Color x:Key="CinderAccentColor">#D45A00</Color>
+            <Color x:Key="CinderAccentHoverColor">#FF7A1A</Color>
+            <Color x:Key="CinderAccentDimColor">#8A3A00</Color>
+
+            <Color x:Key="CinderOkColor">#118A55</Color>
+            <Color x:Key="CinderWarnColor">#9C5A00</Color>
+            <Color x:Key="CinderDangerColor">#C8323A</Color>
+            <Color x:Key="CinderInfoColor">#1F6FCB</Color>
+        </ResourceDictionary>
+
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!-- =================== Brushes (theme-aware) =================== -->
+    <SolidColorBrush x:Key="CinderBackground0Brush" Color="{DynamicResource CinderBackground0Color}" />
+    <SolidColorBrush x:Key="CinderBackground1Brush" Color="{DynamicResource CinderBackground1Color}" />
+    <SolidColorBrush x:Key="CinderBackground2Brush" Color="{DynamicResource CinderBackground2Color}" />
+    <SolidColorBrush x:Key="CinderBorderBrush" Color="{DynamicResource CinderBorderColor}" />
+    <SolidColorBrush x:Key="CinderBorderStrongBrush" Color="{DynamicResource CinderBorderStrongColor}" />
+    <SolidColorBrush x:Key="CinderForegroundBrush" Color="{DynamicResource CinderForegroundColor}" />
+    <SolidColorBrush x:Key="CinderForegroundMutedBrush" Color="{DynamicResource CinderForegroundMutedColor}" />
+    <SolidColorBrush x:Key="CinderForegroundDisabledBrush" Color="{DynamicResource CinderForegroundDisabledColor}" />
+    <SolidColorBrush x:Key="CinderAccentBrush" Color="{DynamicResource CinderAccentColor}" />
+    <SolidColorBrush x:Key="CinderAccentHoverBrush" Color="{DynamicResource CinderAccentHoverColor}" />
+    <SolidColorBrush x:Key="CinderAccentDimBrush" Color="{DynamicResource CinderAccentDimColor}" />
+    <SolidColorBrush x:Key="CinderOkBrush" Color="{DynamicResource CinderOkColor}" />
+    <SolidColorBrush x:Key="CinderWarnBrush" Color="{DynamicResource CinderWarnColor}" />
+    <SolidColorBrush x:Key="CinderDangerBrush" Color="{DynamicResource CinderDangerColor}" />
+    <SolidColorBrush x:Key="CinderInfoBrush" Color="{DynamicResource CinderInfoColor}" />
+
+    <!-- ===================== Typography ===================== -->
+    <FontFamily x:Key="CinderFontFamily">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
+    <FontFamily x:Key="CinderFontFamilyMono">Cascadia Mono, Consolas, JetBrains Mono, monospace</FontFamily>
+
+    <x:Double x:Key="CinderFontSizeXs">11</x:Double>
+    <x:Double x:Key="CinderFontSizeSm">13</x:Double>
+    <x:Double x:Key="CinderFontSizeMd">15</x:Double>
+    <x:Double x:Key="CinderFontSizeLg">18</x:Double>
+    <x:Double x:Key="CinderFontSizeXl">24</x:Double>
+    <x:Double x:Key="CinderFontSize2xl">32</x:Double>
+
+</ResourceDictionary>

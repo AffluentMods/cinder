@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Markdig" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
+    <ProjectReference Include="..\Cinder.Artifacts\Cinder.Artifacts.csproj" />
+  </ItemGroup>
+</Project>

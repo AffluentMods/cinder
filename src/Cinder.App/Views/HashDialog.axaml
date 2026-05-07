@@ -1,0 +1,65 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Cinder.App.ViewModels"
+        x:Class="Cinder.App.Views.HashDialog"
+        x:DataType="vm:HashDialogViewModel"
+        Title="Cinder · Hash file"
+        Width="640" Height="420"
+        SizeToContent="Manual"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource CinderBackground1Brush}"
+        Foreground="{DynamicResource CinderForegroundBrush}">
+    <Grid Margin="16" RowDefinitions="Auto,Auto,Auto,*,Auto">
+        <TextBlock Grid.Row="0"
+                   Margin="0,0,0,12"
+                   Text="Drop a file or paste a path. Cinder hashes once and reuses the bytes for every algorithm — MD5, SHA-1, SHA-256, BLAKE3."
+                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                   TextWrapping="Wrap" />
+
+        <Grid Grid.Row="1" Margin="0,0,0,12" ColumnDefinitions="*,Auto">
+            <TextBox Grid.Column="0" Margin="0,0,8,0" Text="{Binding Path}" Watermark="Path to file…" />
+            <Button Grid.Column="1" Command="{Binding HashCommand}"
+                    Content="Hash"
+                    Background="{DynamicResource CinderAccentBrush}"
+                    Foreground="White"
+                    Padding="14,4"
+                    IsEnabled="{Binding !IsComputing}" />
+        </Grid>
+
+        <ProgressBar Grid.Row="2"
+                     Margin="0,0,0,12"
+                     Value="{Binding ProgressPercent}"
+                     Minimum="0" Maximum="100"
+                     Foreground="{DynamicResource CinderAccentBrush}"
+                     Background="{DynamicResource CinderBackground2Brush}"
+                     IsVisible="{Binding IsComputing}" />
+
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="80,*">
+                    <TextBlock Grid.Column="0" Text="MD5"     Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <SelectableTextBlock Grid.Column="1" Text="{Binding Md5}"     FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                </Grid>
+                <Grid ColumnDefinitions="80,*">
+                    <TextBlock Grid.Column="0" Text="SHA-1"   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <SelectableTextBlock Grid.Column="1" Text="{Binding Sha1}"    FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                </Grid>
+                <Grid ColumnDefinitions="80,*">
+                    <TextBlock Grid.Column="0" Text="SHA-256" Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <SelectableTextBlock Grid.Column="1" Text="{Binding Sha256}"  FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                </Grid>
+                <Grid ColumnDefinitions="80,*">
+                    <TextBlock Grid.Column="0" Text="BLAKE3"  Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <SelectableTextBlock Grid.Column="1" Text="{Binding Blake3}"  FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                </Grid>
+                <TextBlock Text="{Binding Error}" Foreground="{DynamicResource CinderDangerBrush}"
+                           IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock Grid.Row="4"
+                   Text="{Binding BytesHashed, StringFormat='{}{0:N0} bytes hashed'}"
+                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                   FontSize="{DynamicResource CinderFontSizeXs}" />
+    </Grid>
+</Window>

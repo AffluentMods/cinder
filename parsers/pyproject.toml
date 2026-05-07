@@ -1,0 +1,40 @@
+[project]
+name = "cinder-parsers"
+version = "0.0.1"
+description = "Cinder forensic parser sidecars (pytsk3, regipy, volatility3, libpff, ...)"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Affluent Labs" }]
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "black>=24.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["echo*", "shared*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true

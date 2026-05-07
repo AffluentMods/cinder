@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Cinder.Native\Cinder.Native.csproj" />
+  </ItemGroup>
+</Project>

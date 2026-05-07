@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Cinder.Cli</RootNamespace>
+    <AssemblyName>cinder-cli</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
+    <ProjectReference Include="..\Cinder.Imaging\Cinder.Imaging.csproj" />
+    <ProjectReference Include="..\Cinder.Filesystems\Cinder.Filesystems.csproj" />
+    <ProjectReference Include="..\Cinder.Carving\Cinder.Carving.csproj" />
+    <ProjectReference Include="..\Cinder.Search\Cinder.Search.csproj" />
+    <ProjectReference Include="..\Cinder.Reports\Cinder.Reports.csproj" />
+    <ProjectReference Include="..\Cinder.Workflow\Cinder.Workflow.csproj" />
+  </ItemGroup>
+</Project>

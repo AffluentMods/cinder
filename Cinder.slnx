@@ -1,0 +1,34 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cinder.AI/Cinder.AI.csproj" />
+    <Project Path="src/Cinder.App/Cinder.App.csproj" />
+    <Project Path="src/Cinder.Artifacts.Linux/Cinder.Artifacts.Linux.csproj" />
+    <Project Path="src/Cinder.Artifacts.Windows/Cinder.Artifacts.Windows.csproj" />
+    <Project Path="src/Cinder.Artifacts/Cinder.Artifacts.csproj" />
+    <Project Path="src/Cinder.Carving/Cinder.Carving.csproj" />
+    <Project Path="src/Cinder.Cases/Cinder.Cases.csproj" />
+    <Project Path="src/Cinder.Cli/Cinder.Cli.csproj" />
+    <Project Path="src/Cinder.Cloud/Cinder.Cloud.csproj" />
+    <Project Path="src/Cinder.Core/Cinder.Core.csproj" />
+    <Project Path="src/Cinder.Filesystems/Cinder.Filesystems.csproj" />
+    <Project Path="src/Cinder.Hex/Cinder.Hex.csproj" />
+    <Project Path="src/Cinder.Imaging/Cinder.Imaging.csproj" />
+    <Project Path="src/Cinder.Memory/Cinder.Memory.csproj" />
+    <Project Path="src/Cinder.Mobile/Cinder.Mobile.csproj" />
+    <Project Path="src/Cinder.Native.Linux/Cinder.Native.Linux.csproj" />
+    <Project Path="src/Cinder.Native.Windows/Cinder.Native.Windows.csproj" />
+    <Project Path="src/Cinder.Native/Cinder.Native.csproj" />
+    <Project Path="src/Cinder.Network/Cinder.Network.csproj" />
+    <Project Path="src/Cinder.Plugins/Cinder.Plugins.csproj" />
+    <Project Path="src/Cinder.Reader/Cinder.Reader.csproj" />
+    <Project Path="src/Cinder.Reports/Cinder.Reports.csproj" />
+    <Project Path="src/Cinder.Search/Cinder.Search.csproj" />
+    <Project Path="src/Cinder.Sidecar/Cinder.Sidecar.csproj" />
+    <Project Path="src/Cinder.Workflow/Cinder.Workflow.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cinder.Core.Tests/Cinder.Core.Tests.csproj" />
+    <Project Path="tests/Cinder.Hex.Tests/Cinder.Hex.Tests.csproj" />
+    <Project Path="tests/Cinder.Native.Tests/Cinder.Native.Tests.csproj" />
+  </Folder>
+</Solution>

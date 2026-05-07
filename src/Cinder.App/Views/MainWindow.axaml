@@ -1,0 +1,141 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Cinder.App.ViewModels"
+        xmlns:views="using:Cinder.App.Views"
+        x:Class="Cinder.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Cinder"
+        Width="1280" Height="800"
+        MinWidth="960" MinHeight="600"
+        Background="{DynamicResource CinderBackground0Brush}"
+        Foreground="{DynamicResource CinderForegroundBrush}"
+        FontFamily="{DynamicResource CinderFontFamily}"
+        FontSize="{DynamicResource CinderFontSizeSm}">
+
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+K" Command="{Binding OpenPaletteCommand}" />
+    </Window.KeyBindings>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <Border Grid.Row="0"
+                Background="{DynamicResource CinderBackground1Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="16,10">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0"
+                           Text="🔥 Cinder"
+                           FontWeight="600"
+                           FontSize="{DynamicResource CinderFontSizeMd}"
+                           Foreground="{DynamicResource CinderAccentBrush}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="Affluent Labs · pre-alpha"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+                <Button Grid.Column="2"
+                        Command="{Binding OpenPaletteCommand}"
+                        Content="⌘K  Search commands"
+                        Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                        Background="{DynamicResource CinderBackground2Brush}"
+                        BorderBrush="{DynamicResource CinderBorderBrush}"
+                        Padding="10,4" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" ColumnDefinitions="240,4,*,4,300">
+            <Border Grid.Column="0" Background="{DynamicResource CinderBackground1Brush}">
+                <DockPanel Margin="12">
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="Case"
+                               FontWeight="600"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               Margin="0,0,0,8" />
+                    <ListBox ItemsSource="{Binding CaseTreeItems}"
+                             Background="Transparent" BorderThickness="0"
+                             Foreground="{DynamicResource CinderForegroundBrush}" />
+                </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+
+            <TabControl Grid.Column="2"
+                        ItemsSource="{Binding Tabs}"
+                        SelectedItem="{Binding SelectedTab}"
+                        Background="{DynamicResource CinderBackground0Brush}"
+                        Padding="0">
+                <TabControl.ItemTemplate>
+                    <DataTemplate DataType="vm:TabItemViewModel">
+                        <TextBlock Text="{Binding Title}" />
+                    </DataTemplate>
+                </TabControl.ItemTemplate>
+                <TabControl.ContentTemplate>
+                    <DataTemplate DataType="vm:TabItemViewModel">
+                        <Panel>
+                            <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hex'}"
+                                            Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex}">
+                                <ContentControl.ContentTemplate>
+                                    <DataTemplate DataType="vm:HexViewModel">
+                                        <views:HexView />
+                                    </DataTemplate>
+                                </ContentControl.ContentTemplate>
+                            </ContentControl>
+                            <TextBlock IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='gallery'}"
+                                       Text="Image gallery — Phase 4 deliverable. Drop a folder to scan."
+                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <TextBlock IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='timeline'}"
+                                       Text="Super-timeline — Phase 6 deliverable."
+                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <TextBlock IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='reports'}"
+                                       Text="Report builder — Phase 8 deliverable."
+                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Panel>
+                    </DataTemplate>
+                </TabControl.ContentTemplate>
+            </TabControl>
+
+            <GridSplitter Grid.Column="3" Background="{DynamicResource CinderBorderBrush}" />
+
+            <Border Grid.Column="4" Background="{DynamicResource CinderBackground1Brush}">
+                <DockPanel Margin="12">
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="Properties"
+                               FontWeight="600"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               Margin="0,0,0,8" />
+                    <TextBlock Text="No selection"
+                               Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="2"
+                Background="{DynamicResource CinderBackground1Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="16,8">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding ActivityLog[0]}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding StatusBar}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+
+        <views:CommandPaletteView Grid.Row="0"
+                                  Grid.RowSpan="3"
+                                  DataContext="{Binding Palette}"
+                                  IsVisible="{Binding IsOpen}" />
+    </Grid>
+</Window>

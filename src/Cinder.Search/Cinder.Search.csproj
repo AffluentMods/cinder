@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Lucene.Net" />
+    <PackageReference Include="Lucene.Net.Analysis.Common" />
+    <PackageReference Include="Lucene.Net.QueryParser" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
+    <ProjectReference Include="..\Cinder.Artifacts\Cinder.Artifacts.csproj" />
+  </ItemGroup>
+</Project>

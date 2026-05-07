@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             xmlns:svc="using:Cinder.App.Services"
+             x:Class="Cinder.App.Views.CommandPaletteView"
+             x:DataType="vm:CommandPaletteViewModel"
+             Background="#A0000000">
+
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Escape" Command="{Binding CloseCommand}" />
+        <KeyBinding Gesture="Enter" Command="{Binding InvokeSelectedCommand}" />
+    </UserControl.KeyBindings>
+
+    <Border Width="640"
+            MaxHeight="420"
+            VerticalAlignment="Top"
+            HorizontalAlignment="Center"
+            Margin="0,120,0,0"
+            Background="{DynamicResource CinderBackground2Brush}"
+            BorderBrush="{DynamicResource CinderBorderStrongBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            BoxShadow="0 16 32 0 #80000000">
+        <DockPanel>
+            <TextBox DockPanel.Dock="Top"
+                     Watermark="Type a command..."
+                     Text="{Binding Query}"
+                     FontSize="{DynamicResource CinderFontSizeMd}"
+                     Padding="14,12"
+                     Background="Transparent"
+                     BorderThickness="0,0,0,1"
+                     BorderBrush="{DynamicResource CinderBorderBrush}" />
+            <ListBox ItemsSource="{Binding Results}"
+                     SelectedItem="{Binding Selected}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Padding="0,4">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="svc:CommandDescriptor">
+                        <StackPanel Spacing="2" Margin="6,4">
+                            <TextBlock Text="{Binding Title}" FontWeight="500" />
+                            <TextBlock Text="{Binding Subtitle}"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                       IsVisible="{Binding Subtitle, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+    </Border>
+</UserControl>
