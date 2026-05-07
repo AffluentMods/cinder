@@ -90,7 +90,7 @@ yay -S cinder
 
 ## Build from source
 
-You'll need .NET 9 SDK, Python 3.12, and Git. Full setup in [CONTRIBUTING.md](CONTRIBUTING.md).
+You'll need .NET 10 SDK, Python 3.12, and Git. Full setup in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/affluent-labs/cinder.git
@@ -111,7 +111,7 @@ Forensic tools need raw disk access.
 ```
 Avalonia UI 11 (cross-platform shell)
         ↓
-C# .NET 9 core ─── platform abstraction ─── Win/Linux native bits
+C# .NET 10 core ─── platform abstraction ─── Win/Linux native bits
         ↓                                          ↓
    SQLite case DB                          Python 3.12 sidecars
                                            (pytsk3, regipy, vol3, …)

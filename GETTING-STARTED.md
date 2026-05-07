@@ -7,7 +7,7 @@ Step-by-step from "I have an idea" to "I'm writing the first commit." Tailored f
 ## TL;DR
 
 1. Reserve names (GitHub org, repo, domain) — 15 min
-2. Install dev tools (Rider, .NET 9, Python 3.12, Git LFS) — 30 min
+2. Install dev tools (Rider, .NET 10, Python 3.12, Git LFS) — 30 min
 3. Apply for free OSS licenses (JetBrains, SignPath later) — 10 min
 4. Init the repo with the starter kit files — 10 min
 5. Push to GitHub — 5 min
@@ -73,7 +73,7 @@ Once your `cinder` repo is public on GitHub:
 
 While you wait, the 30-day trial covers you.
 
-### .NET 9 SDK
+### .NET 10 SDK
 
 **Windows:**
 ```powershell

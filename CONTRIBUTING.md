@@ -33,11 +33,11 @@ This project follows the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md). Be exce
 ### Prerequisites
 
 | Tool | Version | Notes |
-|---|---|---|
-| .NET SDK | 9.0+ | [Download](https://dotnet.microsoft.com/download) |
-| Python | 3.12+ | For sidecar workers |
-| Git | 2.40+ | |
-| Git LFS | latest | For test fixtures |
+|---|---------|---|
+| .NET SDK | 10.0+   | [Download](https://dotnet.microsoft.com/download) |
+| Python | 3.12+   | For sidecar workers |
+| Git | 2.40+   | |
+| Git LFS | latest  | For test fixtures |
 
 ### IDE
 
@@ -74,7 +74,7 @@ dotnet build
 #### Linux (Ubuntu / Debian / WSL)
 
 ```bash
-# 1. Install .NET 9 SDK
+# 1. Install .NET 10 SDK
 wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
 sudo dpkg -i packages-microsoft-prod.deb
 sudo apt update && sudo apt install -y dotnet-sdk-9.0
@@ -177,7 +177,7 @@ mypy .
 
 ### C#
 
-- **Target**: .NET 9, C# 13, nullable reference types **enabled**
+- **Target**: .NET 10, C# 13, nullable reference types **enabled**
 - `async`/`Task` on every IO method — no `.Result` or `.Wait()`
 - `CancellationToken` parameter on every public async method
 - `record` over `class` for DTOs and value objects

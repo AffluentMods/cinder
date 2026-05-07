@@ -18,18 +18,18 @@
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
 
     <!-- DI / Hosting / Logging -->
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Logging" Version="9.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="9.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.0" />
     <PackageVersion Include="Serilog" Version="4.2.0" />
-    <PackageVersion Include="Serilog.Extensions.Hosting" Version="9.0.0" />
+    <PackageVersion Include="Serilog.Extensions.Hosting" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageVersion Include="Serilog.Sinks.Async" Version="2.1.0" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.0.0" />
 
     <!-- Database -->
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageVersion Include="Dapper" Version="2.1.66" />
     <PackageVersion Include="DbUp" Version="6.0.0" />
 
