@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a bug or unexpected behavior in Cinder
+title: "[bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more detail you provide, the faster we can fix it.
+
+        **Do not include real case data.** Sanitize any evidence samples first.
+
+  - type: input
+    id: cinder-version
+    attributes:
+      label: Cinder version
+      description: From About dialog or `cinder --version`
+      placeholder: e.g., 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11 (24H2)
+        - Windows 11 (23H2 or earlier)
+        - Windows 10
+        - Ubuntu 24.04
+        - Ubuntu 22.04
+        - Debian 12
+        - Fedora
+        - Arch Linux
+        - Other (specify in description)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug
+      placeholder: When I tried to..., Cinder did...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: What you did, in order
+      placeholder: |
+        1. Open Cinder
+        2. Create a new case named "test"
+        3. Add an E01 image at...
+        4. Click...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you think would happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What did happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / crash bundle
+      description: |
+        Attach the crash bundle from `%APPDATA%\Cinder\crashes\` (Windows) or `~/.config/cinder/crashes/` (Linux), or paste relevant log lines.
+      render: shell
+
+  - type: textarea
+    id: sample-data
+    attributes:
+      label: Sample data
+      description: |
+        Sanitized minimal sample that triggers the bug. Public test images (NIST CFReDS, etc.) are ideal.
+        **Never upload real case data.**
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and confirmed this is not a duplicate
+          required: true
+        - label: This bug report contains no real case data or PII
+          required: true

@@ -1,0 +1,60 @@
+name: Parser request
+description: Request support for a new file format, artifact, or evidence source
+title: "[parser]: "
+labels: ["parser", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to request that Cinder support parsing a specific format or artifact.
+        The more complete the request, the faster a parser ships.
+
+  - type: input
+    id: format-name
+    attributes:
+      label: Format / artifact name
+      placeholder: e.g., "Windows Notification Database (wpndatabase.db)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec
+    attributes:
+      label: Format specification
+      description: Link to RFC, vendor doc, blog post, or reverse-engineered notes
+    validations:
+      required: true
+
+  - type: textarea
+    id: forensic-relevance
+    attributes:
+      label: Forensic relevance
+      description: What can investigators learn from this?
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing-tools
+    attributes:
+      label: Existing tools
+      description: What other tools (Eric Zimmerman, Plaso plugins, custom Python scripts) already parse this?
+
+  - type: textarea
+    id: sample-data
+    attributes:
+      label: Sample data
+      description: |
+        Sanitized minimal sample. Public test datasets ideal.
+        **Never upload real case data.**
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform origin
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Android
+        - iOS
+        - Cross-platform / multiple

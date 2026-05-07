@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Publish self-contained
+        run: |
+          dotnet publish src/Cinder.App `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained `
+            -p:PublishSingleFile=true `
+            -p:Version=${{ github.ref_name }} `
+            -o publish/win-x64
+
+      - name: Submit to SignPath
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+          project-slug: cinder
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: cinder-windows
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: publish/win-x64-signed
+        # Note: Wire this up after SignPath approves your OSS application.
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinder-windows
+          path: publish/win-x64/
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Publish self-contained
+        run: |
+          dotnet publish src/Cinder.App \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained \
+            -p:PublishSingleFile=true \
+            -p:Version=${{ github.ref_name }} \
+            -o publish/linux-x64
+
+      - name: Build AppImage
+        run: |
+          # placeholder — wire up appimagetool once installer/linux/appimage/ has the recipe
+          echo "TODO: build AppImage"
+
+      - name: GPG sign Linux artifacts
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          # gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+          #   --output Cinder.AppImage.sig --detach-sign Cinder.AppImage
+          echo "TODO: enable once AppImage build lands"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinder-linux
+          path: publish/linux-x64/
+
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*
+          fail_on_unmatched_files: false
