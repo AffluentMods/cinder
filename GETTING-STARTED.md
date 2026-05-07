@@ -28,7 +28,7 @@ You can be at step 6 by tonight.
    - Description: *"Open-source forensics toolkit. What remains tells the story."*
    - Public
    - Do **not** initialize with README, .gitignore, or license — you'll push the starter kit
-4. Reserve `affluent-labs` GitHub Sponsors profile too while you're there
+4. Reserve `AffluentMods` GitHub Sponsors profile too while you're there
 
 ### Domain
 
@@ -177,7 +177,7 @@ You have the starter kit (this folder you're reading right now). Drop it into yo
 
 ```bash
 # Clone the empty repo you created in step 1
-git clone https://github.com/affluent-labs/cinder.git
+git clone https://github.com/AffluentMods/cinder.git
 cd cinder
 
 # Copy the starter kit contents into the clone

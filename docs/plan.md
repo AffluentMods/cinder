@@ -12,7 +12,7 @@
 | **Name** | Cinder |
 | **Studio** | Affluent Labs |
 | **License** | Apache License 2.0 |
-| **Repo** | `github.com/affluent-labs/cinder` (proposed) |
+| **Repo** | `github.com/AffluentMods/cinder` (proposed) |
 | **Platforms** | Windows 11 (x64) + Linux (x64). macOS deferred to v2+. |
 | **Stack** | C# .NET 10 + Avalonia UI 11 + Python 3.12 sidecars + SQLite |
 | **Pricing** | Free, forever. GitHub Sponsors / Open Collective for donations. |
@@ -480,7 +480,7 @@ When you eventually run Astryx on the 4090 (or 6090), it speaks OpenAI-compatibl
 ### Auto-update
 
 - Settings → "Check for updates" toggle (default: on for stable, off for nightly)
-- Update check: `GET https://api.github.com/repos/affluent-labs/cinder/releases/latest` — 100% public API, no Cinder backend service
+- Update check: `GET https://api.github.com/repos/AffluentMods/cinder/releases/latest` — 100% public API, no Cinder backend service
 - Updates are user-confirmed, never silent
 
 ---

@@ -11,4 +11,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial repository scaffold
 - Project plan v0.2 in `docs/plan.md`
 
-[Unreleased]: https://github.com/affluent-labs/cinder/compare/HEAD...HEAD
+[Unreleased]: https://github.com/AffluentMods/cinder/compare/HEAD...HEAD

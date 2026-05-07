@@ -26,7 +26,7 @@ This project follows the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md). Be exce
 - **Test fixtures** — submit forensic test images with provenance
 - **Bug reports** — see [Reporting bugs](#reporting-bugs)
 - **Parser requests** — see [Requesting parsers](#requesting-parsers)
-- **Sponsor** — [GitHub Sponsors](https://github.com/sponsors/affluent-labs) covers signing certs and infra
+- **Sponsor** — [GitHub Sponsors](https://github.com/sponsors/AffluentMods) covers signing certs and infra
 
 ## Local development setup
 
@@ -55,7 +55,7 @@ winget install Git.Git
 winget install GitHub.GitLFS
 
 # 2. Clone the repo
-git clone https://github.com/affluent-labs/cinder.git
+git clone https://github.com/AffluentMods/cinder.git
 cd cinder
 
 # 3. Set up Python venv for parsers
@@ -83,7 +83,7 @@ sudo apt update && sudo apt install -y dotnet-sdk-9.0
 sudo apt install -y python3.12 python3.12-venv python3-pip git git-lfs build-essential libfuse-dev
 
 # 3. Clone the repo
-git clone https://github.com/affluent-labs/cinder.git
+git clone https://github.com/AffluentMods/cinder.git
 cd cinder
 
 # 4. Set up Python venv
@@ -100,7 +100,7 @@ dotnet build
 
 ```bash
 sudo pacman -S dotnet-sdk python git git-lfs base-devel fuse3
-git clone https://github.com/affluent-labs/cinder.git
+git clone https://github.com/AffluentMods/cinder.git
 cd cinder
 python -m venv parsers/.venv
 source parsers/.venv/bin/activate
@@ -113,7 +113,7 @@ dotnet build
 
 ```bash
 sudo dnf install -y dotnet-sdk-9.0 python3.12 git git-lfs gcc-c++ fuse3-devel
-git clone https://github.com/affluent-labs/cinder.git
+git clone https://github.com/AffluentMods/cinder.git
 cd cinder
 python3.12 -m venv parsers/.venv
 source parsers/.venv/bin/activate

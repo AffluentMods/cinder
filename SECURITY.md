@@ -4,7 +4,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Use [GitHub Security Advisories](https://github.com/affluent-labs/cinder/security/advisories/new) to report privately. This goes to maintainers only and supports a coordinated disclosure timeline.
+Use [GitHub Security Advisories](https://github.com/AffluentMods/cinder/security/advisories/new) to report privately. This goes to maintainers only and supports a coordinated disclosure timeline.
 
 Alternatively, email **security@cinder.dev** with PGP encryption (key on the website).
 

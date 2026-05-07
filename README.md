@@ -9,12 +9,12 @@
 *What remains tells the story.*
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-FF7A1A.svg)](LICENSE)
-[![CI](https://github.com/affluent-labs/cinder/actions/workflows/ci.yml/badge.svg)](https://github.com/affluent-labs/cinder/actions/workflows/ci.yml)
-[![GitHub release](https://img.shields.io/github/v/release/affluent-labs/cinder?color=FF7A1A)](https://github.com/affluent-labs/cinder/releases)
-[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-FF7A1A)](https://github.com/sponsors/affluent-labs)
+[![CI](https://github.com/AffluentMods/cinder/actions/workflows/ci.yml/badge.svg)](https://github.com/AffluentMods/cinder/actions/workflows/ci.yml)
+[![GitHub release](https://img.shields.io/github/v/release/AffluentMods/cinder?color=FF7A1A)](https://github.com/AffluentMods/cinder/releases)
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-FF7A1A)](https://github.com/sponsors/AffluentMods)
 
-[**Download**](https://github.com/affluent-labs/cinder/releases) ·
-[**Documentation**](https://github.com/affluent-labs/cinder/tree/main/docs) ·
+[**Download**](https://github.com/AffluentMods/cinder/releases) ·
+[**Documentation**](https://github.com/AffluentMods/cinder/tree/main/docs) ·
 [**Roadmap**](ROADMAP.md) ·
 [**Contributing**](CONTRIBUTING.md)
 
@@ -62,13 +62,13 @@ When defense counsel can audit the tool that produced your evidence, methodology
 winget install AffluentLabs.Cinder
 ```
 
-Or download the signed `.msix` from [Releases](https://github.com/affluent-labs/cinder/releases).
+Or download the signed `.msix` from [Releases](https://github.com/AffluentMods/cinder/releases).
 
 ### Linux
 
 **AppImage** (any distro):
 ```bash
-curl -LO https://github.com/affluent-labs/cinder/releases/latest/download/Cinder.AppImage
+curl -LO https://github.com/AffluentMods/cinder/releases/latest/download/Cinder.AppImage
 chmod +x Cinder.AppImage
 ./Cinder.AppImage
 ```
@@ -93,7 +93,7 @@ yay -S cinder
 You'll need .NET 10 SDK, Python 3.12, and Git. Full setup in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-git clone https://github.com/affluent-labs/cinder.git
+git clone https://github.com/AffluentMods/cinder.git
 cd cinder
 dotnet build
 dotnet run --project src/Cinder.App
@@ -123,7 +123,7 @@ C# .NET 10 core ─── platform abstraction ─── Win/Linux native bits
 
 Contributions welcome and encouraged. Cinder is an open project — every parser, every artifact, every UI improvement helps. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions, and how to submit a PR.
 
-Looking for a place to start? Issues tagged [`good first issue`](https://github.com/affluent-labs/cinder/labels/good%20first%20issue) are intentionally scoped for newcomers.
+Looking for a place to start? Issues tagged [`good first issue`](https://github.com/AffluentMods/cinder/labels/good%20first%20issue) are intentionally scoped for newcomers.
 
 ## Telemetry
 
@@ -131,7 +131,7 @@ Looking for a place to start? Issues tagged [`good first issue`](https://github.
 
 ## Sponsor
 
-Cinder is free and will stay free. If it saves you time, [sponsor on GitHub](https://github.com/sponsors/affluent-labs) or contribute a parser. Funds go toward code-signing certificates, test hardware, and domain renewals.
+Cinder is free and will stay free. If it saves you time, [sponsor on GitHub](https://github.com/sponsors/AffluentMods) or contribute a parser. Funds go toward code-signing certificates, test hardware, and domain renewals.
 
 ## License
 
@@ -149,4 +149,4 @@ Cinder stands on the shoulders of:
 - [regipy](https://github.com/mkorman90/regipy), [libewf](https://github.com/libyal/libewf), [libpff](https://github.com/libyal/libpff)
 - And every contributor to open digital forensics.
 
-Built by [Affluent Labs](https://github.com/affluent-labs).
+Built by [Affluent Labs](https://github.com/AffluentMods).

@@ -15,7 +15,7 @@
     <Company>Affluent Labs</Company>
     <Copyright>Copyright (c) 2026 Affluent Labs</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/affluent-labs/cinder</RepositoryUrl>
+    <RepositoryUrl>https://github.com/AffluentMods/cinder</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
