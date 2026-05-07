@@ -5,6 +5,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- SourceLink -->
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />
+
     <!-- Avalonia -->
     <PackageVersion Include="Avalonia" Version="11.2.1" />
     <PackageVersion Include="Avalonia.Desktop" Version="11.2.1" />
@@ -31,10 +34,10 @@
     <!-- Database -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageVersion Include="Dapper" Version="2.1.66" />
-    <PackageVersion Include="DbUp" Version="6.0.0" />
 
     <!-- Hashing / Crypto -->
     <PackageVersion Include="Blake3" Version="1.0.0" />
+    <PackageVersion Include="System.IO.Hashing" Version="10.0.0" />
     <PackageVersion Include="BouncyCastle.Cryptography" Version="2.5.0" />
 
     <!-- Charts / Maps / Markdown -->
@@ -45,6 +48,11 @@
     <!-- HTTP -->
     <PackageVersion Include="Polly" Version="8.5.0" />
     <PackageVersion Include="Polly.Extensions.Http" Version="3.0.0" />
+
+    <!-- Search (Lucene.NET — picked over Tantivy per docs/plan.md §13.3) -->
+    <PackageVersion Include="Lucene.Net" Version="4.8.0-beta00017" />
+    <PackageVersion Include="Lucene.Net.Analysis.Common" Version="4.8.0-beta00017" />
+    <PackageVersion Include="Lucene.Net.QueryParser" Version="4.8.0-beta00017" />
 
     <!-- YARA -->
     <PackageVersion Include="dnYara.NetStandard" Version="2.1.4" />

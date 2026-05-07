@@ -85,7 +85,7 @@ winget install Microsoft.DotNet.SDK.9
 wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
 sudo dpkg -i packages-microsoft-prod.deb
 sudo apt update
-sudo apt install -y dotnet-sdk-9.0
+sudo apt install -y dotnet-sdk-10.0
 ```
 
 **Linux (Arch):**
@@ -96,7 +96,7 @@ sudo pacman -S dotnet-sdk
 Verify:
 ```bash
 dotnet --version
-# should output 9.0.x
+# should output 10.0.x
 ```
 
 ### Python 3.12

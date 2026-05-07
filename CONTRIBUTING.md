@@ -177,7 +177,7 @@ mypy .
 
 ### C#
 
-- **Target**: .NET 10, C# 13, nullable reference types **enabled**
+- **Target**: .NET 10, C# 14, nullable reference types **enabled**
 - `async`/`Task` on every IO method — no `.Result` or `.Wait()`
 - `CancellationToken` parameter on every public async method
 - `record` over `class` for DTOs and value objects
