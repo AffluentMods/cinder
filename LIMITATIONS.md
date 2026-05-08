@@ -61,20 +61,22 @@ can link to it.
   - Roughly equivalent feature surface but in roughly one more engineer-month
 - **Re-visit:** if benchmarks show Lucene.NET indexing falls behind on 1M+ artifact cases.
 
-## <a id="cloud-oauth-clients"></a> Cloud connector OAuth client IDs
+## <a id="cloud-oauth-clients"></a> Cloud connectors require user-supplied OAuth client_ids
 
 - **Where:** [`Cinder.Cloud.GoogleDriveConnector`](src/Cinder.Cloud/GoogleDriveConnector.cs),
   [`OneDriveConnector`](src/Cinder.Cloud/OneDriveConnector.cs),
   [`DropboxConnector`](src/Cinder.Cloud/DropboxConnector.cs)
-- **State:** code is complete; all three need a registered OAuth application with a loopback
-  redirect URI.
-- **Blockers:**
-  - Google Cloud Console: register a Desktop OAuth client → get `client_id`
-  - Microsoft Entra ID: register an App Registration → public-client redirect → `client_id`
-  - Dropbox App Console: register an app → "PKCE only" redirect → `client_id`
-- **Workaround:** `ClientId` properties are init-only and read from `SettingsStore.CloudClientIds`.
-  Distributors can ship Cinder with their own client IDs filled in, OR the user enters them
-  in Settings on first cloud-connect.
+- **State:** code is complete; cloud connectors are an **opt-in advanced feature**.
+- **Why "user supplies their own":** Cinder is 100% public + buildable + redistributable, so the
+  project ships **no** baked-in OAuth client_ids. PKCE makes client_ids public-by-design (they're
+  not secrets — that's the whole point of PKCE), but registering one ties a personal Google /
+  Microsoft / Dropbox account to the OSS project, including its ToS, quotas, and ban risk. Cinder
+  declines that obligation.
+- **What the user does:** the ten-minute per-provider walkthrough lives in
+  [docs/cloud-setup.md](docs/cloud-setup.md). Paste the resulting public client_ids into Settings
+  → Cloud (or directly into `%LOCALAPPDATA%\Cinder\settings.json`); no client secrets are ever
+  involved. The Settings → Cloud UI itself is Phase 8.2 — until then, edit the JSON directly per
+  the guide.
 
 ## <a id="parser-libraries"></a> Python parser libraries
 

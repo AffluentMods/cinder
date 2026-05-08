@@ -1,6 +1,7 @@
 # Cinder docs
 
 - **[plan.md](plan.md)** — full project plan v0.2: architecture, feature inventory, phased roadmap, design system. **Start here.**
+- **[cloud-setup.md](cloud-setup.md)** — register your own OAuth client IDs with Google / Microsoft / Dropbox to use the cloud connectors
 - **architecture.md** — deep dive on the C# core + Python sidecar architecture (TODO)
 - **ai-providers.md** — how to configure local AI backends (TODO)
 - **sidecar-protocol.md** — JSON-RPC contract for Python workers (TODO)

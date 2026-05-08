@@ -11,9 +11,9 @@ namespace Cinder.Cloud;
 /// open the system browser, and listen on a loopback HTTP server for the redirect — no client
 /// secret required, suitable for a desktop app.
 ///
-/// **TODO**: each provider needs a registered OAuth client_id with `http://127.0.0.1:&lt;port&gt;`
-/// as an allowed redirect URI. Cinder cannot register these automatically; see
-/// <c>LIMITATIONS.md → cloud-oauth-clients</c>.
+/// Each provider needs a user-registered OAuth client_id with a localhost redirect URI.
+/// Cinder ships no baked-in client_ids; see <c>docs/cloud-setup.md</c> for the ten-minute
+/// per-provider walkthrough.
 /// </summary>
 public static class OAuthPkceHelper
 {
