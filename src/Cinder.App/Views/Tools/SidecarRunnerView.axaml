@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.SidecarRunnerView"
+             x:DataType="tools:SidecarToolViewModel">
+    <Grid RowDefinitions="Auto,Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Classes="accent" Content="Pick evidence…"
+                        Click="OnPickEvidenceClick" />
+                <Button Content="Run"
+                        Command="{Binding LoadEvidenceCommand}"
+                        CommandParameter="{Binding EvidencePath}"
+                        IsEnabled="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                <TextBlock VerticalAlignment="Center" Margin="14,0"
+                           Text="{Binding EvidencePath, FallbackValue='No evidence loaded'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                           FontSize="{DynamicResource CinderFontSizeXs}" />
+            </StackPanel>
+        </Border>
+        <Border Grid.Row="1" Padding="14,8" Background="{DynamicResource CinderBackground0Brush}"
+                IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <SelectableTextBlock Text="{Binding ErrorMessage}"
+                                 Foreground="{DynamicResource CinderDangerBrush}"
+                                 TextWrapping="Wrap"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                 FontSize="{DynamicResource CinderFontSizeXs}" />
+        </Border>
+        <Grid Grid.Row="2" RowDefinitions="*,Auto">
+            <DataGrid Grid.Row="0" ItemsSource="{Binding Rows}" AutoGenerateColumns="True" IsReadOnly="True"
+                      Background="{DynamicResource CinderBackground0Brush}" />
+            <Border Grid.Row="1" Background="{DynamicResource CinderBackground1Brush}" Padding="14,4">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="{Binding StatusLine, FallbackValue='Pick evidence to begin.'}"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <ProgressBar Grid.Column="1" Width="120" IsIndeterminate="True"
+                                 IsVisible="{Binding IsLoading}" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

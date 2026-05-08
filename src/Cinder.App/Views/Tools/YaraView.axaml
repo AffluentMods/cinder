@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.YaraView"
+             x:DataType="tools:YaraTool">
+    <Grid ColumnDefinitions="*,4,*">
+        <DockPanel Grid.Column="0">
+            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                <TextBlock Text="RULES" FontWeight="600"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+            </Border>
+            <TextBox Text="{Binding Rules}" AcceptsReturn="True" TextWrapping="NoWrap"
+                     FontFamily="{DynamicResource CinderFontFamilyMono}"
+                     FontSize="{DynamicResource CinderFontSizeXs}"
+                     VerticalContentAlignment="Top"
+                     Background="{DynamicResource CinderBackground0Brush}" />
+        </DockPanel>
+        <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+        <DockPanel Grid.Column="2">
+            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Classes="accent" Content="Pick file + scan…" Command="{Binding PickAndScanCommand}" />
+                    <TextBlock Text="{Binding ScanTarget, FallbackValue='No file scanned'}"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                </StackPanel>
+            </Border>
+            <TextBlock DockPanel.Dock="Bottom" Margin="14,4"
+                       Text="{Binding StatusLine}"
+                       FontSize="{DynamicResource CinderFontSizeXs}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            <ListBox ItemsSource="{Binding Hits}" Background="{DynamicResource CinderBackground0Brush}" />
+        </DockPanel>
+    </Grid>
+</UserControl>

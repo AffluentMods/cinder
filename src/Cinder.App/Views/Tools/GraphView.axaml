@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:srch="using:Cinder.Search"
+             x:Class="Cinder.App.Views.Tools.GraphView"
+             x:DataType="tools:GraphTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox Width="200" Text="{Binding From}" Watermark="from (email/handle)" />
+                <TextBox Width="200" Text="{Binding To}"   Watermark="to" />
+                <TextBox Width="160" Text="{Binding Source}" Watermark="source" />
+                <TextBox Width="240" Text="{Binding Subject}" Watermark="subject (optional)" />
+                <Button Classes="accent" Content="Add edge" Command="{Binding AddEdgeCommand}" />
+            </StackPanel>
+        </Border>
+        <Grid Grid.Row="1" ColumnDefinitions="*,4,*">
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="NODES"
+                           FontWeight="600" Margin="14,8"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                <DataGrid ItemsSource="{Binding Nodes}" AutoGenerateColumns="False" IsReadOnly="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Identity"  Binding="{Binding Identity}" Width="*" />
+                        <DataGridTextColumn Header="In"        Binding="{Binding InCount}" Width="60" />
+                        <DataGridTextColumn Header="Out"       Binding="{Binding OutCount}" Width="60" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+            <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Text="EDGES"
+                           FontWeight="600" Margin="14,8"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                <DataGrid ItemsSource="{Binding Edges}" AutoGenerateColumns="False" IsReadOnly="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="From"    Binding="{Binding From}"    Width="*" />
+                        <DataGridTextColumn Header="To"      Binding="{Binding To}"      Width="*" />
+                        <DataGridTextColumn Header="Source"  Binding="{Binding Source}"  Width="120" />
+                        <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.HashSetsView"
+             x:DataType="tools:HashSetsTool">
+    <Grid RowDefinitions="Auto,Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Content="Open / create DB…" Classes="accent" Command="{Binding PickDatabaseCommand}" />
+                <Button Content="Import NSRL minimal CSV…" Command="{Binding ImportNsrlCommand}" />
+                <TextBlock Margin="14,0" VerticalAlignment="Center"
+                           Text="{Binding DatabasePath, FallbackValue='No DB selected'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                           FontSize="{DynamicResource CinderFontSizeXs}" />
+            </StackPanel>
+        </Border>
+        <Border Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="14,10">
+            <Grid ColumnDefinitions="120,*,Auto">
+                <ComboBox Grid.Column="0" ItemsSource="{Binding Algorithms}" SelectedItem="{Binding Algorithm}" />
+                <TextBox Grid.Column="1" Margin="8,0" Text="{Binding Query}"
+                         Watermark="Hex digest (lowercase)"
+                         FontFamily="{DynamicResource CinderFontFamilyMono}">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Return" Command="{Binding LookupCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
+                <Button Grid.Column="2" Classes="accent" Content="Lookup" Command="{Binding LookupCommand}" />
+            </Grid>
+        </Border>
+        <ScrollViewer Grid.Row="2" Background="{DynamicResource CinderBackground0Brush}" Padding="20">
+            <StackPanel Spacing="14">
+                <SelectableTextBlock Text="{Binding VerdictLine, FallbackValue='Open a hash-set DB and run a lookup.'}"
+                                     FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                     FontSize="{DynamicResource CinderFontSizeMd}"
+                                     Foreground="{DynamicResource CinderForegroundBrush}" />
+                <TextBlock Text="{Binding StatusLine}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

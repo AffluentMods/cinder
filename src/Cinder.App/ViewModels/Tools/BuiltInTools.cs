@@ -4,7 +4,7 @@ namespace Cinder.App.ViewModels.Tools;
 // EXAMINE — per-evidence parsers + viewers
 // =================================================================================
 
-public sealed class HexTool : ToolViewModel
+public sealed partial class HexTool : ToolViewModel
 {
     public override string Id => "hex";
     public override string Title => "Hex Viewer";
@@ -14,7 +14,7 @@ public sealed class HexTool : ToolViewModel
     public override string Kind => "hex";
 }
 
-public sealed class StringsTool : ToolViewModel
+public sealed partial class StringsTool : ToolViewModel
 {
     public override string Id => "strings";
     public override string Title => "Strings";
@@ -24,7 +24,7 @@ public sealed class StringsTool : ToolViewModel
     public override string Kind => "strings";
 }
 
-public sealed class FilesystemTool : SidecarToolViewModel
+public sealed partial class FilesystemTool : SidecarToolViewModel
 {
     public override string Id => "filesystem";
     public override string Title => "Filesystem";
@@ -37,7 +37,7 @@ public sealed class FilesystemTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class RegistryTool : SidecarToolViewModel
+public sealed partial class RegistryTool : SidecarToolViewModel
 {
     public override string Id => "registry";
     public override string Title => "Registry";
@@ -50,7 +50,7 @@ public sealed class RegistryTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class EventLogTool : SidecarToolViewModel
+public sealed partial class EventLogTool : SidecarToolViewModel
 {
     public override string Id => "evtx";
     public override string Title => "Event Log";
@@ -63,7 +63,7 @@ public sealed class EventLogTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class PrefetchTool : SidecarToolViewModel
+public sealed partial class PrefetchTool : SidecarToolViewModel
 {
     public override string Id => "prefetch";
     public override string Title => "Prefetch";
@@ -75,7 +75,7 @@ public sealed class PrefetchTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class ShellbagsTool : SidecarToolViewModel
+public sealed partial class ShellbagsTool : SidecarToolViewModel
 {
     public override string Id => "shellbags";
     public override string Title => "Shellbags";
@@ -88,7 +88,7 @@ public sealed class ShellbagsTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class JumplistsTool : SidecarToolViewModel
+public sealed partial class JumplistsTool : SidecarToolViewModel
 {
     public override string Id => "jumplists";
     public override string Title => "Jumplists";
@@ -100,7 +100,7 @@ public sealed class JumplistsTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class LnkTool : SidecarToolViewModel
+public sealed partial class LnkTool : SidecarToolViewModel
 {
     public override string Id => "lnk";
     public override string Title => "LNK shortcuts";
@@ -113,7 +113,7 @@ public sealed class LnkTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class BrowserHistoryTool : SidecarToolViewModel
+public sealed partial class BrowserHistoryTool : SidecarToolViewModel
 {
     public override string Id => "browser";
     public override string Title => "Browser history";
@@ -125,7 +125,7 @@ public sealed class BrowserHistoryTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class UsbHistoryTool : SidecarToolViewModel
+public sealed partial class UsbHistoryTool : SidecarToolViewModel
 {
     public override string Id => "usb";
     public override string Title => "USB history";
@@ -138,7 +138,7 @@ public sealed class UsbHistoryTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class WifiHistoryTool : SidecarToolViewModel
+public sealed partial class WifiHistoryTool : SidecarToolViewModel
 {
     public override string Id => "wifi";
     public override string Title => "Wi-Fi history";
@@ -151,7 +151,7 @@ public sealed class WifiHistoryTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class SrumTool : SidecarToolViewModel
+public sealed partial class SrumTool : SidecarToolViewModel
 {
     public override string Id => "srum";
     public override string Title => "SRUM";
@@ -164,7 +164,7 @@ public sealed class SrumTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class AmcacheTool : SidecarToolViewModel
+public sealed partial class AmcacheTool : SidecarToolViewModel
 {
     public override string Id => "amcache";
     public override string Title => "Amcache";
@@ -177,7 +177,7 @@ public sealed class AmcacheTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class ShimcacheTool : SidecarToolViewModel
+public sealed partial class ShimcacheTool : SidecarToolViewModel
 {
     public override string Id => "shimcache";
     public override string Title => "ShimCache";
@@ -190,7 +190,7 @@ public sealed class ShimcacheTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class LinuxArtifactsTool : SidecarToolViewModel
+public sealed partial class LinuxArtifactsTool : SidecarToolViewModel
 {
     public override string Id => "linux";
     public override string Title => "Linux artifacts";
@@ -202,7 +202,7 @@ public sealed class LinuxArtifactsTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class MemoryTool : SidecarToolViewModel
+public sealed partial class MemoryTool : SidecarToolViewModel
 {
     public override string Id => "memory";
     public override string Title => "Memory";
@@ -215,7 +215,7 @@ public sealed class MemoryTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class NetworkTool : SidecarToolViewModel
+public sealed partial class NetworkTool : SidecarToolViewModel
 {
     public override string Id => "network";
     public override string Title => "Network (PCAP)";
@@ -228,7 +228,7 @@ public sealed class NetworkTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class MobileTool : SidecarToolViewModel
+public sealed partial class MobileTool : SidecarToolViewModel
 {
     public override string Id => "mobile";
     public override string Title => "Mobile backup";
@@ -241,7 +241,7 @@ public sealed class MobileTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class EmailTool : SidecarToolViewModel
+public sealed partial class EmailTool : SidecarToolViewModel
 {
     public override string Id => "email";
     public override string Title => "Email (PST/MBOX)";
@@ -254,17 +254,12 @@ public sealed class EmailTool : SidecarToolViewModel
     protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class GalleryTool : ToolViewModel
-{
-    public override string Id => "gallery";
-    public override string Title => "Image gallery";
-    public override string Icon => "🖼";
-    public override string Subtitle => "Thumbnails · EXIF · GPS overlay · grouping.";
-    public override string Phase => "4";
-    public override string Kind => "gallery";
-}
+// GalleryTool, DocumentsTool, StringsTool, CasesTool, CustodyTool, HashSetsTool, YaraTool,
+// VirusTotalTool, MapTool, GraphTool, ImagerTool, VerifyTool, MountTool, ConvertTool,
+// ShadowCopyTool, RamCaptureTool, CarverTool, CloudPullTool, WorkflowsTool, PluginsTool —
+// each lives in its own file under ViewModels/Tools/ to keep them tractable.
 
-public sealed class DocumentsTool : ToolViewModel
+public sealed partial class DocumentsTool : ToolViewModel
 {
     public override string Id => "documents";
     public override string Title => "Documents";
@@ -278,7 +273,7 @@ public sealed class DocumentsTool : ToolViewModel
 // ANALYZE — case-wide
 // =================================================================================
 
-public sealed class TimelineTool : ToolViewModel
+public sealed partial class TimelineTool : ToolViewModel
 {
     public override string Id => "timeline";
     public override string Title => "Super-timeline";
@@ -288,7 +283,7 @@ public sealed class TimelineTool : ToolViewModel
     public override string Kind => "timeline";
 }
 
-public sealed class MapTool : ToolViewModel
+public sealed partial class MapTool : ToolViewModel
 {
     public override string Id => "map";
     public override string Title => "GPS map";
@@ -298,7 +293,7 @@ public sealed class MapTool : ToolViewModel
     public override string Kind => "map";
 }
 
-public sealed class GraphTool : ToolViewModel
+public sealed partial class GraphTool : ToolViewModel
 {
     public override string Id => "graph";
     public override string Title => "Comm graph";
@@ -308,7 +303,7 @@ public sealed class GraphTool : ToolViewModel
     public override string Kind => "graph";
 }
 
-public sealed class SearchTool : ToolViewModel
+public sealed partial class SearchTool : ToolViewModel
 {
     public override string Id => "search";
     public override string Title => "Full-text search";
@@ -318,7 +313,7 @@ public sealed class SearchTool : ToolViewModel
     public override string Kind => "search";
 }
 
-public sealed class HashSetsTool : ToolViewModel
+public sealed partial class HashSetsTool : ToolViewModel
 {
     public override string Id => "hashsets";
     public override string Title => "Hash sets";
@@ -328,7 +323,7 @@ public sealed class HashSetsTool : ToolViewModel
     public override string Kind => "hashsets";
 }
 
-public sealed class YaraTool : ToolViewModel
+public sealed partial class YaraTool : ToolViewModel
 {
     public override string Id => "yara";
     public override string Title => "YARA";
@@ -338,7 +333,7 @@ public sealed class YaraTool : ToolViewModel
     public override string Kind => "yara";
 }
 
-public sealed class VirusTotalTool : ToolViewModel
+public sealed partial class VirusTotalTool : ToolViewModel
 {
     public override string Id => "virustotal";
     public override string Title => "VirusTotal";
@@ -348,7 +343,7 @@ public sealed class VirusTotalTool : ToolViewModel
     public override string Kind => "virustotal";
 }
 
-public sealed class AiCopilotTool : ToolViewModel
+public sealed partial class AiCopilotTool : ToolViewModel
 {
     public override string Id => "ai";
     public override string Title => "AI Copilot";
@@ -362,7 +357,7 @@ public sealed class AiCopilotTool : ToolViewModel
 // ACQUIRE
 // =================================================================================
 
-public sealed class ImagerTool : ToolViewModel
+public sealed partial class ImagerTool : ToolViewModel
 {
     public override string Id => "imager";
     public override string Title => "Disk imager";
@@ -372,7 +367,7 @@ public sealed class ImagerTool : ToolViewModel
     public override string Kind => "imager";
 }
 
-public sealed class VerifyTool : ToolViewModel
+public sealed partial class VerifyTool : ToolViewModel
 {
     public override string Id => "verify";
     public override string Title => "Image verify";
@@ -382,7 +377,7 @@ public sealed class VerifyTool : ToolViewModel
     public override string Kind => "verify";
 }
 
-public sealed class MountTool : ToolViewModel
+public sealed partial class MountTool : ToolViewModel
 {
     public override string Id => "mount";
     public override string Title => "Mount image";
@@ -392,7 +387,7 @@ public sealed class MountTool : ToolViewModel
     public override string Kind => "mount";
 }
 
-public sealed class ConvertTool : ToolViewModel
+public sealed partial class ConvertTool : ToolViewModel
 {
     public override string Id => "convert";
     public override string Title => "Convert format";
@@ -402,7 +397,7 @@ public sealed class ConvertTool : ToolViewModel
     public override string Kind => "convert";
 }
 
-public sealed class ShadowCopyTool : ToolViewModel
+public sealed partial class ShadowCopyTool : ToolViewModel
 {
     public override string Id => "shadowcopy";
     public override string Title => "Shadow copies";
@@ -412,7 +407,7 @@ public sealed class ShadowCopyTool : ToolViewModel
     public override string Kind => "shadowcopy";
 }
 
-public sealed class RamCaptureTool : ToolViewModel
+public sealed partial class RamCaptureTool : ToolViewModel
 {
     public override string Id => "ramcapture";
     public override string Title => "RAM capture";
@@ -422,7 +417,7 @@ public sealed class RamCaptureTool : ToolViewModel
     public override string Kind => "ramcapture";
 }
 
-public sealed class CarverTool : ToolViewModel
+public sealed partial class CarverTool : ToolViewModel
 {
     public override string Id => "carver";
     public override string Title => "File carver";
@@ -432,7 +427,7 @@ public sealed class CarverTool : ToolViewModel
     public override string Kind => "carver";
 }
 
-public sealed class CloudPullTool : ToolViewModel
+public sealed partial class CloudPullTool : ToolViewModel
 {
     public override string Id => "cloud";
     public override string Title => "Cloud pull";
@@ -446,7 +441,7 @@ public sealed class CloudPullTool : ToolViewModel
 // CASE
 // =================================================================================
 
-public sealed class CasesTool : ToolViewModel
+public sealed partial class CasesTool : ToolViewModel
 {
     public override string Id => "cases";
     public override string Title => "Cases";
@@ -456,7 +451,7 @@ public sealed class CasesTool : ToolViewModel
     public override string Kind => "cases";
 }
 
-public sealed class ReportsTool : ToolViewModel
+public sealed partial class ReportsTool : ToolViewModel
 {
     public override string Id => "reports";
     public override string Title => "Reports";
@@ -466,7 +461,7 @@ public sealed class ReportsTool : ToolViewModel
     public override string Kind => "reports";
 }
 
-public sealed class CustodyTool : ToolViewModel
+public sealed partial class CustodyTool : ToolViewModel
 {
     public override string Id => "custody";
     public override string Title => "Chain of custody";
@@ -476,7 +471,7 @@ public sealed class CustodyTool : ToolViewModel
     public override string Kind => "custody";
 }
 
-public sealed class WorkflowsTool : ToolViewModel
+public sealed partial class WorkflowsTool : ToolViewModel
 {
     public override string Id => "workflows";
     public override string Title => "Workflows";
@@ -486,7 +481,7 @@ public sealed class WorkflowsTool : ToolViewModel
     public override string Kind => "workflows";
 }
 
-public sealed class PluginsTool : ToolViewModel
+public sealed partial class PluginsTool : ToolViewModel
 {
     public override string Id => "plugins";
     public override string Title => "Plugins";
@@ -496,7 +491,7 @@ public sealed class PluginsTool : ToolViewModel
     public override string Kind => "plugins";
 }
 
-public sealed class SettingsTool : ToolViewModel
+public sealed partial class SettingsTool : ToolViewModel
 {
     public override string Id => "settings";
     public override string Title => "Settings";

@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:plg="using:Cinder.Plugins"
+             x:Class="Cinder.App.Views.Tools.PluginsView"
+             x:DataType="tools:PluginsTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Classes="accent" Content="Pick plugins folder…" Command="{Binding PickFolderCommand}" />
+                <TextBlock VerticalAlignment="Center" Text="{Binding Folder, FallbackValue='No folder selected'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBlock VerticalAlignment="Center" Margin="14,0"
+                           Text="{Binding StatusLine}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            </StackPanel>
+        </Border>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Loaded}" AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Id"          Binding="{Binding Id}" Width="200" />
+                <DataGridTextColumn Header="Display"     Binding="{Binding DisplayName}" Width="*" />
+                <DataGridTextColumn Header="Author"      Binding="{Binding Author}" Width="160" />
+                <DataGridTextColumn Header="Version"     Binding="{Binding Version}" Width="100" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

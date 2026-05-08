@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.SettingsView"
+             x:DataType="tools:SettingsTool">
+    <Border Padding="40" Background="{DynamicResource CinderBackground0Brush}">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" MaxWidth="520">
+            <TextBlock Text="⚙" FontSize="56"
+                       Foreground="{DynamicResource CinderAccentBrush}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="Settings"
+                       FontWeight="600"
+                       FontSize="{DynamicResource CinderFontSizeXl}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="Theme · density · vim mode · Python · AI provider · cloud client_ids."
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                       TextAlignment="Center" />
+            <Button Classes="accent" Content="Open Settings dialog (Ctrl+,)"
+                    Command="{Binding OpenSettingsCommand}"
+                    HorizontalAlignment="Center" />
+        </StackPanel>
+    </Border>
+</UserControl>

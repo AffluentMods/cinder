@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.DocumentsView"
+             x:DataType="tools:DocumentsTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <Button Grid.Column="0" Content="Pick document…" Classes="accent" Command="{Binding PickCommand}" />
+                <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
+                           Text="{Binding Path, FallbackValue='No document loaded'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBlock Grid.Column="2" VerticalAlignment="Center"
+                           Text="{Binding StatusLine}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            </Grid>
+        </Border>
+        <ScrollViewer Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="20">
+            <SelectableTextBlock Text="{Binding Content, FallbackValue=''}"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                 FontSize="{DynamicResource CinderFontSizeSm}"
+                                 Foreground="{DynamicResource CinderForegroundBrush}"
+                                 TextWrapping="Wrap" />
+        </ScrollViewer>
+    </Grid>
+</UserControl>

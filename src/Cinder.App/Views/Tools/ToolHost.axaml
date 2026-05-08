@@ -5,15 +5,8 @@
                     xmlns:views="using:Cinder.App.Views"
                     xmlns:tv="using:Cinder.App.Views.Tools">
 
-    <!--
-        Single template that branches by ToolViewModel.Kind. For each tool we either render a
-        specialised view (Reports / Timeline / Search / AI / Settings / Cases) or the generic
-        SidecarToolView which shows a "load evidence" affordance + an empty state.
-    -->
-
     <DataTemplate x:Key="ToolContentTemplate" DataType="tools:ToolViewModel">
         <Panel>
-            <!-- Hex viewer (Phase 1) — wraps the multi-tab buffer strip -->
             <Grid IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hex'}"
                   RowDefinitions="Auto,*">
                 <Border Grid.Row="0"
@@ -28,20 +21,15 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:HexViewModel">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Background="Transparent"
-                                            BorderThickness="0"
-                                            Padding="10,4"
+                                    <Button Background="Transparent" BorderThickness="0" Padding="10,4"
                                             Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SetActiveBufferCommand}"
                                             CommandParameter="{Binding}">
                                         <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='(empty)'}"
                                                    Foreground="{DynamicResource CinderForegroundBrush}" />
                                     </Button>
-                                    <Button Background="Transparent"
-                                            BorderThickness="0"
-                                            Padding="4,0"
+                                    <Button Background="Transparent" BorderThickness="0" Padding="4,0"
                                             Foreground="{DynamicResource CinderForegroundMutedBrush}"
                                             Content="×"
-                                            ToolTip.Tip="Close tab"
                                             Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CloseBufferCommand}"
                                             CommandParameter="{Binding}" />
                                 </StackPanel>
@@ -59,48 +47,54 @@
                 </ContentControl>
             </Grid>
 
-            <!-- Reports (Phase 8) — real view -->
             <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='reports'}"
                             Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Reports}">
                 <ContentControl.ContentTemplate>
-                    <DataTemplate DataType="vm:ReportsToolViewModel">
-                        <tv:ReportsView />
-                    </DataTemplate>
+                    <DataTemplate DataType="vm:ReportsToolViewModel"><tv:ReportsView /></DataTemplate>
                 </ContentControl.ContentTemplate>
             </ContentControl>
-
-            <!-- Timeline (Phase 6) -->
             <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='timeline'}"
                             Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Timeline}">
                 <ContentControl.ContentTemplate>
-                    <DataTemplate DataType="vm:TimelineToolViewModel">
-                        <tv:TimelineView />
-                    </DataTemplate>
+                    <DataTemplate DataType="vm:TimelineToolViewModel"><tv:TimelineView /></DataTemplate>
                 </ContentControl.ContentTemplate>
             </ContentControl>
-
-            <!-- Search (Phase 6) -->
             <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='search'}"
                             Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Search}">
                 <ContentControl.ContentTemplate>
-                    <DataTemplate DataType="vm:SearchToolViewModel">
-                        <tv:SearchView />
-                    </DataTemplate>
+                    <DataTemplate DataType="vm:SearchToolViewModel"><tv:SearchView /></DataTemplate>
                 </ContentControl.ContentTemplate>
             </ContentControl>
-
-            <!-- AI Copilot (Phase 9) -->
             <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='ai'}"
                             Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Ai}">
                 <ContentControl.ContentTemplate>
-                    <DataTemplate DataType="vm:AiCopilotToolViewModel">
-                        <tv:AiCopilotView />
-                    </DataTemplate>
+                    <DataTemplate DataType="vm:AiCopilotToolViewModel"><tv:AiCopilotView /></DataTemplate>
                 </ContentControl.ContentTemplate>
             </ContentControl>
 
-            <!-- Generic placeholder for everything else (sidecar-driven, not yet bootstrapped) -->
-            <tv:GenericToolView IsVisible="{Binding ., Converter={x:Static tv:ToolKindConverters.IsGeneric}}" />
+            <tv:GalleryView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='gallery'}" />
+            <tv:StringsView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='strings'}" />
+            <tv:DocumentsView  IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='documents'}" />
+            <tv:CasesView      IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='cases'}" />
+            <tv:CustodyView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='custody'}" />
+            <tv:HashSetsView   IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hashsets'}" />
+            <tv:YaraView       IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='yara'}" />
+            <tv:VirusTotalView IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='virustotal'}" />
+            <tv:MapView        IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='map'}" />
+            <tv:GraphView      IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='graph'}" />
+            <tv:ImagerView     IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='imager'}" />
+            <tv:VerifyView     IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='verify'}" />
+            <tv:MountView      IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='mount'}" />
+            <tv:ConvertView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='convert'}" />
+            <tv:ShadowCopyView IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='shadowcopy'}" />
+            <tv:RamCaptureView IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='ramcapture'}" />
+            <tv:CarverView     IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='carver'}" />
+            <tv:CloudView      IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='cloud'}" />
+            <tv:WorkflowsView  IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='workflows'}" />
+            <tv:PluginsView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='plugins'}" />
+            <tv:SettingsView   IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='settings'}" />
+
+            <tv:SidecarRunnerView IsVisible="{Binding ., Converter={x:Static tools:ToolKindHelpers.HasSidecar}}" />
         </Panel>
     </DataTemplate>
 

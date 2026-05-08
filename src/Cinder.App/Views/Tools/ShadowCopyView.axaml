@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:nat="using:Cinder.Native"
+             x:Class="Cinder.App.Views.Tools.ShadowCopyView"
+             x:DataType="tools:ShadowCopyTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Classes="accent" Content="Enumerate snapshots" Command="{Binding RefreshCommand}" />
+                <TextBlock VerticalAlignment="Center" Margin="14,0"
+                           Text="{Binding StatusLine}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            </StackPanel>
+        </Border>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Snapshots}" AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="ID"      Binding="{Binding Id}" Width="*" />
+                <DataGridTextColumn Header="Origin"  Binding="{Binding Origin}" Width="*" />
+                <DataGridTextColumn Header="Created" Binding="{Binding CreatedUtc, StringFormat=u}" Width="200" />
+                <DataGridTextColumn Header="Notes"   Binding="{Binding Notes}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

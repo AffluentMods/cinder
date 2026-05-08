@@ -36,6 +36,11 @@
     <ProjectReference Include="..\Cinder.AI\Cinder.AI.csproj" />
     <ProjectReference Include="..\Cinder.Search\Cinder.Search.csproj" />
     <ProjectReference Include="..\Cinder.Reports\Cinder.Reports.csproj" />
+    <ProjectReference Include="..\Cinder.Cases\Cinder.Cases.csproj" />
+    <ProjectReference Include="..\Cinder.Imaging\Cinder.Imaging.csproj" />
+    <ProjectReference Include="..\Cinder.Carving\Cinder.Carving.csproj" />
+    <ProjectReference Include="..\Cinder.Workflow\Cinder.Workflow.csproj" />
+    <ProjectReference Include="..\Cinder.Plugins\Cinder.Plugins.csproj" />
     <ProjectReference Include="..\Cinder.Native.Windows\Cinder.Native.Windows.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     <ProjectReference Include="..\Cinder.Native.Linux\Cinder.Native.Linux.csproj" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
   </ItemGroup>

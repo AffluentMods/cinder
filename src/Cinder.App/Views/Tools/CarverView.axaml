@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.CarverView"
+             x:DataType="tools:CarverTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="120,*,Auto">
+                    <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <TextBox Grid.Column="1" Text="{Binding Source}" />
+                    <Button Grid.Column="2" Margin="6,0,0,0" Content="Pick…" Command="{Binding PickSourceCommand}" />
+                </Grid>
+                <Grid ColumnDefinitions="120,*,Auto">
+                    <TextBlock Grid.Column="0" Text="Output dir" VerticalAlignment="Center"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <TextBox Grid.Column="1" Text="{Binding OutputDir}" />
+                    <Button Grid.Column="2" Margin="6,0,0,0" Content="Pick…" Command="{Binding PickOutputDirCommand}" />
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Classes="accent" Content="Run carver" Command="{Binding RunCommand}" />
+                    <TextBlock VerticalAlignment="Center" Text="{Binding StatusLine}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Label"     Binding="{Binding Label}"     Width="*" />
+                <DataGridTextColumn Header="Extension" Binding="{Binding Extension}" Width="100" />
+                <DataGridTextColumn Header="Offset"    Binding="{Binding Offset, StringFormat='0x{0:X12}'}" Width="160" />
+                <DataGridTextColumn Header="Length"    Binding="{Binding Length, StringFormat=N0}" Width="120" />
+                <DataGridCheckBoxColumn Header="Validated" Binding="{Binding Validated}" Width="100" />
+                <DataGridTextColumn Header="Output path" Binding="{Binding OutputPath}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

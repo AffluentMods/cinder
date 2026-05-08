@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.ImagerView"
+             x:DataType="tools:ImagerTool">
+    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
+        <StackPanel Spacing="14" MaxWidth="720">
+            <Grid ColumnDefinitions="120,*,Auto">
+                <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBox Grid.Column="1" Text="{Binding Source}" Watermark="\\.\PhysicalDrive0  /  /dev/sda  /  path to .img" />
+                <Button Grid.Column="2" Margin="6,0,0,0" Content="Pick…" Command="{Binding PickSourceCommand}" />
+            </Grid>
+            <Grid ColumnDefinitions="120,*,Auto">
+                <TextBlock Grid.Column="0" Text="Output" VerticalAlignment="Center"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBox Grid.Column="1" Text="{Binding Output}" />
+                <Button Grid.Column="2" Margin="6,0,0,0" Content="Save as…" Command="{Binding PickOutputCommand}" />
+            </Grid>
+            <Grid ColumnDefinitions="120,*">
+                <TextBlock Grid.Column="0" Text="Format" VerticalAlignment="Center"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" />
+            </Grid>
+            <Button Classes="accent" Content="Start imaging" Command="{Binding StartCommand}"
+                    HorizontalAlignment="Left" />
+            <ProgressBar Minimum="0" Maximum="0" IsIndeterminate="True"
+                         IsVisible="{Binding BytesRead, Converter={x:Static ObjectConverters.NotEqual}, ConverterParameter=0}" />
+            <TextBlock Text="{Binding BytesRead, StringFormat='{}{0:N0} bytes read'}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                       IsVisible="{Binding BytesRead, Converter={x:Static ObjectConverters.NotEqual}, ConverterParameter=0}" />
+            <TextBlock Text="{Binding StatusLine}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

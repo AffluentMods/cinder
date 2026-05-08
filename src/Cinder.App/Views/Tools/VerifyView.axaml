@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.VerifyView"
+             x:DataType="tools:VerifyTool">
+    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
+        <StackPanel Spacing="14" MaxWidth="720">
+            <Button Classes="accent" Content="Pick image + verify…" Command="{Binding PickAndRunCommand}"
+                    HorizontalAlignment="Left" />
+            <TextBlock Text="{Binding ImagePath, FallbackValue='No image selected'}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                       FontFamily="{DynamicResource CinderFontFamilyMono}" />
+            <SelectableTextBlock Text="{Binding ResultText}"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                 FontSize="{DynamicResource CinderFontSizeSm}"
+                                 TextWrapping="Wrap"
+                                 IsVisible="{Binding ResultText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Text="{Binding StatusLine}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

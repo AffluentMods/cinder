@@ -3,8 +3,8 @@ using Avalonia.Markup.Xaml;
 
 namespace Cinder.App.Views.Tools;
 
-public partial class GenericToolView : UserControl
+public partial class CustodyView : UserControl
 {
-    public GenericToolView() => InitializeComponent();
+    public CustodyView() => InitializeComponent();
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 }

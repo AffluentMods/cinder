@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:cases="using:Cinder.Cases"
+             x:Class="Cinder.App.Views.Tools.CasesView"
+             x:DataType="tools:CasesTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Classes="accent" Content="Create case…" Command="{Binding CreateCommand}" />
+                <Button Content="Open .cinder…" Command="{Binding OpenCommand}" />
+                <TextBlock Margin="14,0" VerticalAlignment="Center"
+                           Text="{Binding StatusLine}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            </StackPanel>
+        </Border>
+        <ScrollViewer Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="20">
+            <StackPanel Spacing="14">
+                <TextBlock Text="RECENT CASES"
+                           FontWeight="600"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                <ItemsControl ItemsSource="{Binding Recents}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="cases:WorkspaceCase">
+                            <Button HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Left"
+                                    Background="{DynamicResource CinderBackground1Brush}"
+                                    BorderThickness="0"
+                                    Padding="14,10"
+                                    Margin="0,0,0,8"
+                                    CornerRadius="6"
+                                    Command="{Binding $parent[UserControl].((tools:CasesTool)DataContext).OpenRecentCommand}"
+                                    CommandParameter="{Binding}">
+                                <StackPanel Spacing="3">
+                                    <TextBlock Text="{Binding DisplayName}"
+                                               FontWeight="500"
+                                               Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    <TextBlock Text="{Binding FilePath}"
+                                               FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                    <TextBlock Text="{Binding LastOpenedUtc, StringFormat='last opened {0:u}'}"
+                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="(no recent cases yet)"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                           IsVisible="{Binding Recents.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

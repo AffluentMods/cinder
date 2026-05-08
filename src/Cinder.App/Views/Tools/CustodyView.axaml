@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:c="using:Cinder.Core.Custody"
+             x:Class="Cinder.App.Views.Tools.CustodyView"
+             x:DataType="tools:CustodyTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <Button Grid.Column="0" Content="Open + verify…" Classes="accent"
+                        Command="{Binding PickAndVerifyCommand}" />
+                <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
+                           Text="{Binding CasePath, FallbackValue='No case loaded'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBlock Grid.Column="2" Text="{Binding Verdict}"
+                           Foreground="{DynamicResource CinderAccentBrush}"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding Verdict, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </Grid>
+        </Border>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Entries}" AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Seq"        Binding="{Binding Sequence}" Width="60" />
+                <DataGridTextColumn Header="Timestamp"  Binding="{Binding TimestampUtc, StringFormat=u}" Width="200" />
+                <DataGridTextColumn Header="Examiner"   Binding="{Binding Examiner}" Width="120" />
+                <DataGridTextColumn Header="Action"     Binding="{Binding Action}"   Width="160" />
+                <DataGridTextColumn Header="Details"    Binding="{Binding DetailsJson}" Width="*" />
+                <DataGridTextColumn Header="Hash"       Binding="{Binding EntryHash}" Width="180" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

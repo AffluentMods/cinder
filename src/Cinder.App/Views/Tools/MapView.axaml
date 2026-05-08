@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:srch="using:Cinder.Search"
+             x:Class="Cinder.App.Views.Tools.MapView"
+             x:DataType="tools:MapTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox Width="120" Text="{Binding Latitude}" Watermark="lat" />
+                <TextBox Width="120" Text="{Binding Longitude}" Watermark="lng" />
+                <TextBox Width="200" Text="{Binding Label}" Watermark="label" />
+                <TextBox Width="160" Text="{Binding Source}" Watermark="source" />
+                <Button Classes="accent" Content="Add point" Command="{Binding AddPointCommand}" />
+                <Button Content="Clear" Command="{Binding ClearCommand}" />
+            </StackPanel>
+        </Border>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Points}" AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Latitude"  Binding="{Binding Latitude, StringFormat=F5}"  Width="120" />
+                <DataGridTextColumn Header="Longitude" Binding="{Binding Longitude, StringFormat=F5}" Width="120" />
+                <DataGridTextColumn Header="Source"    Binding="{Binding Source}" Width="160" />
+                <DataGridTextColumn Header="Label"     Binding="{Binding Label}"  Width="*" />
+                <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp, StringFormat=u}" Width="200" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

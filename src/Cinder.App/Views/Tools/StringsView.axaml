@@ -1,0 +1,29 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.StringsView"
+             x:DataType="tools:StringsTool">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                <Button Grid.Column="0" Content="Pick file…" Classes="accent" Command="{Binding PickCommand}" />
+                <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
+                           Text="{Binding Path, FallbackValue='No file loaded'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBlock Grid.Column="2" Text="Min length" VerticalAlignment="Center"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" Margin="0,0,8,0" />
+                <NumericUpDown Grid.Column="3" Value="{Binding MinLength}" Minimum="3" Maximum="32" Increment="1" Width="100" />
+                <Button Grid.Column="4" Margin="8,0,0,0" Content="Re-scan" Command="{Binding RunCommand}" />
+            </Grid>
+        </Border>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Offset"   Binding="{Binding Offset, StringFormat='0x{0:X12}'}" Width="160" />
+                <DataGridTextColumn Header="Encoding" Binding="{Binding Encoding}" Width="100" />
+                <DataGridTextColumn Header="String"   Binding="{Binding Value}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

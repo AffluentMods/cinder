@@ -1,0 +1,41 @@
+# Cinder forensic-parser dependency lockfile.
+#
+# Cinder.App.Services.PythonBootstrap pip-installs this list into a per-user venv
+# (%LOCALAPPDATA%\Cinder\venv on Windows, ~/.local/share/Cinder/venv on Linux) the
+# first time a sidecar tool runs. The release installer pre-bakes the same venv
+# so end users never wait for the bootstrap.
+#
+# Pin minimum versions. Don't pin to ==X.Y.Z — wheel availability per Python minor
+# version varies and forensic libraries lag major Python releases by months.
+
+# protocol layer (every sidecar)
+pydantic>=2.7
+
+# disk-imaging sidecar (parsers/imager)
+libewf-python>=20231119
+pyaff4>=1.0
+
+# filesystem-parsing sidecar (parsers/filesystem)
+pytsk3>=20230125
+
+# windows-artifact sidecar (parsers/windows)
+regipy>=4.0
+python-evtx>=0.7
+pylnk3>=0.4
+libesedb-python>=20230824
+
+# memory-forensics sidecar (parsers/memory)
+volatility3>=2.5
+
+# network sidecar (parsers/network)
+dpkt>=1.9
+scapy>=2.5
+
+# email sidecar (parsers/email)
+libpff-python>=20231203
+
+# mobile sidecar (parsers/mobile)
+iphone-backup-decrypt>=0.7
+
+# YARA via python-yara wheel
+yara-python>=4.5
