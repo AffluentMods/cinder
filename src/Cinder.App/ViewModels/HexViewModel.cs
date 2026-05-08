@@ -40,6 +40,25 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
     private string? _quickHashSha256Full;
 
     public ObservableCollection<HexSearchHit> SearchResults { get; } = new();
+    public ObservableCollection<InspectorRow> InspectorRows { get; } = new();
+    public ObservableCollection<Bookmark> Bookmarks { get; } = new();
+
+    [ObservableProperty]
+    private long _selectionStart = -1;
+
+    [ObservableProperty]
+    private long _selectionEnd = -1;
+
+    public bool HasSelection => SelectionStart >= 0 && SelectionEnd >= SelectionStart;
+    public long SelectionLength => HasSelection ? SelectionEnd - SelectionStart + 1 : 0;
+    public string SelectionSummary => HasSelection
+        ? $"selected 0x{SelectionStart:X}–0x{SelectionEnd:X} · {SelectionLength:N0} byte{(SelectionLength == 1 ? "" : "s")}"
+        : "";
+
+    private readonly Stack<long> _navBack = new();
+    private readonly Stack<long> _navForward = new();
+    public bool CanNavigateBack => _navBack.Count > 0;
+    public bool CanNavigateForward => _navForward.Count > 0;
 
     [ObservableProperty]
     private HexSearchHit? _selectedSearchResult;
@@ -108,6 +127,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CaretByteDec));
         OnPropertyChanged(nameof(CaretByteAscii));
         OnPropertyChanged(nameof(CaretByteBinary));
+        RefreshInspector();
     }
 
     partial void OnBufferChanged(IHexBuffer? value)
@@ -119,6 +139,44 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CaretByteAscii));
         OnPropertyChanged(nameof(CaretByteBinary));
         SearchResults.Clear();
+        Bookmarks.Clear();
+        _navBack.Clear();
+        _navForward.Clear();
+        SelectionStart = -1;
+        SelectionEnd = -1;
+        OnPropertyChanged(nameof(CanNavigateBack));
+        OnPropertyChanged(nameof(CanNavigateForward));
+        RefreshInspector();
+    }
+
+    partial void OnSelectionStartChanged(long value)
+    {
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(SelectionLength));
+        OnPropertyChanged(nameof(SelectionSummary));
+    }
+
+    partial void OnSelectionEndChanged(long value)
+    {
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(SelectionLength));
+        OnPropertyChanged(nameof(SelectionSummary));
+    }
+
+    private void RefreshInspector()
+    {
+        InspectorRows.Clear();
+        if (Buffer is null || CaretOffset >= Buffer.Length)
+        {
+            return;
+        }
+        Span<byte> bytes = stackalloc byte[16];
+        var read = Buffer.Read(CaretOffset, bytes);
+        var rows = Inspector.Decode(bytes[..read]);
+        foreach (var r in rows)
+        {
+            InspectorRows.Add(r);
+        }
     }
 
     partial void OnSelectedSearchResultChanged(HexSearchHit? value)
@@ -127,8 +185,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         {
             return;
         }
-        CaretOffset = value.Offset;
-        ScrollOffset = (value.Offset / BytesPerRow) * BytesPerRow;
+        JumpTo(value.Offset);
     }
 
     public HexViewModel() { }
@@ -156,6 +213,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         {
             DetectedFormat = "Unknown";
             DetectedFormatBadge = null;
+            DetectedRouting = null;
             return;
         }
         var best = hits[0];
@@ -164,7 +222,36 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         DetectedFormatBadge = _scanner.IsExtensionMismatch(path, header.AsSpan(0, read), out _)
             ? $"⚠ Extension mismatch — content looks like .{best.Signature.Extension}"
             : null;
+        DetectedRouting = RouteForExtension(best.Signature.Extension);
     }
+
+    [ObservableProperty]
+    private string? _detectedRouting;
+
+    /// <summary>
+    /// Maps a magic-detected extension to the parser pane that *would* handle it once Cinder's
+    /// sidecar runtime is bootstrapped (Phase 3+). Phase 1 just surfaces the suggestion in the
+    /// header so the user knows the file would be parsed.
+    /// </summary>
+    private static string? RouteForExtension(string ext) => ext.ToLowerInvariant() switch
+    {
+        "hive" => "→ Registry parser (Phase 4)",
+        "evtx" => "→ Event Log viewer (Phase 4)",
+        "evt" => "→ Event Log viewer (Phase 4)",
+        "lnk" => "→ LNK parser (Phase 4)",
+        "pf" => "→ Prefetch viewer (Phase 4)",
+        "pst" or "ost" => "→ Email parser (Phase 4)",
+        "pcap" or "pcapng" => "→ PCAP analyzer (Phase 10)",
+        "e01" or "ex01" or "aff4" or "vmdk" or "vhd" or "vhdx" or "qcow" or "vdi" => "→ Disk imager (Phase 2)",
+        "ntfs" or "ext" or "fat" or "apfs" or "hfsplus" or "btrfs" or "xfs" or "iso" => "→ Filesystem browser (Phase 3)",
+        "sqlite" => "→ SQLite browser",
+        "elf" or "exe" or "macho" or "class" or "wasm" => "→ Executable inspector",
+        "jpg" or "png" or "gif" or "bmp" or "webp" or "heic" or "avif" or "tiff" => "→ Image gallery (Phase 4)",
+        "mp4" or "mkv" or "avi" => "→ Video preview (Phase 4)",
+        "pdf" => "→ Document preview (Phase 4)",
+        "docx" or "xlsx" or "pptx" or "doc" or "xls" or "ppt" => "→ Document preview (Phase 4)",
+        _ => null,
+    };
 
     private static string FormatMatchedBytes(byte[] header, MagicSignature sig, int validRead)
     {
@@ -230,6 +317,117 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private void AddBookmark()
+    {
+        if (Buffer is null)
+        {
+            return;
+        }
+        var existing = Bookmarks.FirstOrDefault(b => b.Offset == CaretOffset);
+        if (existing is not null)
+        {
+            Bookmarks.Remove(existing);
+            return;
+        }
+        var label = $"Bookmark {Bookmarks.Count + 1} · 0x{CaretOffset:X}";
+        Bookmarks.Add(new Bookmark(CaretOffset, label));
+    }
+
+    [RelayCommand]
+    private void GotoBookmark(Bookmark? bookmark)
+    {
+        if (bookmark is null || Buffer is null)
+        {
+            return;
+        }
+        JumpTo(bookmark.Offset);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanNavigateBack))]
+    private void NavigateBack()
+    {
+        if (!_navBack.TryPop(out var prev))
+        {
+            return;
+        }
+        _navForward.Push(CaretOffset);
+        ApplyJump(prev);
+        OnPropertyChanged(nameof(CanNavigateBack));
+        OnPropertyChanged(nameof(CanNavigateForward));
+    }
+
+    [RelayCommand(CanExecute = nameof(CanNavigateForward))]
+    private void NavigateForward()
+    {
+        if (!_navForward.TryPop(out var next))
+        {
+            return;
+        }
+        _navBack.Push(CaretOffset);
+        ApplyJump(next);
+        OnPropertyChanged(nameof(CanNavigateBack));
+        OnPropertyChanged(nameof(CanNavigateForward));
+    }
+
+    /// <summary>Jump the caret to a specific offset, recording the prior caret on the back-stack.</summary>
+    public void JumpTo(long offset)
+    {
+        if (Buffer is null || offset < 0 || offset >= Buffer.Length)
+        {
+            return;
+        }
+        if (CaretOffset != offset)
+        {
+            _navBack.Push(CaretOffset);
+            _navForward.Clear();
+            OnPropertyChanged(nameof(CanNavigateBack));
+            OnPropertyChanged(nameof(CanNavigateForward));
+        }
+        ApplyJump(offset);
+    }
+
+    private void ApplyJump(long offset)
+    {
+        CaretOffset = offset;
+        ScrollOffset = (offset / BytesPerRow) * BytesPerRow;
+    }
+
+    [RelayCommand]
+    private async Task CopySelectionAsHexAsync()
+    {
+        if (!HasSelection || Buffer is null)
+        {
+            return;
+        }
+        var len = (int)Math.Min(SelectionLength, 1 << 20); // cap at 1 MiB to avoid clipboard abuse
+        var bytes = new byte[len];
+        Buffer.Read(SelectionStart, bytes);
+        var sb = new StringBuilder(len * 3);
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            if (i > 0) sb.Append(' ');
+            sb.Append(bytes[i].ToString("X2", CultureInfo.InvariantCulture));
+        }
+        await CopyToClipboardAsync(sb.ToString()).ConfigureAwait(false);
+    }
+
+    private static async Task CopyToClipboardAsync(string text)
+    {
+        try
+        {
+            var clipboard = Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow?.Clipboard
+                : null;
+            if (clipboard is not null)
+            {
+                await clipboard.SetTextAsync(text).ConfigureAwait(false);
+            }
+        }
+        catch { /* best effort */ }
+    }
+
+    [RelayCommand]
     private void GotoOffset(string raw)
     {
         if (Buffer is null || string.IsNullOrWhiteSpace(raw))
@@ -249,12 +447,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         {
             return;
         }
-        if (parsed < 0 || parsed >= Buffer.Length)
-        {
-            return;
-        }
-        CaretOffset = parsed;
-        ScrollOffset = (parsed / BytesPerRow) * BytesPerRow;
+        JumpTo(parsed);
     }
 
     /// <summary>Run a search across the open buffer and surface the first ~1000 hits.</summary>

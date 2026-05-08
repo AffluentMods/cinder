@@ -26,16 +26,21 @@ public partial class HexView : UserControl
 
     private void OnDrop(object? sender, DragEventArgs e)
     {
-        if (DataContext is not HexViewModel vm)
-        {
-            return;
-        }
         var files = e.Data.GetFiles();
         var first = files?.FirstOrDefault();
         var path = first?.TryGetLocalPath();
         if (!string.IsNullOrEmpty(path))
         {
-            vm.OpenFile(path);
+            // Route through the main window so each drop spawns a new tab + auto-routes by type.
+            var owner = TopLevel.GetTopLevel(this);
+            if (owner is Window w && w.DataContext is MainWindowViewModel main)
+            {
+                main.OpenFileInNewBuffer(path);
+            }
+            else if (DataContext is HexViewModel vm)
+            {
+                vm.OpenFile(path);
+            }
         }
         e.Handled = true;
     }

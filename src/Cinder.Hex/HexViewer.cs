@@ -41,6 +41,24 @@ public sealed class HexViewer : Control, ILogicalScrollable
     public static readonly StyledProperty<IBrush?> RowBrushProperty =
         AvaloniaProperty.Register<HexViewer, IBrush?>(nameof(RowBrush), Brushes.Transparent);
 
+    public static readonly StyledProperty<long> SelectionStartProperty =
+        AvaloniaProperty.Register<HexViewer, long>(nameof(SelectionStart), defaultValue: -1);
+
+    public static readonly StyledProperty<long> SelectionEndProperty =
+        AvaloniaProperty.Register<HexViewer, long>(nameof(SelectionEnd), defaultValue: -1);
+
+    public long SelectionStart
+    {
+        get => GetValue(SelectionStartProperty);
+        set => SetValue(SelectionStartProperty, value);
+    }
+
+    public long SelectionEnd
+    {
+        get => GetValue(SelectionEndProperty);
+        set => SetValue(SelectionEndProperty, value);
+    }
+
     public IHexBuffer? Buffer
     {
         get => GetValue(BufferProperty);
@@ -78,28 +96,62 @@ public sealed class HexViewer : Control, ILogicalScrollable
     }
 
     public IList<HexSearchHit> Highlights { get; } = new List<HexSearchHit>();
-    public IList<Bookmark> Bookmarks { get; } = new List<Bookmark>();
     public IList<StructureOverlay> Overlays { get; } = new List<StructureOverlay>();
+
+    public static readonly StyledProperty<System.Collections.IEnumerable?> BookmarksProperty =
+        AvaloniaProperty.Register<HexViewer, System.Collections.IEnumerable?>(nameof(Bookmarks));
+
+    public System.Collections.IEnumerable? Bookmarks
+    {
+        get => GetValue(BookmarksProperty);
+        set => SetValue(BookmarksProperty, value);
+    }
 
     private readonly Typeface _typeface = new("Cascadia Mono, Consolas, monospace");
     private double _glyphAdvance;
     private double _rowHeight;
     private Size _viewport;
 
+    // Brushes cached once, reused every frame. Render is on the hot path of every wheel tick
+    // and scrollbar drag; allocating SolidColorBrush per-paint produces GC churn that's
+    // perceptible as scroll jank on multi-MB files.
+    private static readonly IBrush BrushFg = Brushes.Gainsboro;
+    private static readonly IBrush BrushMuted = new SolidColorBrush(Color.FromRgb(0x9C, 0xA0, 0xAB));
+    private static readonly IBrush BrushAccent = new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1A));
+    private static readonly IBrush BrushHitBg = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0x7A, 0x1A));
+    private static readonly IBrush BrushCaret = new SolidColorBrush(Color.FromRgb(0xFF, 0xB3, 0x47));
+    private static readonly IBrush BrushStripe = new SolidColorBrush(Color.FromArgb(0x14, 0x9C, 0xA0, 0xAB));
+    private static readonly IBrush BrushCaretRow = new SolidColorBrush(Color.FromArgb(0x28, 0xFF, 0x7A, 0x1A));
+    private static readonly IBrush BrushSelection = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0x7A, 0x1A));
+    private static readonly IBrush BrushBookmark = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xB3, 0x47));
+
+    static HexViewer()
+    {
+        // Brushes constructed off the UI thread above need to be frozen for cross-thread reuse.
+        ((SolidColorBrush)BrushMuted).ToImmutable();
+        ((SolidColorBrush)BrushAccent).ToImmutable();
+        ((SolidColorBrush)BrushHitBg).ToImmutable();
+        ((SolidColorBrush)BrushCaret).ToImmutable();
+        ((SolidColorBrush)BrushStripe).ToImmutable();
+        ((SolidColorBrush)BrushCaretRow).ToImmutable();
+        ((SolidColorBrush)BrushSelection).ToImmutable();
+        ((SolidColorBrush)BrushBookmark).ToImmutable();
+
+        // Tell the wrapping ScrollViewer to re-read scroll info when EXTENT changes (buffer
+        // swap, BPR change). NOT when ScrollOffset changes — that creates a feedback loop where
+        // the ScrollViewer's own thumb-drag setter triggers an invalidation that makes the
+        // ScrollViewer re-query offset, which is the cause of the perceptible drag jank.
+        BufferProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
+        BytesPerRowProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
+    }
+
     public HexViewer()
     {
         Focusable = true;
         ClipToBounds = true;
         AffectsRender<HexViewer>(BufferProperty, ScrollOffsetProperty, BytesPerRowProperty,
-            CaretOffsetProperty, CinderFontSizeProperty);
-    }
-
-    static HexViewer()
-    {
-        // Ensure the scroll viewer wakes up when our scrollable inputs change.
-        BufferProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
-        ScrollOffsetProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
-        BytesPerRowProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
+            CaretOffsetProperty, CinderFontSizeProperty,
+            SelectionStartProperty, SelectionEndProperty);
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -154,58 +206,59 @@ public sealed class HexViewer : Control, ILogicalScrollable
         var visibleRows = Math.Max(1, (int)Math.Ceiling(bounds.Height / _rowHeight));
         var bytesPerRow = Math.Max(1, BytesPerRow);
         var capacity = visibleRows * bytesPerRow;
-        var read = new byte[capacity];
-        var bytesRead = buffer.Read(ScrollOffset, read);
-
-        var fg = Brushes.Gainsboro;
-        var muted = new SolidColorBrush(Color.FromRgb(0x9C, 0xA0, 0xAB));
-        var accent = new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1A));
-        var hitBg = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0x7A, 0x1A));
-        var caretBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xB3, 0x47));
-        var stripeBrush = new SolidColorBrush(Color.FromArgb(0x14, 0x9C, 0xA0, 0xAB));
-        var caretRowBrush = new SolidColorBrush(Color.FromArgb(0x28, 0xFF, 0x7A, 0x1A));
-
-        var caretRow = BytesPerRow > 0 ? CaretOffset / BytesPerRow : -1;
-        var firstVisibleRow = ScrollOffset / Math.Max(1, BytesPerRow);
-
-        for (int row = 0; row < visibleRows; row++)
+        var pool = System.Buffers.ArrayPool<byte>.Shared;
+        var read = pool.Rent(capacity);
+        try
         {
-            var rowOffset = ScrollOffset + (long)row * bytesPerRow;
-            if (rowOffset >= buffer.Length)
-            {
-                break;
-            }
+            var bytesRead = buffer.Read(ScrollOffset, read.AsSpan(0, capacity));
 
-            var y = row * _rowHeight;
-            var absoluteRow = firstVisibleRow + row;
+            var caretRow = BytesPerRow > 0 ? CaretOffset / BytesPerRow : -1;
+            var firstVisibleRow = ScrollOffset / Math.Max(1, BytesPerRow);
 
-            // Row band — alternate stripes for readability + accent band on caret row.
-            if (absoluteRow == caretRow)
+            for (int row = 0; row < visibleRows; row++)
             {
-                context.FillRectangle(caretRowBrush, new Rect(0, y, bounds.Width, _rowHeight));
-            }
-            else if ((absoluteRow & 1) == 1)
-            {
-                context.FillRectangle(stripeBrush, new Rect(0, y, bounds.Width, _rowHeight));
-            }
+                var rowOffset = ScrollOffset + (long)row * bytesPerRow;
+                if (rowOffset >= buffer.Length)
+                {
+                    break;
+                }
 
-            DrawRow(context, rowOffset, read.AsSpan(row * bytesPerRow, Math.Min(bytesPerRow, Math.Max(0, bytesRead - row * bytesPerRow))),
-                bytesPerRow, y, fg, muted, accent, hitBg, caretBrush);
+                var y = row * _rowHeight;
+                var absoluteRow = firstVisibleRow + row;
+
+                // Row band — alternate stripes for readability + accent band on caret row.
+                if (absoluteRow == caretRow)
+                {
+                    context.FillRectangle(BrushCaretRow, new Rect(0, y, bounds.Width, _rowHeight));
+                    // 2px left border — caret-row affordance per the design system.
+                    context.FillRectangle(BrushAccent, new Rect(0, y, 2, _rowHeight));
+                }
+                else if ((absoluteRow & 1) == 1)
+                {
+                    context.FillRectangle(BrushStripe, new Rect(0, y, bounds.Width, _rowHeight));
+                }
+
+                DrawRow(context, rowOffset, read.AsSpan(row * bytesPerRow, Math.Min(bytesPerRow, Math.Max(0, bytesRead - row * bytesPerRow))),
+                    bytesPerRow, y);
+            }
+        }
+        finally
+        {
+            pool.Return(read);
         }
     }
 
-    private void DrawRow(DrawingContext context, long rowOffset, ReadOnlySpan<byte> row, int bytesPerRow,
-        double y, IBrush fg, IBrush muted, IBrush accent, IBrush hitBg, IBrush caretBrush)
+    private void DrawRow(DrawingContext context, long rowOffset, ReadOnlySpan<byte> row, int bytesPerRow, double y)
     {
         var x = 6.0;
 
         // Offset column
         var offsetText = rowOffset.ToString("X16", CultureInfo.InvariantCulture);
-        DrawText(context, offsetText, new Point(x, y), muted);
+        DrawText(context, offsetText, new Point(x, y), BrushMuted);
         x += OffsetColumnChars * _glyphAdvance + 12;
 
         // Highlight any search hits intersecting this row
-        DrawRowHighlights(context, rowOffset, bytesPerRow, x, y, hitBg);
+        DrawRowHighlights(context, rowOffset, bytesPerRow, x, y);
 
         // Hex column
         var hexX = x;
@@ -217,7 +270,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
             }
             var byteText = row[i].ToString("X2", CultureInfo.InvariantCulture);
             var byteOffset = rowOffset + i;
-            var brush = byteOffset == CaretOffset ? caretBrush : (IsBookmarked(byteOffset) ? accent : fg);
+            var brush = byteOffset == CaretOffset ? BrushCaret : (IsBookmarked(byteOffset) ? BrushAccent : BrushFg);
             DrawText(context, byteText, new Point(hexX + i * 3 * _glyphAdvance, y), brush);
         }
         x += bytesPerRow * 3 * _glyphAdvance + 12;
@@ -228,7 +281,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
         {
             var b = row[i];
             var c = b is >= 0x20 and < 0x7F ? (char)b : '.';
-            DrawText(context, c.ToString(), new Point(asciiX + i * _glyphAdvance, y), muted);
+            DrawText(context, c.ToString(), new Point(asciiX + i * _glyphAdvance, y), BrushMuted);
         }
         x += bytesPerRow * _glyphAdvance + 12;
 
@@ -238,14 +291,16 @@ public sealed class HexViewer : Control, ILogicalScrollable
         {
             var ch = (char)(row[i] | (row[i + 1] << 8));
             var glyph = char.IsControl(ch) || ch > 0xFFFD ? '.' : ch;
-            DrawText(context, glyph.ToString(), new Point(utfX + i * _glyphAdvance / 2, y), muted);
+            DrawText(context, glyph.ToString(), new Point(utfX + i * _glyphAdvance / 2, y), BrushMuted);
         }
     }
 
     private void DrawRowHighlights(DrawingContext context, long rowOffset, int bytesPerRow,
-        double hexStartX, double y, IBrush hitBg)
+        double hexStartX, double y)
     {
         var rowEnd = rowOffset + bytesPerRow;
+
+        // Search hits (orange)
         foreach (var hit in Highlights)
         {
             var hitEnd = hit.Offset + hit.Length;
@@ -253,22 +308,59 @@ public sealed class HexViewer : Control, ILogicalScrollable
             {
                 continue;
             }
-            var localStart = (int)Math.Max(0, hit.Offset - rowOffset);
-            var localEnd = (int)Math.Min(bytesPerRow, hitEnd - rowOffset);
-            var rect = new Rect(
-                hexStartX + localStart * 3 * _glyphAdvance,
-                y,
-                (localEnd - localStart) * 3 * _glyphAdvance,
-                _rowHeight);
-            context.FillRectangle(hitBg, rect);
+            DrawByteBand(context, BrushHitBg, hit.Offset, hitEnd - hit.Offset, rowOffset, bytesPerRow, hexStartX, y);
         }
+
+        // Selection (deeper orange, primary)
+        if (SelectionStart >= 0 && SelectionEnd >= SelectionStart)
+        {
+            var selEnd = SelectionEnd + 1;
+            if (SelectionStart < rowEnd && selEnd > rowOffset)
+            {
+                DrawByteBand(context, BrushSelection, SelectionStart, selEnd - SelectionStart, rowOffset, bytesPerRow, hexStartX, y);
+            }
+        }
+
+        // Bookmarks (warm yellow band on the offset gutter)
+        if (Bookmarks is not null)
+        {
+            foreach (var item in Bookmarks)
+            {
+                if (item is Bookmark bm && bm.Offset >= rowOffset && bm.Offset < rowEnd)
+                {
+                    context.FillRectangle(BrushBookmark, new Rect(0, y, 4, _rowHeight));
+                    break;
+                }
+            }
+        }
+    }
+
+    private void DrawByteBand(DrawingContext context, IBrush brush, long start, long length,
+        long rowOffset, int bytesPerRow, double hexStartX, double y)
+    {
+        var localStart = (int)Math.Max(0, start - rowOffset);
+        var localEnd = (int)Math.Min(bytesPerRow, start + length - rowOffset);
+        if (localEnd <= localStart)
+        {
+            return;
+        }
+        var rect = new Rect(
+            hexStartX + localStart * 3 * _glyphAdvance,
+            y,
+            (localEnd - localStart) * 3 * _glyphAdvance,
+            _rowHeight);
+        context.FillRectangle(brush, rect);
     }
 
     private bool IsBookmarked(long offset)
     {
-        for (int i = 0; i < Bookmarks.Count; i++)
+        if (Bookmarks is null)
         {
-            if (Bookmarks[i].Offset == offset)
+            return false;
+        }
+        foreach (var item in Bookmarks)
+        {
+            if (item is Bookmark bm && bm.Offset == offset)
             {
                 return true;
             }
@@ -328,48 +420,74 @@ public sealed class HexViewer : Control, ILogicalScrollable
         {
             return;
         }
-        var step = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 16 : 1;
+        var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        var step = shift ? 1 : 1;
+        long? targetOffset = null;
         switch (e.Key)
         {
             case Key.Left:
-                CaretOffset = Math.Max(0, CaretOffset - step);
-                EnsureCaretVisible();
-                e.Handled = true;
+                targetOffset = Math.Max(0, CaretOffset - step);
                 break;
             case Key.Right:
-                CaretOffset = Math.Min(Buffer.Length - 1, CaretOffset + step);
-                EnsureCaretVisible();
-                e.Handled = true;
+                targetOffset = Math.Min(Buffer.Length - 1, CaretOffset + step);
                 break;
             case Key.Up:
-                CaretOffset = Math.Max(0, CaretOffset - BytesPerRow);
-                EnsureCaretVisible();
-                e.Handled = true;
+                targetOffset = Math.Max(0, CaretOffset - BytesPerRow);
                 break;
             case Key.Down:
-                CaretOffset = Math.Min(Buffer.Length - 1, CaretOffset + BytesPerRow);
-                EnsureCaretVisible();
-                e.Handled = true;
+                targetOffset = Math.Min(Buffer.Length - 1, CaretOffset + BytesPerRow);
                 break;
             case Key.PageDown:
-                ScrollOffset = Math.Min(Buffer.Length - 1, ScrollOffset + BytesPerRow * 32);
+                ScrollOffset = ClampScrollOffset(ScrollOffset + BytesPerRow * 32);
                 e.Handled = true;
-                break;
+                return;
             case Key.PageUp:
-                ScrollOffset = Math.Max(0, ScrollOffset - BytesPerRow * 32);
+                ScrollOffset = ClampScrollOffset(ScrollOffset - BytesPerRow * 32);
                 e.Handled = true;
-                break;
+                return;
             case Key.Home when e.KeyModifiers.HasFlag(KeyModifiers.Control):
                 ScrollOffset = 0;
                 CaretOffset = 0;
+                ClearSelection();
                 e.Handled = true;
-                break;
+                return;
             case Key.End when e.KeyModifiers.HasFlag(KeyModifiers.Control):
                 CaretOffset = Math.Max(0, Buffer.Length - 1);
+                ClearSelection();
                 EnsureCaretVisible();
                 e.Handled = true;
-                break;
+                return;
+            case Key.Escape:
+                ClearSelection();
+                e.Handled = true;
+                return;
         }
+
+        if (targetOffset is { } target)
+        {
+            if (shift)
+            {
+                if (SelectionStart < 0)
+                {
+                    SelectionStart = CaretOffset;
+                    SelectionEnd = CaretOffset;
+                }
+                ExtendSelection(target);
+            }
+            else
+            {
+                CaretOffset = target;
+                ClearSelection();
+            }
+            EnsureCaretVisible();
+            e.Handled = true;
+        }
+    }
+
+    private void ClearSelection()
+    {
+        SelectionStart = -1;
+        SelectionEnd = -1;
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -382,6 +500,110 @@ public sealed class HexViewer : Control, ILogicalScrollable
         var rows = (int)Math.Round(e.Delta.Y * 3);
         ScrollOffset = ClampScrollOffset(ScrollOffset - rows * BytesPerRow);
         e.Handled = true;
+    }
+
+    private bool _dragging;
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        Focus();
+        if (Buffer is null)
+        {
+            return;
+        }
+        var hit = HitTestByteOffset(e.GetPosition(this));
+        if (hit < 0)
+        {
+            return;
+        }
+        var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        if (shift && SelectionStart >= 0)
+        {
+            ExtendSelection(hit);
+        }
+        else
+        {
+            CaretOffset = hit;
+            SelectionStart = hit;
+            SelectionEnd = hit;
+        }
+        _dragging = true;
+        e.Pointer.Capture(this);
+        e.Handled = true;
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (!_dragging || Buffer is null)
+        {
+            return;
+        }
+        var hit = HitTestByteOffset(e.GetPosition(this));
+        if (hit < 0)
+        {
+            return;
+        }
+        ExtendSelection(hit);
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        _dragging = false;
+        e.Pointer.Capture(null);
+    }
+
+    private long HitTestByteOffset(Point p)
+    {
+        if (Buffer is null || _rowHeight <= 0 || _glyphAdvance <= 0 || BytesPerRow <= 0)
+        {
+            return -1;
+        }
+        var row = (long)(p.Y / _rowHeight);
+        if (row < 0) row = 0;
+        var rowStart = ScrollOffset + row * BytesPerRow;
+        if (rowStart >= Buffer.Length)
+        {
+            return Buffer.Length - 1;
+        }
+
+        // Hex column starts after offset gutter + padding.
+        var hexStart = 6.0 + OffsetColumnChars * _glyphAdvance + 12;
+        var hexLocal = (p.X - hexStart) / (3 * _glyphAdvance);
+        var byteInRow = (int)Math.Floor(hexLocal);
+        if (byteInRow < 0)
+        {
+            return rowStart;
+        }
+        if (byteInRow >= BytesPerRow)
+        {
+            byteInRow = BytesPerRow - 1;
+        }
+        var offset = rowStart + byteInRow;
+        return Math.Min(offset, Buffer.Length - 1);
+    }
+
+    private void ExtendSelection(long pivotEnd)
+    {
+        CaretOffset = pivotEnd;
+        if (SelectionStart < 0)
+        {
+            SelectionStart = pivotEnd;
+            SelectionEnd = pivotEnd;
+            return;
+        }
+        if (pivotEnd >= SelectionStart)
+        {
+            SelectionEnd = pivotEnd;
+        }
+        else
+        {
+            // Drag/extend backwards — flip the anchor so SelectionStart <= SelectionEnd holds.
+            SelectionEnd = SelectionStart;
+            SelectionStart = pivotEnd;
+        }
     }
 
     private long ClampScrollOffset(long value)
@@ -437,7 +659,9 @@ public sealed class HexViewer : Control, ILogicalScrollable
             {
                 return;
             }
-            var row = (long)Math.Round(value.Y / _rowHeight);
+            // Floor (not round) so thumb-drag advances row-by-row in the direction of motion
+            // — rounding causes a "snap back" near half-row thresholds that reads as jitter.
+            var row = (long)Math.Floor(value.Y / _rowHeight);
             row = Math.Max(0, row);
             var maxRow = Math.Max(0, RowCount - 1);
             row = Math.Min(row, maxRow);

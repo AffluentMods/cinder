@@ -10,7 +10,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 {
     public CommandRegistry Commands { get; }
     public CommandPaletteViewModel Palette { get; }
-    public HexViewModel Hex { get; }
+
+    /// <summary>One <see cref="HexViewModel"/> per open file. <see cref="Hex"/> is the active one.</summary>
+    public ObservableCollection<HexViewModel> OpenBuffers { get; } = new();
+
+    [ObservableProperty]
+    private HexViewModel _hex;
 
     public ObservableCollection<string> CaseTreeItems { get; } = ["No case open"];
 
@@ -36,7 +41,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public MainWindowViewModel(CommandRegistry commands)
     {
         Commands = commands ?? throw new ArgumentNullException(nameof(commands));
-        Hex = new HexViewModel();
+        _hex = new HexViewModel();
+        OpenBuffers.Add(_hex);
         Palette = new CommandPaletteViewModel(commands);
         Tabs =
         [
@@ -55,6 +61,63 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 ActivityHeadline = "Ready";
             }
         }, TimeSpan.FromSeconds(3));
+    }
+
+    /// <summary>
+    /// Open a file into a fresh hex buffer (a new tab). If the same path is already open the
+    /// existing buffer is brought to focus instead.
+    /// </summary>
+    public void OpenFileInNewBuffer(string path)
+    {
+        var existing = OpenBuffers.FirstOrDefault(b =>
+            string.Equals(b.Buffer?.DisplayName, System.IO.Path.GetFileName(path), StringComparison.Ordinal));
+        if (existing is not null)
+        {
+            Hex = existing;
+            return;
+        }
+
+        // The very first slot starts empty (placeholder); reuse it.
+        var slot = OpenBuffers.FirstOrDefault(b => b.Buffer is null);
+        if (slot is null)
+        {
+            slot = new HexViewModel();
+            OpenBuffers.Add(slot);
+        }
+        slot.OpenFile(path);
+        Hex = slot;
+        Announce($"Opened {System.IO.Path.GetFileName(path)}");
+    }
+
+    [RelayCommand]
+    private void SetActiveBuffer(HexViewModel? buffer)
+    {
+        if (buffer is not null && OpenBuffers.Contains(buffer))
+        {
+            Hex = buffer;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseBuffer(HexViewModel? buffer)
+    {
+        if (buffer is null)
+        {
+            return;
+        }
+        if (OpenBuffers.Count <= 1)
+        {
+            // Last tab — empty it instead of removing.
+            buffer.Dispose();
+            return;
+        }
+        var idx = OpenBuffers.IndexOf(buffer);
+        OpenBuffers.Remove(buffer);
+        buffer.Dispose();
+        if (Hex == buffer)
+        {
+            Hex = OpenBuffers[Math.Max(0, Math.Min(idx, OpenBuffers.Count - 1))];
+        }
     }
 
     public void Announce(string headline)
@@ -102,6 +165,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         var gotoCmd = Commands.Commands.FirstOrDefault(c => c.Id == "hex.goto");
         gotoCmd?.Invoke(default);
+    }
+
+    [RelayCommand]
+    private void OpenSettings()
+    {
+        var cmd = Commands.Commands.FirstOrDefault(c => c.Id == "app.settings");
+        cmd?.Invoke(default);
+    }
+
+    [RelayCommand]
+    private async Task CreateCaseAsync(CancellationToken ct)
+    {
+        var cmd = Commands.Commands.FirstOrDefault(c => c.Id == "case.create");
+        if (cmd is not null)
+        {
+            await cmd.Invoke(ct).ConfigureAwait(false);
+        }
     }
 }
 

@@ -17,6 +17,11 @@
         <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenFileCommand}" />
         <KeyBinding Gesture="Ctrl+F" Command="{Binding OpenFindCommand}" />
         <KeyBinding Gesture="Ctrl+G" Command="{Binding OpenGotoCommand}" />
+        <KeyBinding Gesture="Ctrl+D" Command="{Binding Hex.AddBookmarkCommand}" />
+        <KeyBinding Gesture="Alt+Left" Command="{Binding Hex.NavigateBackCommand}" />
+        <KeyBinding Gesture="Alt+Right" Command="{Binding Hex.NavigateForwardCommand}" />
+        <KeyBinding Gesture="Ctrl+C" Command="{Binding Hex.CopySelectionAsHexCommand}" />
+        <KeyBinding Gesture="Ctrl+Comma" Command="{Binding OpenSettingsCommand}" />
     </Window.KeyBindings>
 
     <Grid RowDefinitions="Auto,*,Auto">
@@ -69,8 +74,8 @@
                         <Button Content="Create case…"
                                 HorizontalAlignment="Stretch"
                                 HorizontalContentAlignment="Center"
-                                IsEnabled="False"
-                                ToolTip.Tip="Multi-case workspace lands in Phase 8." />
+                                Command="{Binding CreateCaseCommand}"
+                                ToolTip.Tip="Create a Cinder case file (.cinder). Multi-case branching ships in Phase 8." />
                     </StackPanel>
                     <ListBox ItemsSource="{Binding CaseTreeItems}"
                              Background="Transparent" BorderThickness="0"
@@ -94,14 +99,54 @@
                 <TabControl.ContentTemplate>
                     <DataTemplate DataType="vm:TabItemViewModel">
                         <Panel>
-                            <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hex'}"
-                                            Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex}">
-                                <ContentControl.ContentTemplate>
-                                    <DataTemplate DataType="vm:HexViewModel">
-                                        <views:HexView />
-                                    </DataTemplate>
-                                </ContentControl.ContentTemplate>
-                            </ContentControl>
+                            <Grid IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hex'}"
+                                  RowDefinitions="Auto,*">
+                                <Border Grid.Row="0"
+                                        Background="{DynamicResource CinderBackground1Brush}"
+                                        BorderBrush="{DynamicResource CinderBorderBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="6,3">
+                                    <ItemsControl ItemsSource="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenBuffers}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="2" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="vm:HexViewModel">
+                                                <Border Padding="0" CornerRadius="4">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <Button Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Padding="10,4"
+                                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SetActiveBufferCommand}"
+                                                                CommandParameter="{Binding}">
+                                                            <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='(empty)'}"
+                                                                       Foreground="{DynamicResource CinderForegroundBrush}" />
+                                                        </Button>
+                                                        <Button Background="Transparent"
+                                                                BorderThickness="0"
+                                                                Padding="4,0"
+                                                                Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                                                Content="×"
+                                                                ToolTip.Tip="Close tab"
+                                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CloseBufferCommand}"
+                                                                CommandParameter="{Binding}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Border>
+                                <ContentControl Grid.Row="1"
+                                                Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex}">
+                                    <ContentControl.ContentTemplate>
+                                        <DataTemplate DataType="vm:HexViewModel">
+                                            <views:HexView />
+                                        </DataTemplate>
+                                    </ContentControl.ContentTemplate>
+                                </ContentControl>
+                            </Grid>
                             <TextBlock IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='gallery'}"
                                        Text="Image gallery — Phase 4 deliverable. Drop a folder to scan."
                                        Foreground="{DynamicResource CinderForegroundMutedBrush}"
@@ -193,6 +238,57 @@
                                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                             </Button>
                         </StackPanel>
+
+                        <!-- Inspector: caret bytes interpreted as common types -->
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Inspector"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            <ItemsControl ItemsSource="{Binding Hex.InspectorRows}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="vm:InspectorRow">
+                                        <Grid ColumnDefinitions="92,*" Margin="0,2,0,2">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Label}"
+                                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                            <SelectableTextBlock Grid.Column="1"
+                                                                 Text="{Binding Value}"
+                                                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                                 FontSize="{DynamicResource CinderFontSizeXs}"
+                                                                 Foreground="{DynamicResource CinderForegroundBrush}"
+                                                                 TextWrapping="Wrap" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+
+                        <!-- Bookmarks list -->
+                        <StackPanel Spacing="6"
+                                    IsVisible="{Binding Hex.Bookmarks.Count}">
+                            <TextBlock Text="Bookmarks (Ctrl+D)"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            <ItemsControl ItemsSource="{Binding Hex.Bookmarks}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Background="Transparent"
+                                                BorderThickness="0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left"
+                                                Padding="2,3"
+                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex.GotoBookmarkCommand}"
+                                                CommandParameter="{Binding}">
+                                            <TextBlock Text="{Binding Label}"
+                                                       FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                                       Foreground="{DynamicResource CinderForegroundBrush}" />
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
                     </StackPanel>
                 </DockPanel>
             </Border>
@@ -203,12 +299,18 @@
                 BorderBrush="{DynamicResource CinderBorderBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="16,8">
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto">
                 <TextBlock Grid.Column="0"
                            Text="{Binding ActivityHeadline}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1"
+                           Text="{Binding Hex.SelectionSummary}"
+                           Foreground="{DynamicResource CinderAccentBrush}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,16,0"
+                           IsVisible="{Binding Hex.HasSelection}" />
+                <TextBlock Grid.Column="2"
                            Text="{Binding StatusBar}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            VerticalAlignment="Center" />

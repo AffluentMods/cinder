@@ -41,7 +41,7 @@ public static class CommandRegistration
                 }
                 Dispatcher.UIThread.Post(() =>
                 {
-                    mainVm.Hex.OpenFile(path);
+                    mainVm.OpenFileInNewBuffer(path);
                     var hexTab = mainVm.Tabs.FirstOrDefault(t => t.Kind == "hex");
                     if (hexTab is not null)
                     {
@@ -89,6 +89,68 @@ public static class CommandRegistration
                     dialog.ShowDialog(owner);
                 });
                 return Task.CompletedTask;
+            }));
+
+        registry.Register(new CommandDescriptor(
+            Id: "app.settings",
+            Title: "Settings… (Ctrl+,)",
+            Subtitle: "Theme, density, AI provider, cloud client_ids, parsers directory.",
+            Category: "App",
+            Invoke: _ =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var owner = ResolveMainWindow();
+                    if (owner is null)
+                    {
+                        return;
+                    }
+                    var dialog = new SettingsDialog { DataContext = new SettingsDialogViewModel(new SettingsStore()) };
+                    dialog.ShowDialog(owner);
+                });
+                return Task.CompletedTask;
+            }));
+
+        registry.Register(new CommandDescriptor(
+            Id: "case.create",
+            Title: "Create case…",
+            Subtitle: "Set up a new case file (.cinder) with chain-of-custody log.",
+            Category: "Case",
+            Invoke: async ct =>
+            {
+                var owner = ResolveMainWindow();
+                if (owner is null)
+                {
+                    return;
+                }
+                var picked = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = "Create Cinder case",
+                    DefaultExtension = "cinder",
+                    SuggestedFileName = "case.cinder",
+                    FileTypeChoices = [new FilePickerFileType("Cinder case") { Patterns = ["*.cinder"] }],
+                }).ConfigureAwait(false);
+                var path = picked?.TryGetLocalPath();
+                if (string.IsNullOrEmpty(path))
+                {
+                    return;
+                }
+                try
+                {
+                    var store = new Cinder.Core.Cases.CaseStore(path);
+                    var custody = new Cinder.Core.Custody.CustodyLog(store);
+                    var svc = new Cinder.Core.Cases.CaseService(store, custody);
+                    var c = await svc.CreateAsync(System.IO.Path.GetFileNameWithoutExtension(path), Environment.UserName, null, ct).ConfigureAwait(false);
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        mainVm.ActiveCaseName = c.Name;
+                        mainVm.Announce($"Case created: {c.Name}");
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Dispatcher.UIThread.Post(() => mainVm.Announce($"Failed to create case: {ex.Message}"));
+                }
             }));
 
         registry.Register(new CommandDescriptor(

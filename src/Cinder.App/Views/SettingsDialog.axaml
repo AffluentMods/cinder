@@ -1,0 +1,88 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Cinder.App.ViewModels"
+        x:Class="Cinder.App.Views.SettingsDialog"
+        x:DataType="vm:SettingsDialogViewModel"
+        Title="Cinder · Settings"
+        Width="640" Height="640"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource CinderBackground1Brush}"
+        Foreground="{DynamicResource CinderForegroundBrush}">
+    <Border BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1" CornerRadius="6">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20">
+            <StackPanel Spacing="22">
+                <TextBlock Text="SETTINGS" FontWeight="600"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Appearance" FontWeight="600" />
+                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto" Margin="0,0,0,4">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Theme" VerticalAlignment="Center" />
+                        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding Theme}" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Density" VerticalAlignment="Center" Margin="0,8,0,0" />
+                        <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" ItemsSource="{Binding DensityOptions}" SelectedItem="{Binding Density}" />
+                    </Grid>
+                    <CheckBox Content="Vim mode in hex viewer" IsChecked="{Binding VimModeInHex}" />
+                    <CheckBox Content="Respect OS reduce-motion" IsChecked="{Binding RespectReduceMotion}" />
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Updates" FontWeight="600" />
+                    <CheckBox Content="Check for updates on launch (public GitHub API)" IsChecked="{Binding CheckForUpdates}" />
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Python sidecars" FontWeight="600" />
+                    <TextBlock Text="Used for parsers (pytsk3, regipy, volatility3, etc.). Leave blank to use 'python' on PATH."
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Python executable" VerticalAlignment="Center" />
+                        <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding PythonExecutable}" Watermark="python.exe (optional)" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Parsers directory" VerticalAlignment="Center" Margin="0,8,0,0" />
+                        <TextBox  Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding ParsersDirectory}" Watermark="Path to parsers/ folder" />
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="AI provider (BYOM)" FontWeight="600" />
+                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Provider" VerticalAlignment="Center" />
+                        <ComboBox  Grid.Row="0" Grid.Column="1" ItemsSource="{Binding AiProviderOptions}" SelectedItem="{Binding AiProviderId}" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Endpoint" VerticalAlignment="Center" Margin="0,8,0,0" />
+                        <TextBox  Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding AiEndpoint}" Watermark="http://localhost:11434 / vLLM URL / etc." />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Model" VerticalAlignment="Center" Margin="0,8,0,0" />
+                        <TextBox  Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" Text="{Binding AiModel}" Watermark="e.g. llama3, mistral, gpt-4o-mini" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="API key" VerticalAlignment="Center" Margin="0,8,0,0" />
+                        <TextBox  Grid.Row="3" Grid.Column="1" Margin="0,8,0,0" Text="{Binding AiApiKey}" PasswordChar="•" Watermark="(only for cloud providers)" />
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Cloud connectors" FontWeight="600" />
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}">
+                        <Run Text="Paste OAuth client IDs here. See " />
+                        <Run Text="docs/cloud-setup.md" Foreground="{DynamicResource CinderAccentBrush}" />
+                        <Run Text=" for the per-provider walkthrough. PKCE means these are public — never paste a client secret." />
+                    </TextBlock>
+                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Google Drive" VerticalAlignment="Center" />
+                        <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding GoogleDriveClientId}" Watermark="123-abc.apps.googleusercontent.com" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="OneDrive" VerticalAlignment="Center" Margin="0,8,0,0" />
+                        <TextBox  Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding OneDriveClientId}" Watermark="00000000-0000-0000-0000-000000000000" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Dropbox" VerticalAlignment="Center" Margin="0,8,0,0" />
+                        <TextBox  Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" Text="{Binding DropboxAppKey}" Watermark="dropbox app key" />
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" Margin="0,8,0,0">
+                    <Button Content="Save" Classes="accent" Command="{Binding SaveCommand}" />
+                    <Button Content="Close" Click="OnCloseClick" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+</Window>

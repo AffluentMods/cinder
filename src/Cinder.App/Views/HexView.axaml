@@ -29,6 +29,11 @@
                            Foreground="{DynamicResource CinderWarnBrush}"
                            VerticalAlignment="Center"
                            IsVisible="{Binding DetectedFormatBadge, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                <TextBlock Text="{Binding DetectedRouting}"
+                           Foreground="{DynamicResource CinderAccentBrush}"
+                           VerticalAlignment="Center"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           IsVisible="{Binding DetectedRouting, Converter={x:Static ObjectConverters.IsNotNull}}" />
                 <TextBlock Text="{Binding QuickHashSha256, StringFormat='SHA-256 {0}'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            VerticalAlignment="Center"
@@ -77,6 +82,9 @@
                 <hx:HexViewer Buffer="{Binding Buffer}"
                               ScrollOffset="{Binding ScrollOffset, Mode=TwoWay}"
                               CaretOffset="{Binding CaretOffset, Mode=TwoWay}"
+                              SelectionStart="{Binding SelectionStart, Mode=TwoWay}"
+                              SelectionEnd="{Binding SelectionEnd, Mode=TwoWay}"
+                              Bookmarks="{Binding Bookmarks}"
                               BytesPerRow="{Binding BytesPerRow}" />
             </ScrollViewer>
         </Panel>
