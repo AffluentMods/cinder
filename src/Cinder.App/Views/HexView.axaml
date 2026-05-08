@@ -5,24 +5,31 @@
              x:Class="Cinder.App.Views.HexView"
              x:DataType="vm:HexViewModel">
     <Grid RowDefinitions="Auto,*">
+
+        <!-- Header strip: filename + format + signature mismatch + quick hash -->
         <Border Grid.Row="0"
                 Background="{DynamicResource CinderBackground1Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="12,8">
-            <StackPanel Orientation="Horizontal" Spacing="16">
+                Padding="14,10">
+            <StackPanel Orientation="Horizontal" Spacing="18">
                 <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='No file open'}"
                            FontWeight="500"
                            Foreground="{DynamicResource CinderForegroundBrush}"
                            VerticalAlignment="Center" />
-                <TextBlock Text="{Binding DetectedFormat, FallbackValue=''}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                           VerticalAlignment="Center" />
+                <Border Padding="6,2"
+                        CornerRadius="3"
+                        Background="{DynamicResource CinderBackground2Brush}"
+                        IsVisible="{Binding DetectedFormat, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Text="{Binding DetectedFormat}"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                </Border>
                 <TextBlock Text="{Binding DetectedFormatBadge}"
                            Foreground="{DynamicResource CinderWarnBrush}"
                            VerticalAlignment="Center"
                            IsVisible="{Binding DetectedFormatBadge, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                <TextBlock Text="{Binding QuickHashSha256, StringFormat='SHA-256: {0}'}"
+                <TextBlock Text="{Binding QuickHashSha256, StringFormat='SHA-256 {0}'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            VerticalAlignment="Center"
                            FontFamily="{DynamicResource CinderFontFamilyMono}"
@@ -30,15 +37,48 @@
                            IsVisible="{Binding QuickHashSha256, Converter={x:Static ObjectConverters.IsNotNull}}" />
             </StackPanel>
         </Border>
-        <ScrollViewer Grid.Row="1"
-                      HorizontalScrollBarVisibility="Auto"
-                      VerticalScrollBarVisibility="Auto"
-                      Background="{DynamicResource CinderBackground0Brush}">
-            <hx:HexViewer Buffer="{Binding Buffer}"
-                          ScrollOffset="{Binding ScrollOffset, Mode=TwoWay}"
-                          CaretOffset="{Binding CaretOffset, Mode=TwoWay}"
-                          BytesPerRow="{Binding BytesPerRow}"
-                          MinHeight="600" />
-        </ScrollViewer>
+
+        <!-- Body: hex pane OR empty-state placeholder -->
+        <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
+
+            <!-- Empty state — shown when no buffer is open -->
+            <Border Background="{DynamicResource CinderBackground0Brush}"
+                    IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNull}}">
+                <StackPanel HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="14"
+                            MaxWidth="420">
+                    <Border CornerRadius="8"
+                            Background="{DynamicResource CinderBackground1Brush}"
+                            Padding="22"
+                            HorizontalAlignment="Center">
+                        <TextBlock Text="🔥" FontSize="56"
+                                   Foreground="{DynamicResource CinderAccentBrush}" />
+                    </Border>
+                    <TextBlock Text="Drop a file to begin"
+                               FontSize="{DynamicResource CinderFontSizeLg}"
+                               FontWeight="600"
+                               Foreground="{DynamicResource CinderForegroundBrush}"
+                               HorizontalAlignment="Center" />
+                    <TextBlock TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}">
+                        <Run Text="Drop a file anywhere on this pane, or press " />
+                        <Run Text="Ctrl+O" Foreground="{DynamicResource CinderAccentBrush}" />
+                        <Run Text=" to pick one. Cinder reads memory-mapped — opening a 100 GB image is instant." />
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <!-- Real hex pane — only when there's a buffer -->
+            <ScrollViewer IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNotNull}}"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Visible">
+                <hx:HexViewer Buffer="{Binding Buffer}"
+                              ScrollOffset="{Binding ScrollOffset, Mode=TwoWay}"
+                              CaretOffset="{Binding CaretOffset, Mode=TwoWay}"
+                              BytesPerRow="{Binding BytesPerRow}" />
+            </ScrollViewer>
+        </Panel>
     </Grid>
 </UserControl>

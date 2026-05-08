@@ -14,6 +14,9 @@
 
     <Window.KeyBindings>
         <KeyBinding Gesture="Ctrl+K" Command="{Binding OpenPaletteCommand}" />
+        <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenFileCommand}" />
+        <KeyBinding Gesture="Ctrl+F" Command="{Binding OpenFindCommand}" />
+        <KeyBinding Gesture="Ctrl+G" Command="{Binding OpenGotoCommand}" />
     </Window.KeyBindings>
 
     <Grid RowDefinitions="Auto,*,Auto">
@@ -31,13 +34,13 @@
                            Foreground="{DynamicResource CinderAccentBrush}"
                            VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1"
-                           Text="Affluent Labs · pre-alpha"
+                           Text="{Binding HeaderSubtitle}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center" />
                 <Button Grid.Column="2"
                         Command="{Binding OpenPaletteCommand}"
-                        Content="⌘K  Search commands"
+                        Content="Ctrl+K  Search commands"
                         Foreground="{DynamicResource CinderForegroundMutedBrush}"
                         Background="{DynamicResource CinderBackground2Brush}"
                         BorderBrush="{DynamicResource CinderBorderBrush}"
@@ -47,16 +50,32 @@
 
         <Grid Grid.Row="1" ColumnDefinitions="240,4,*,4,300">
             <Border Grid.Column="0" Background="{DynamicResource CinderBackground1Brush}">
-                <DockPanel Margin="12">
+                <DockPanel Margin="14">
                     <TextBlock DockPanel.Dock="Top"
-                               Text="Case"
+                               Text="CASE"
                                FontWeight="600"
                                FontSize="{DynamicResource CinderFontSizeXs}"
                                Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               Margin="0,0,0,8" />
+                               Margin="0,0,0,12" />
+                    <StackPanel DockPanel.Dock="Top" Spacing="10"
+                                IsVisible="{Binding ActiveCaseName, Converter={x:Static ObjectConverters.IsNull}}">
+                        <TextBlock Text="No case open"
+                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                        <Button Classes="accent"
+                                Content="Open file…"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                Command="{Binding OpenFileCommand}" />
+                        <Button Content="Create case…"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                IsEnabled="False"
+                                ToolTip.Tip="Multi-case workspace lands in Phase 8." />
+                    </StackPanel>
                     <ListBox ItemsSource="{Binding CaseTreeItems}"
                              Background="Transparent" BorderThickness="0"
-                             Foreground="{DynamicResource CinderForegroundBrush}" />
+                             Foreground="{DynamicResource CinderForegroundBrush}"
+                             IsVisible="{Binding ActiveCaseName, Converter={x:Static ObjectConverters.IsNotNull}}" />
                 </DockPanel>
             </Border>
 
@@ -103,15 +122,78 @@
             <GridSplitter Grid.Column="3" Background="{DynamicResource CinderBorderBrush}" />
 
             <Border Grid.Column="4" Background="{DynamicResource CinderBackground1Brush}">
-                <DockPanel Margin="12">
+                <DockPanel Margin="14">
                     <TextBlock DockPanel.Dock="Top"
-                               Text="Properties"
+                               Text="PROPERTIES"
                                FontWeight="600"
                                FontSize="{DynamicResource CinderFontSizeXs}"
                                Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               Margin="0,0,0,8" />
-                    <TextBlock Text="No selection"
-                               Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                               Margin="0,0,0,12" />
+                    <StackPanel Spacing="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Offset"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            <SelectableTextBlock FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                 FontSize="{DynamicResource CinderFontSizeMd}">
+                                <Run Text="{Binding Hex.CaretOffsetHex}"
+                                     Foreground="{DynamicResource CinderForegroundBrush}" />
+                                <Run Text="  " />
+                                <Run Text="{Binding Hex.CaretOffsetDec}"
+                                     Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                            </SelectableTextBlock>
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Byte at caret"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            <SelectableTextBlock FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                 FontSize="{DynamicResource CinderFontSizeSm}"
+                                                 TextWrapping="Wrap">
+                                <Run Text="{Binding Hex.CaretByteHex}"
+                                     Foreground="{DynamicResource CinderForegroundBrush}" />
+                                <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                <Run Text="{Binding Hex.CaretByteDec}"
+                                     Foreground="{DynamicResource CinderForegroundBrush}" />
+                                <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                <Run Text="{Binding Hex.CaretByteAscii}"
+                                     Foreground="{DynamicResource CinderForegroundBrush}" />
+                                <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                <Run Text="{Binding Hex.CaretByteBinary}"
+                                     Foreground="{DynamicResource CinderForegroundBrush}" />
+                            </SelectableTextBlock>
+                            <TextBlock Text="hex · dec · ascii · binary"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                        </StackPanel>
+                        <StackPanel Spacing="4"
+                                    IsVisible="{Binding Hex.DetectedFormat, Converter={x:Static ObjectConverters.IsNotNull}}">
+                            <TextBlock Text="Detected format"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            <TextBlock Text="{Binding Hex.DetectedFormat}"
+                                       Foreground="{DynamicResource CinderForegroundBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Spacing="4"
+                                    IsVisible="{Binding Hex.QuickHashSha256, Converter={x:Static ObjectConverters.IsNotNull}}">
+                            <TextBlock Text="Quick hash (first 4 MiB) — click to copy"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            <Button Background="Transparent"
+                                    BorderThickness="0"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Left"
+                                    Padding="0"
+                                    Command="{Binding Hex.CopyQuickHashCommand}"
+                                    ToolTip.Tip="Click to copy full SHA-256 to clipboard">
+                                <TextBlock Text="{Binding Hex.QuickHashSha256}"
+                                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
                 </DockPanel>
             </Border>
         </Grid>
@@ -123,7 +205,7 @@
                 Padding="16,8">
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0"
-                           Text="{Binding ActivityLog[0]}"
+                           Text="{Binding ActivityHeadline}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1"

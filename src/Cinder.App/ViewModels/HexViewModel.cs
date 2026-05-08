@@ -1,3 +1,7 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Text;
+using Avalonia.Threading;
 using Cinder.Core.Hashing;
 using Cinder.Core.Signatures;
 using Cinder.Hex;
@@ -32,6 +36,101 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private string? _quickHashSha256;
 
+    [ObservableProperty]
+    private string? _quickHashSha256Full;
+
+    public ObservableCollection<HexSearchHit> SearchResults { get; } = new();
+
+    [ObservableProperty]
+    private HexSearchHit? _selectedSearchResult;
+
+    // ============== Caret display fields (split for muted/primary styling) ==============
+
+    public string CaretOffsetHex => Buffer is null ? "—" : $"0x{CaretOffset:X}";
+    public string CaretOffsetDec => Buffer is null ? "" : $"{CaretOffset:N0}";
+
+    public string CaretByteHex
+    {
+        get
+        {
+            var b = ReadCaretByte();
+            return b is null ? "—" : $"0x{b.Value:X2}";
+        }
+    }
+
+    public string CaretByteDec
+    {
+        get
+        {
+            var b = ReadCaretByte();
+            return b is null ? "" : b.Value.ToString(CultureInfo.InvariantCulture);
+        }
+    }
+
+    public string CaretByteAscii
+    {
+        get
+        {
+            var b = ReadCaretByte();
+            if (b is null)
+            {
+                return "";
+            }
+            var c = b is >= 0x20 and < 0x7F ? ((char)b.Value).ToString() : ".";
+            return $"'{c}'";
+        }
+    }
+
+    public string CaretByteBinary
+    {
+        get
+        {
+            var b = ReadCaretByte();
+            return b is null ? "" : Convert.ToString(b.Value, 2).PadLeft(8, '0');
+        }
+    }
+
+    private byte? ReadCaretByte()
+    {
+        if (Buffer is null || CaretOffset >= Buffer.Length)
+        {
+            return null;
+        }
+        Span<byte> one = stackalloc byte[1];
+        return Buffer.Read(CaretOffset, one) == 0 ? null : (byte?)one[0];
+    }
+
+    partial void OnCaretOffsetChanged(long value)
+    {
+        OnPropertyChanged(nameof(CaretOffsetHex));
+        OnPropertyChanged(nameof(CaretOffsetDec));
+        OnPropertyChanged(nameof(CaretByteHex));
+        OnPropertyChanged(nameof(CaretByteDec));
+        OnPropertyChanged(nameof(CaretByteAscii));
+        OnPropertyChanged(nameof(CaretByteBinary));
+    }
+
+    partial void OnBufferChanged(IHexBuffer? value)
+    {
+        OnPropertyChanged(nameof(CaretOffsetHex));
+        OnPropertyChanged(nameof(CaretOffsetDec));
+        OnPropertyChanged(nameof(CaretByteHex));
+        OnPropertyChanged(nameof(CaretByteDec));
+        OnPropertyChanged(nameof(CaretByteAscii));
+        OnPropertyChanged(nameof(CaretByteBinary));
+        SearchResults.Clear();
+    }
+
+    partial void OnSelectedSearchResultChanged(HexSearchHit? value)
+    {
+        if (value is null || Buffer is null)
+        {
+            return;
+        }
+        CaretOffset = value.Offset;
+        ScrollOffset = (value.Offset / BytesPerRow) * BytesPerRow;
+    }
+
     public HexViewModel() { }
 
     public void OpenFile(string path)
@@ -60,10 +159,27 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             return;
         }
         var best = hits[0];
-        DetectedFormat = $"{best.Signature.Label} (.{best.Signature.Extension})";
+        var matchedBytes = FormatMatchedBytes(header, best.Signature, read);
+        DetectedFormat = $"{best.Signature.Label} ({matchedBytes} at 0x{best.Offset:X})";
         DetectedFormatBadge = _scanner.IsExtensionMismatch(path, header.AsSpan(0, read), out _)
             ? $"⚠ Extension mismatch — content looks like .{best.Signature.Extension}"
             : null;
+    }
+
+    private static string FormatMatchedBytes(byte[] header, MagicSignature sig, int validRead)
+    {
+        var sb = new StringBuilder("0x");
+        var max = Math.Min(sig.Pattern.Length, 6);
+        for (int i = 0; i < max; i++)
+        {
+            var idx = (int)(sig.Offset + i);
+            if (idx < 0 || idx >= validRead)
+            {
+                break;
+            }
+            sb.Append(header[idx].ToString("X2", CultureInfo.InvariantCulture));
+        }
+        return sb.ToString();
     }
 
     private async Task QuickHashAsync()
@@ -79,11 +195,37 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             var read = Buffer.Read(0, sample);
             using var ms = new MemoryStream(sample, 0, read, writable: false);
             var result = await _hash.ComputeAsync(ms, [HashAlgorithmKind.Sha256]).ConfigureAwait(false);
+            QuickHashSha256Full = result.Sha256;
             QuickHashSha256 = result.Sha256?[..16] + "…";
         }
         catch
         {
             QuickHashSha256 = null;
+            QuickHashSha256Full = null;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyQuickHashAsync()
+    {
+        if (string.IsNullOrEmpty(QuickHashSha256Full))
+        {
+            return;
+        }
+        try
+        {
+            var clipboard = Avalonia.Application.Current?.ApplicationLifetime is
+                Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                ? desktop.MainWindow?.Clipboard
+                : null;
+            if (clipboard is not null)
+            {
+                await clipboard.SetTextAsync(QuickHashSha256Full).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // Best effort.
         }
     }
 
@@ -98,14 +240,12 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         var s = raw.Trim();
         if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || s.StartsWith("0X", StringComparison.OrdinalIgnoreCase))
         {
-            if (!long.TryParse(s[2..], System.Globalization.NumberStyles.HexNumber,
-                System.Globalization.CultureInfo.InvariantCulture, out parsed))
+            if (!long.TryParse(s[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out parsed))
             {
                 return;
             }
         }
-        else if (!long.TryParse(s, System.Globalization.NumberStyles.Integer,
-            System.Globalization.CultureInfo.InvariantCulture, out parsed))
+        else if (!long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
         {
             return;
         }
@@ -115,6 +255,41 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         }
         CaretOffset = parsed;
         ScrollOffset = (parsed / BytesPerRow) * BytesPerRow;
+    }
+
+    /// <summary>Run a search across the open buffer and surface the first ~1000 hits.</summary>
+    public async Task SearchAsync(HexSearchOptions options, CancellationToken ct = default)
+    {
+        if (Buffer is null)
+        {
+            return;
+        }
+        SearchResults.Clear();
+        var hits = await Task.Run(() =>
+        {
+            var bag = new List<HexSearchHit>();
+            foreach (var hit in HexSearch.Search(Buffer, options, ct))
+            {
+                bag.Add(hit);
+                if (bag.Count >= 1000)
+                {
+                    break;
+                }
+            }
+            return bag;
+        }, ct).ConfigureAwait(false);
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            foreach (var h in hits)
+            {
+                SearchResults.Add(h);
+            }
+            if (hits.Count > 0)
+            {
+                SelectedSearchResult = hits[0];
+            }
+        });
     }
 
     public void Dispose()

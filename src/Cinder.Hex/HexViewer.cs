@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -15,8 +16,12 @@ namespace Cinder.Hex;
 /// Only the visible rows are rendered, so opening a 100 GB image is constant-time. Reads come
 /// from <see cref="IHexBuffer"/>; in production that's an mmap-backed buffer so paging is the
 /// kernel's job.
+///
+/// Implements <see cref="ILogicalScrollable"/> so a wrapping <see cref="ScrollViewer"/> can
+/// drive scrolling against the buffer's full extent without forcing the control to actually
+/// allocate that much pixel space.
 /// </summary>
-public sealed class HexViewer : Control
+public sealed class HexViewer : Control, ILogicalScrollable
 {
     public static readonly StyledProperty<IHexBuffer?> BufferProperty =
         AvaloniaProperty.Register<HexViewer, IHexBuffer?>(nameof(Buffer));
@@ -76,9 +81,10 @@ public sealed class HexViewer : Control
     public IList<Bookmark> Bookmarks { get; } = new List<Bookmark>();
     public IList<StructureOverlay> Overlays { get; } = new List<StructureOverlay>();
 
-    private Typeface _typeface = new("Cascadia Mono, Consolas, monospace");
+    private readonly Typeface _typeface = new("Cascadia Mono, Consolas, monospace");
     private double _glyphAdvance;
     private double _rowHeight;
+    private Size _viewport;
 
     public HexViewer()
     {
@@ -88,14 +94,41 @@ public sealed class HexViewer : Control
             CaretOffsetProperty, CinderFontSizeProperty);
     }
 
+    static HexViewer()
+    {
+        // Ensure the scroll viewer wakes up when our scrollable inputs change.
+        BufferProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
+        ScrollOffsetProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
+        BytesPerRowProperty.Changed.AddClassHandler<HexViewer>((c, _) => c.RaiseScrollInvalidated(EventArgs.Empty));
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         MeasureGlyph();
-        var width = OffsetColumnChars * _glyphAdvance + 12 +
-                    BytesPerRow * 3 * _glyphAdvance + 12 +
-                    BytesPerRow * _glyphAdvance + 12 +
-                    BytesPerRow * _glyphAdvance + 12;
-        return new Size(Math.Max(width, availableSize.Width), availableSize.Height);
+        var contentWidth = OffsetColumnChars * _glyphAdvance + 12 +
+                           BytesPerRow * 3 * _glyphAdvance + 12 +
+                           BytesPerRow * _glyphAdvance + 12 +
+                           BytesPerRow * _glyphAdvance + 12;
+        // Avalonia rejects ∞ from MeasureOverride. Logical scrolling means the wrapping
+        // ScrollViewer hands us its viewport size — we never claim the buffer's full extent.
+        var width = double.IsFinite(availableSize.Width)
+            ? Math.Max(contentWidth, availableSize.Width)
+            : contentWidth;
+        var height = double.IsFinite(availableSize.Height)
+            ? availableSize.Height
+            : Math.Max(_rowHeight * 32, 600);
+        return new Size(width, height);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var arranged = base.ArrangeOverride(finalSize);
+        if (_viewport != arranged)
+        {
+            _viewport = arranged;
+            RaiseScrollInvalidated(EventArgs.Empty);
+        }
+        return arranged;
     }
 
     public override void Render(DrawingContext context)
@@ -115,8 +148,7 @@ public sealed class HexViewer : Control
         var buffer = Buffer;
         if (buffer is null || buffer.Length == 0)
         {
-            DrawCenteredText(context, "(no buffer)", bounds);
-            return;
+            return; // The wrapping view shows the friendly empty state.
         }
 
         var visibleRows = Math.Max(1, (int)Math.Ceiling(bounds.Height / _rowHeight));
@@ -130,6 +162,11 @@ public sealed class HexViewer : Control
         var accent = new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1A));
         var hitBg = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0x7A, 0x1A));
         var caretBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xB3, 0x47));
+        var stripeBrush = new SolidColorBrush(Color.FromArgb(0x14, 0x9C, 0xA0, 0xAB));
+        var caretRowBrush = new SolidColorBrush(Color.FromArgb(0x28, 0xFF, 0x7A, 0x1A));
+
+        var caretRow = BytesPerRow > 0 ? CaretOffset / BytesPerRow : -1;
+        var firstVisibleRow = ScrollOffset / Math.Max(1, BytesPerRow);
 
         for (int row = 0; row < visibleRows; row++)
         {
@@ -140,6 +177,18 @@ public sealed class HexViewer : Control
             }
 
             var y = row * _rowHeight;
+            var absoluteRow = firstVisibleRow + row;
+
+            // Row band — alternate stripes for readability + accent band on caret row.
+            if (absoluteRow == caretRow)
+            {
+                context.FillRectangle(caretRowBrush, new Rect(0, y, bounds.Width, _rowHeight));
+            }
+            else if ((absoluteRow & 1) == 1)
+            {
+                context.FillRectangle(stripeBrush, new Rect(0, y, bounds.Width, _rowHeight));
+            }
+
             DrawRow(context, rowOffset, read.AsSpan(row * bytesPerRow, Math.Min(bytesPerRow, Math.Max(0, bytesRead - row * bytesPerRow))),
                 bytesPerRow, y, fg, muted, accent, hitBg, caretBrush);
         }
@@ -331,7 +380,100 @@ public sealed class HexViewer : Control
             return;
         }
         var rows = (int)Math.Round(e.Delta.Y * 3);
-        ScrollOffset = Math.Clamp(ScrollOffset - rows * BytesPerRow, 0, Math.Max(0, Buffer.Length - BytesPerRow));
+        ScrollOffset = ClampScrollOffset(ScrollOffset - rows * BytesPerRow);
         e.Handled = true;
     }
+
+    private long ClampScrollOffset(long value)
+    {
+        if (Buffer is null || Buffer.Length == 0)
+        {
+            return 0;
+        }
+        var maxStart = Math.Max(0, Buffer.Length - BytesPerRow);
+        return Math.Clamp(value, 0, maxStart);
+    }
+
+    // ============================ ILogicalScrollable ============================
+    //
+    // The parent ScrollViewer reads Extent + Viewport to size its scroll thumb and reads/writes
+    // Offset to drive scrolling. ScrollOffset (a byte offset in the buffer) and Offset.Y (a
+    // pixel offset in scroll space) represent the same position via the row-height conversion.
+
+    public bool CanHorizontallyScroll { get; set; }
+    public bool CanVerticallyScroll { get; set; } = true;
+    public bool IsLogicalScrollEnabled => true;
+
+    public Size Extent
+    {
+        get
+        {
+            if (Buffer is null || _rowHeight <= 0)
+            {
+                return new Size(_glyphAdvance * 32, 0);
+            }
+            var contentWidth = OffsetColumnChars * _glyphAdvance + 12 +
+                               BytesPerRow * 3 * _glyphAdvance + 12 +
+                               BytesPerRow * _glyphAdvance + 12 +
+                               BytesPerRow * _glyphAdvance + 12;
+            return new Size(contentWidth, RowCount * _rowHeight);
+        }
+    }
+
+    public Vector Offset
+    {
+        get
+        {
+            if (BytesPerRow <= 0 || _rowHeight <= 0)
+            {
+                return default;
+            }
+            var row = ScrollOffset / BytesPerRow;
+            return new Vector(0, row * _rowHeight);
+        }
+        set
+        {
+            if (BytesPerRow <= 0 || _rowHeight <= 0)
+            {
+                return;
+            }
+            var row = (long)Math.Round(value.Y / _rowHeight);
+            row = Math.Max(0, row);
+            var maxRow = Math.Max(0, RowCount - 1);
+            row = Math.Min(row, maxRow);
+            var newOffset = row * BytesPerRow;
+            if (newOffset != ScrollOffset)
+            {
+                ScrollOffset = newOffset;
+            }
+        }
+    }
+
+    public Size Viewport => _viewport;
+
+    public Size ScrollSize
+    {
+        get
+        {
+            MeasureGlyph();
+            return new Size(_glyphAdvance, _rowHeight);
+        }
+    }
+
+    public Size PageScrollSize
+    {
+        get
+        {
+            MeasureGlyph();
+            return new Size(_glyphAdvance * 16, _rowHeight * 32);
+        }
+    }
+
+    public event EventHandler? ScrollInvalidated;
+
+    public void RaiseScrollInvalidated(EventArgs e) => ScrollInvalidated?.Invoke(this, e);
+
+    public bool BringIntoView(Control target, Rect targetRect) => false;
+
+    public Control? GetControlInDirection(NavigationDirection direction, Control? from) => null;
 }

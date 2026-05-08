@@ -1,15 +1,95 @@
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Cinder.App.ViewModels;
+using Cinder.App.Views;
 
 namespace Cinder.App.Services;
 
 /// <summary>Built-in command palette actions registered at startup.</summary>
 public static class CommandRegistration
 {
-    public static void RegisterBuiltIns(CommandRegistry registry)
+    public static void RegisterBuiltIns(CommandRegistry registry, MainWindowViewModel mainVm)
     {
         ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(mainVm);
+
+        registry.Register(new CommandDescriptor(
+            Id: "file.open",
+            Title: "Open file… (Ctrl+O)",
+            Subtitle: "Load a file into the hex viewer.",
+            Category: "File",
+            Invoke: async ct =>
+            {
+                var window = ResolveMainWindow();
+                if (window is null)
+                {
+                    return;
+                }
+                var picked = await window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Open file in Cinder",
+                    AllowMultiple = false,
+                }).ConfigureAwait(false);
+                var path = picked.FirstOrDefault()?.TryGetLocalPath();
+                if (string.IsNullOrEmpty(path))
+                {
+                    return;
+                }
+                Dispatcher.UIThread.Post(() =>
+                {
+                    mainVm.Hex.OpenFile(path);
+                    var hexTab = mainVm.Tabs.FirstOrDefault(t => t.Kind == "hex");
+                    if (hexTab is not null)
+                    {
+                        mainVm.SelectedTab = hexTab;
+                    }
+                });
+                _ = ct;
+            }));
+
+        registry.Register(new CommandDescriptor(
+            Id: "hex.find",
+            Title: "Find in buffer… (Ctrl+F)",
+            Subtitle: "Search the open file: hex / ASCII / UTF-16 / regex.",
+            Category: "Hex",
+            Invoke: _ =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var owner = ResolveMainWindow();
+                    if (owner is null || mainVm.Hex.Buffer is null)
+                    {
+                        return;
+                    }
+                    var dialog = new FindDialog { DataContext = new FindDialogViewModel(mainVm.Hex) };
+                    dialog.ShowDialog(owner);
+                });
+                return Task.CompletedTask;
+            }));
+
+        registry.Register(new CommandDescriptor(
+            Id: "hex.goto",
+            Title: "Goto offset… (Ctrl+G)",
+            Subtitle: "Jump the caret to a specific offset (decimal or 0x… hex).",
+            Category: "Hex",
+            Invoke: _ =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var owner = ResolveMainWindow();
+                    if (owner is null || mainVm.Hex.Buffer is null)
+                    {
+                        return;
+                    }
+                    var dialog = new GotoDialog { DataContext = mainVm.Hex };
+                    dialog.ShowDialog(owner);
+                });
+                return Task.CompletedTask;
+            }));
 
         registry.Register(new CommandDescriptor(
             Id: "view.theme.toggle",
@@ -48,8 +128,7 @@ public static class CommandRegistration
             {
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (Avalonia.Application.Current?.ApplicationLifetime is
-                        Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+                    if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                     {
                         desktop.Shutdown();
                     }
@@ -57,4 +136,7 @@ public static class CommandRegistration
                 return Task.CompletedTask;
             }));
     }
+
+    private static Window? ResolveMainWindow()
+        => (Avalonia.Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
 }

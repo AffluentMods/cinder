@@ -1,0 +1,111 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Cinder control styles. Override FluentAvalonia / native Avalonia defaults to make
+        scrollbars, tabs, buttons, and textboxes wear the Cinder palette.
+    -->
+
+    <!-- ===================== ScrollBar ===================== -->
+    <Style Selector="ScrollBar:vertical">
+        <Setter Property="Width" Value="10" />
+        <Setter Property="MinWidth" Value="10" />
+        <Setter Property="Background" Value="{DynamicResource CinderBackground1Brush}" />
+    </Style>
+    <Style Selector="ScrollBar:horizontal">
+        <Setter Property="Height" Value="10" />
+        <Setter Property="MinHeight" Value="10" />
+        <Setter Property="Background" Value="{DynamicResource CinderBackground1Brush}" />
+    </Style>
+    <Style Selector="ScrollBar /template/ Thumb">
+        <Setter Property="Background" Value="{DynamicResource CinderBorderStrongBrush}" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="MinHeight" Value="20" />
+        <Setter Property="MinWidth" Value="20" />
+    </Style>
+    <Style Selector="ScrollBar /template/ Thumb:pointerover">
+        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+    </Style>
+    <Style Selector="ScrollBar /template/ Thumb:pressed">
+        <Setter Property="Background" Value="{DynamicResource CinderAccentHoverBrush}" />
+    </Style>
+    <Style Selector="ScrollBar /template/ RepeatButton">
+        <Setter Property="Opacity" Value="0" />
+    </Style>
+
+    <!-- ===================== TabControl / TabItem ===================== -->
+    <Style Selector="TabControl">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="TabControl > TabItem">
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="FontWeight" Value="500" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <Style Selector="TabControl > TabItem:pointerover /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource CinderBackground2Brush}" />
+    </Style>
+    <Style Selector="TabControl > TabItem:selected">
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
+    </Style>
+    <Style Selector="TabControl > TabItem /template/ Border#PART_SelectedPipe">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.18" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="TabControl > TabItem:selected /template/ Border#PART_SelectedPipe">
+        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="Height" Value="2" />
+    </Style>
+
+    <!-- ===================== Button ===================== -->
+    <Style Selector="Button">
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="12,6" />
+    </Style>
+    <Style Selector="Button.accent">
+        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentBrush}" />
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderAccentHoverBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentHoverBrush}" />
+        <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- ===================== TextBox ===================== -->
+    <Style Selector="TextBox">
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="10,6" />
+    </Style>
+    <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentBrush}" />
+    </Style>
+
+    <!-- ===================== ListBox / ListBoxItem ===================== -->
+    <Style Selector="ListBox">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ListBoxItem">
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+    <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderAccentDimBrush}" />
+    </Style>
+
+    <!-- ===================== GridSplitter ===================== -->
+    <Style Selector="GridSplitter">
+        <Setter Property="Background" Value="{DynamicResource CinderBorderBrush}" />
+    </Style>
+    <Style Selector="GridSplitter:pointerover">
+        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+    </Style>
+
+</Styles>

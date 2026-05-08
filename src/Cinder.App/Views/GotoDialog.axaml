@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Cinder.App.ViewModels"
+        x:Class="Cinder.App.Views.GotoDialog"
+        x:DataType="vm:HexViewModel"
+        Title="Cinder · Goto offset"
+        Width="420" Height="160"
+        WindowStartupLocation="CenterOwner"
+        SystemDecorations="BorderOnly"
+        Background="{DynamicResource CinderBackground1Brush}"
+        Foreground="{DynamicResource CinderForegroundBrush}">
+
+    <Border BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1" CornerRadius="6">
+        <DockPanel Margin="18">
+            <TextBlock DockPanel.Dock="Top"
+                       Text="GOTO OFFSET"
+                       FontWeight="600"
+                       FontSize="{DynamicResource CinderFontSizeXs}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            <TextBlock DockPanel.Dock="Top"
+                       Text="Decimal or hex (with 0x prefix). Press Enter to jump."
+                       Margin="0,4,0,12"
+                       FontSize="{DynamicResource CinderFontSizeXs}"
+                       Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                       TextWrapping="Wrap" />
+            <TextBox Name="GotoInput"
+                     Watermark="0x1234 or 4660"
+                     FontFamily="{DynamicResource CinderFontFamilyMono}"
+                     FontSize="{DynamicResource CinderFontSizeMd}">
+                <TextBox.KeyBindings>
+                    <KeyBinding Gesture="Return" Command="{Binding GotoOffsetCommand}" CommandParameter="{Binding ElementName=GotoInput, Path=Text}" />
+                </TextBox.KeyBindings>
+            </TextBox>
+        </DockPanel>
+    </Border>
+</Window>

@@ -16,9 +16,8 @@ public partial class App : Avalonia.Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var registry = new CommandRegistry();
-            CommandRegistration.RegisterBuiltIns(registry);
-
             var vm = new MainWindowViewModel(registry);
+            CommandRegistration.RegisterBuiltIns(registry, vm);
             desktop.MainWindow = new MainWindow { DataContext = vm };
         }
 

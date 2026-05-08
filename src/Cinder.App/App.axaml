@@ -5,6 +5,7 @@
              RequestedThemeVariant="Dark">
     <Application.Styles>
         <sty:FluentAvaloniaTheme PreferUserAccentColor="False" />
+        <StyleInclude Source="avares://Cinder/Themes/Cinder.Styles.axaml" />
     </Application.Styles>
     <Application.Resources>
         <ResourceDictionary>
