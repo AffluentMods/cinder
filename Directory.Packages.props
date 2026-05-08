@@ -16,6 +16,7 @@
     <PackageVersion Include="Avalonia.Diagnostics" Version="11.2.1" />
     <PackageVersion Include="Avalonia.ReactiveUI" Version="11.2.1" />
     <PackageVersion Include="FluentAvaloniaUI" Version="2.1.0" />
+    <PackageVersion Include="Avalonia.Controls.DataGrid" Version="11.2.1" />
 
     <!-- MVVM -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />

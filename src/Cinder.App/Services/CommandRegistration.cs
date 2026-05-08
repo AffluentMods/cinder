@@ -42,10 +42,10 @@ public static class CommandRegistration
                 Dispatcher.UIThread.Post(() =>
                 {
                     mainVm.OpenFileInNewBuffer(path);
-                    var hexTab = mainVm.Tabs.FirstOrDefault(t => t.Kind == "hex");
-                    if (hexTab is not null)
+                    var hexTool = mainVm.Workspace.FindByKind("hex");
+                    if (hexTool is not null)
                     {
-                        mainVm.SelectedTab = hexTab;
+                        mainVm.Workspace.SelectedTool = hexTool;
                     }
                 });
                 _ = ct;

@@ -1,0 +1,107 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:vm="using:Cinder.App.ViewModels"
+                    xmlns:tools="using:Cinder.App.ViewModels.Tools"
+                    xmlns:views="using:Cinder.App.Views"
+                    xmlns:tv="using:Cinder.App.Views.Tools">
+
+    <!--
+        Single template that branches by ToolViewModel.Kind. For each tool we either render a
+        specialised view (Reports / Timeline / Search / AI / Settings / Cases) or the generic
+        SidecarToolView which shows a "load evidence" affordance + an empty state.
+    -->
+
+    <DataTemplate x:Key="ToolContentTemplate" DataType="tools:ToolViewModel">
+        <Panel>
+            <!-- Hex viewer (Phase 1) — wraps the multi-tab buffer strip -->
+            <Grid IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hex'}"
+                  RowDefinitions="Auto,*">
+                <Border Grid.Row="0"
+                        Background="{DynamicResource CinderBackground1Brush}"
+                        BorderBrush="{DynamicResource CinderBorderBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="6,3">
+                    <ItemsControl ItemsSource="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenBuffers}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:HexViewModel">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button Background="Transparent"
+                                            BorderThickness="0"
+                                            Padding="10,4"
+                                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SetActiveBufferCommand}"
+                                            CommandParameter="{Binding}">
+                                        <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='(empty)'}"
+                                                   Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    </Button>
+                                    <Button Background="Transparent"
+                                            BorderThickness="0"
+                                            Padding="4,0"
+                                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                            Content="×"
+                                            ToolTip.Tip="Close tab"
+                                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CloseBufferCommand}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+                <ContentControl Grid.Row="1"
+                                Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate DataType="vm:HexViewModel">
+                            <views:HexView />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </Grid>
+
+            <!-- Reports (Phase 8) — real view -->
+            <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='reports'}"
+                            Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Reports}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate DataType="vm:ReportsToolViewModel">
+                        <tv:ReportsView />
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
+
+            <!-- Timeline (Phase 6) -->
+            <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='timeline'}"
+                            Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Timeline}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate DataType="vm:TimelineToolViewModel">
+                        <tv:TimelineView />
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
+
+            <!-- Search (Phase 6) -->
+            <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='search'}"
+                            Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Search}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate DataType="vm:SearchToolViewModel">
+                        <tv:SearchView />
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
+
+            <!-- AI Copilot (Phase 9) -->
+            <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='ai'}"
+                            Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Ai}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate DataType="vm:AiCopilotToolViewModel">
+                        <tv:AiCopilotView />
+                    </DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
+
+            <!-- Generic placeholder for everything else (sidecar-driven, not yet bootstrapped) -->
+            <tv:GenericToolView IsVisible="{Binding ., Converter={x:Static tv:ToolKindConverters.IsGeneric}}" />
+        </Panel>
+    </DataTemplate>
+
+</ResourceDictionary>

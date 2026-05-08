@@ -1,0 +1,93 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             xmlns:srch="using:Cinder.Search"
+             x:Class="Cinder.App.Views.Tools.TimelineView"
+             x:DataType="vm:TimelineToolViewModel">
+    <Grid RowDefinitions="Auto,*">
+
+        <!-- Filter bar -->
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right"
+                        Classes="accent"
+                        Content="Refresh"
+                        Command="{Binding RefreshCommand}"
+                        Margin="6,0,0,0" />
+                <Button DockPanel.Dock="Right"
+                        Content="Seed demo events"
+                        Command="{Binding AddDemoEventsCommand}"
+                        Margin="6,0,0,0" />
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="From" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <DatePicker SelectedDate="{Binding From, Mode=TwoWay}" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="To" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <DatePicker SelectedDate="{Binding To, Mode=TwoWay}" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="User" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBox Text="{Binding UserFilter}" Watermark="(any)" Width="120" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="Source" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBox Text="{Binding SourceFilter}" Watermark="evtx, browser.history…" Width="180" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="Contains" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBox Text="{Binding TextFilter}" Watermark="text in summary" Width="200" />
+                    </StackPanel>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1" RowDefinitions="80,Auto,*">
+            <!-- Histogram -->
+            <Border Grid.Row="0" Background="{DynamicResource CinderBackground0Brush}" Padding="14,10">
+                <ItemsControl ItemsSource="{Binding Histogram}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Rectangle Margin="1,0"
+                                       Fill="{DynamicResource CinderAccentBrush}"
+                                       VerticalAlignment="Bottom"
+                                       Width="NaN"
+                                       Height="{Binding}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Border>
+
+            <Border Grid.Row="1" Background="{DynamicResource CinderBackground1Brush}" Padding="14,4">
+                <TextBlock Text="{Binding StatusLine}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            </Border>
+
+            <!-- Event list -->
+            <DataGrid Grid.Row="2" ItemsSource="{Binding Events}"
+                      Background="{DynamicResource CinderBackground0Brush}"
+                      Foreground="{DynamicResource CinderForegroundBrush}"
+                      GridLinesVisibility="Horizontal"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Timestamp (UTC)" Binding="{Binding Timestamp, StringFormat=u}" Width="200" />
+                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="160" />
+                    <DataGridTextColumn Header="User" Binding="{Binding User}" Width="120" />
+                    <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </Grid>
+</UserControl>

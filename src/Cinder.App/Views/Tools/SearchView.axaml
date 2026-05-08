@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             xmlns:srch="using:Cinder.Search"
+             x:Class="Cinder.App.Views.Tools.SearchView"
+             x:DataType="vm:SearchToolViewModel">
+    <Grid RowDefinitions="Auto,Auto,*">
+        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Pick index folder…"
+                        Command="{Binding PickIndexFolderCommand}"
+                        Margin="6,0,0,0" />
+                <TextBlock Text="{Binding IndexPath, FallbackValue='No index loaded'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+        <Border Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="14,10">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0" Text="{Binding Query, Mode=TwoWay}"
+                         Watermark="Lucene query — text:foo OR source:evtx OR user:alice"
+                         FontFamily="{DynamicResource CinderFontFamilyMono}">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Return" Command="{Binding RunCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
+                <Button Grid.Column="1" Margin="6,0,0,0" Classes="accent" Content="Search"
+                        Command="{Binding RunCommand}" />
+            </Grid>
+        </Border>
+        <Grid Grid.Row="2" RowDefinitions="Auto,*">
+            <TextBlock Grid.Row="0" Text="{Binding StatusLine}" Margin="14,4"
+                       FontSize="{DynamicResource CinderFontSizeXs}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            <DataGrid Grid.Row="1" ItemsSource="{Binding Hits}"
+                      AutoGenerateColumns="False" IsReadOnly="True"
+                      Background="{DynamicResource CinderBackground0Brush}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Score"     Binding="{Binding Score, StringFormat=F2}" Width="70" />
+                    <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp, StringFormat=u}" Width="200" />
+                    <DataGridTextColumn Header="Source"    Binding="{Binding Source}" Width="160" />
+                    <DataGridTextColumn Header="User"      Binding="{Binding User}"   Width="120" />
+                    <DataGridTextColumn Header="Path"      Binding="{Binding Path}"   Width="240" />
+                    <DataGridTextColumn Header="Summary"   Binding="{Binding Summary}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </Grid>
+</UserControl>

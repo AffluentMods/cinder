@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using Cinder.App.Services;
+using Cinder.App.ViewModels.Tools;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -10,6 +11,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 {
     public CommandRegistry Commands { get; }
     public CommandPaletteViewModel Palette { get; }
+    public WorkspaceViewModel Workspace { get; } = new();
+
+    public ReportsToolViewModel Reports { get; }
+    public TimelineToolViewModel Timeline { get; } = new();
+    public SearchToolViewModel Search { get; } = new();
+    public AiCopilotToolViewModel Ai { get; } = new();
 
     /// <summary>One <see cref="HexViewModel"/> per open file. <see cref="Hex"/> is the active one.</summary>
     public ObservableCollection<HexViewModel> OpenBuffers { get; } = new();
@@ -19,15 +26,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public ObservableCollection<string> CaseTreeItems { get; } = ["No case open"];
 
-    public ObservableCollection<TabItemViewModel> Tabs { get; }
-
     public ObservableCollection<string> ActivityLog { get; } = ["Cinder started."];
 
     [ObservableProperty]
     private string _activityHeadline = "Cinder started.";
-
-    [ObservableProperty]
-    private TabItemViewModel _selectedTab;
 
     [ObservableProperty]
     private string _statusBar = "🛡 WriteBlock OFF · No case · Ctrl+K for the command palette";
@@ -44,14 +46,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _hex = new HexViewModel();
         OpenBuffers.Add(_hex);
         Palette = new CommandPaletteViewModel(commands);
-        Tabs =
-        [
-            new("Hex", "hex"),
-            new("Gallery", "gallery"),
-            new("Timeline", "timeline"),
-            new("Reports", "reports"),
-        ];
-        _selectedTab = Tabs[0];
+        Reports = new ReportsToolViewModel(() => ActiveCaseName ?? "Untitled case");
 
         // Status-bar headline auto-fades to "Ready" after 3s if nothing else is happening.
         DispatcherTimer.RunOnce(() =>
@@ -185,8 +180,3 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 }
 
-public sealed partial class TabItemViewModel(string title, string kind) : ViewModelBase
-{
-    public string Title { get; } = title;
-    public string Kind { get; } = kind;
-}

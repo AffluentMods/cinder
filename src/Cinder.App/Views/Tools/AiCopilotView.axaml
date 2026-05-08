@@ -1,0 +1,94 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             x:Class="Cinder.App.Views.Tools.AiCopilotView"
+             x:DataType="vm:AiCopilotToolViewModel">
+    <Grid ColumnDefinitions="320,4,*">
+        <!-- Provider config -->
+        <Border Grid.Column="0" Background="{DynamicResource CinderBackground1Brush}">
+            <DockPanel Margin="14">
+                <TextBlock DockPanel.Dock="Top" Text="PROVIDER"
+                           FontWeight="600" FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                           Margin="0,0,0,10" />
+                <StackPanel DockPanel.Dock="Top" Spacing="10">
+                    <ComboBox ItemsSource="{Binding ProviderOptions}"
+                              SelectedItem="{Binding ProviderId}"
+                              HorizontalAlignment="Stretch" />
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="Endpoint" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBox Text="{Binding Endpoint}" Watermark="http://localhost:11434" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="Model" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBox Text="{Binding Model}" Watermark="llama3" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="API key (cloud only)" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBox Text="{Binding ApiKey}" PasswordChar="•" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="System prompt" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBox Text="{Binding SystemPrompt}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" Height="80"
+                                 FontSize="{DynamicResource CinderFontSizeXs}" />
+                    </StackPanel>
+                    <Button Content="Clear chat" Command="{Binding ClearCommand}" />
+                    <TextBlock Text="{Binding StatusLine}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+
+        <!-- Chat -->
+        <Grid Grid.Column="2" RowDefinitions="*,Auto">
+            <ScrollViewer Grid.Row="0" Padding="18" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Messages}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ChatMessageVm">
+                            <Border Padding="10" Margin="0,0,0,10" CornerRadius="6"
+                                    Background="{DynamicResource CinderBackground1Brush}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Role}"
+                                               FontWeight="600"
+                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                               Foreground="{DynamicResource CinderAccentBrush}"
+                                               Margin="0,0,0,4" />
+                                    <SelectableTextBlock Text="{Binding Content}"
+                                                         TextWrapping="Wrap"
+                                                         FontFamily="{DynamicResource CinderFontFamily}"
+                                                         FontSize="{DynamicResource CinderFontSizeSm}"
+                                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <Border Grid.Row="1" Background="{DynamicResource CinderBackground1Brush}"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0"
+                    Padding="14,10">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Grid.Column="0" Text="{Binding Input, Mode=TwoWay}"
+                             AcceptsReturn="False"
+                             Watermark="Ask the model anything about the case…">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Return" Command="{Binding SendCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Grid.Column="1" Margin="6,0,0,0" Classes="accent" Content="Send"
+                            Command="{Binding SendCommand}"
+                            IsEnabled="{Binding !IsStreaming}" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -15,6 +15,7 @@
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.ReactiveUI" />
     <PackageReference Include="FluentAvaloniaUI" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />

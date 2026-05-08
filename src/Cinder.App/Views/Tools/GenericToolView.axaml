@@ -1,0 +1,92 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.GenericToolView"
+             x:DataType="tools:ToolViewModel">
+    <Border Background="{DynamicResource CinderBackground0Brush}" Padding="40">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                    MaxWidth="640" Spacing="14">
+            <TextBlock Text="{Binding Icon}"
+                       FontSize="64"
+                       Foreground="{DynamicResource CinderAccentBrush}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding Title}"
+                       FontWeight="600"
+                       FontSize="{DynamicResource CinderFontSizeXl}"
+                       Foreground="{DynamicResource CinderForegroundBrush}"
+                       HorizontalAlignment="Center" />
+            <TextBlock Text="{Binding Subtitle}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                       TextAlignment="Center" TextWrapping="Wrap" />
+
+            <Border Background="{DynamicResource CinderBackground1Brush}" CornerRadius="6" Padding="16"
+                    IsVisible="{Binding ., Converter={x:Static tools:ToolKindHelpers.IsSidecar}}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="LOAD EVIDENCE"
+                               FontWeight="600"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                    <TextBlock Text="{Binding EmptyStateHint, FallbackValue='Pick a file to begin'}"
+                               TextWrapping="Wrap"
+                               FontSize="{DynamicResource CinderFontSizeSm}"
+                               Foreground="{DynamicResource CinderForegroundBrush}" />
+                    <TextBlock Text="Required Python packages:"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <ItemsControl ItemsSource="{Binding RequiredPythonPackages}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource CinderBackground2Brush}"
+                                        CornerRadius="3" Padding="6,2" Margin="0,2,4,2">
+                                    <TextBlock Text="{Binding}"
+                                               FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                               FontSize="{DynamicResource CinderFontSizeXs}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="Sidecar-driven parser. Cinder spawns the matching Python worker; install the listed packages in the bundled venv to enable parsing. Until then loading will surface a clean RuntimeError describing what's missing."
+                               TextWrapping="Wrap"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="{DynamicResource CinderBackground1Brush}" CornerRadius="6" Padding="16"
+                    IsVisible="{Binding ., Converter={x:Static tools:ToolKindHelpers.IsAcquisition}}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="ACQUISITION TOOL"
+                               FontWeight="600"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="{DynamicResource CinderFontSizeSm}"
+                               Foreground="{DynamicResource CinderForegroundBrush}"
+                               Text="The Cinder.Imaging service is wired and ready. The full UI for this tool — source picker, format selector, progress bar, hash chain — lands in Phase 2 once the imager Python sidecar is bootstrapped on the user's box. For now, drive it via the cinder-cli verbs documented in HANDOFF.md." />
+                </StackPanel>
+            </Border>
+
+            <Border Background="{DynamicResource CinderBackground1Brush}" CornerRadius="6" Padding="16"
+                    IsVisible="{Binding ., Converter={x:Static tools:ToolKindHelpers.IsManagement}}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="CASE MANAGEMENT"
+                               FontWeight="600"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="{DynamicResource CinderFontSizeSm}"
+                               Foreground="{DynamicResource CinderForegroundBrush}">
+                        <Run Text="The underlying Cinder.Cases / Cinder.Plugins / Cinder.Workflow service is wired. The dedicated UI ships in Phase 8.1. Use " />
+                        <Run Text="Settings (Ctrl+,)" Foreground="{DynamicResource CinderAccentBrush}" />
+                        <Run Text=" for the configuration that's available today." />
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Border>
+</UserControl>

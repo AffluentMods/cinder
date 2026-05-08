@@ -1,12 +1,13 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Cinder.App.ViewModels"
+        xmlns:tools="using:Cinder.App.ViewModels.Tools"
         xmlns:views="using:Cinder.App.Views"
         x:Class="Cinder.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Cinder"
-        Width="1280" Height="800"
-        MinWidth="960" MinHeight="600"
+        Width="1440" Height="900"
+        MinWidth="1080" MinHeight="640"
         Background="{DynamicResource CinderBackground0Brush}"
         Foreground="{DynamicResource CinderForegroundBrush}"
         FontFamily="{DynamicResource CinderFontFamily}"
@@ -21,11 +22,12 @@
         <KeyBinding Gesture="Alt+Left" Command="{Binding Hex.NavigateBackCommand}" />
         <KeyBinding Gesture="Alt+Right" Command="{Binding Hex.NavigateForwardCommand}" />
         <KeyBinding Gesture="Ctrl+C" Command="{Binding Hex.CopySelectionAsHexCommand}" />
-        <KeyBinding Gesture="Ctrl+Comma" Command="{Binding OpenSettingsCommand}" />
+        <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding OpenSettingsCommand}" />
     </Window.KeyBindings>
 
     <Grid RowDefinitions="Auto,*,Auto">
 
+        <!-- Title bar -->
         <Border Grid.Row="0"
                 Background="{DynamicResource CinderBackground1Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}"
@@ -53,244 +55,194 @@
             </Grid>
         </Border>
 
+        <!-- Body: activity rail + content + properties pane -->
         <Grid Grid.Row="1" ColumnDefinitions="240,4,*,4,300">
+
+            <!-- Left activity rail -->
             <Border Grid.Column="0" Background="{DynamicResource CinderBackground1Brush}">
-                <DockPanel Margin="14">
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="CASE"
-                               FontWeight="600"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               Margin="0,0,0,12" />
-                    <StackPanel DockPanel.Dock="Top" Spacing="10"
-                                IsVisible="{Binding ActiveCaseName, Converter={x:Static ObjectConverters.IsNull}}">
-                        <TextBlock Text="No case open"
-                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                        <Button Classes="accent"
-                                Content="Open file…"
-                                HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Center"
-                                Command="{Binding OpenFileCommand}" />
-                        <Button Content="Create case…"
-                                HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Center"
-                                Command="{Binding CreateCaseCommand}"
-                                ToolTip.Tip="Create a Cinder case file (.cinder). Multi-case branching ships in Phase 8." />
-                    </StackPanel>
-                    <ListBox ItemsSource="{Binding CaseTreeItems}"
-                             Background="Transparent" BorderThickness="0"
-                             Foreground="{DynamicResource CinderForegroundBrush}"
-                             IsVisible="{Binding ActiveCaseName, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                </DockPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Workspace.Sections}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="tools:ToolSection">
+                                <StackPanel Margin="0,8,0,8">
+                                    <TextBlock Text="{Binding Title}"
+                                               FontWeight="600"
+                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                               Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                                               Margin="14,4,14,6" />
+                                    <ItemsControl ItemsSource="{Binding Tools}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="tools:ToolViewModel">
+                                                <Button HorizontalAlignment="Stretch"
+                                                        HorizontalContentAlignment="Left"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Padding="14,6"
+                                                        CornerRadius="0"
+                                                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Workspace.SelectCommand}"
+                                                        CommandParameter="{Binding}">
+                                                    <Grid ColumnDefinitions="22,*">
+                                                        <TextBlock Grid.Column="0"
+                                                                   Text="{Binding Icon}"
+                                                                   FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                                   Foreground="{DynamicResource CinderAccentBrush}"
+                                                                   VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding Title}"
+                                                                   Foreground="{DynamicResource CinderForegroundBrush}"
+                                                                   VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </Border>
 
             <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
 
-            <TabControl Grid.Column="2"
-                        ItemsSource="{Binding Tabs}"
-                        SelectedItem="{Binding SelectedTab}"
-                        Background="{DynamicResource CinderBackground0Brush}"
-                        Padding="0">
-                <TabControl.ItemTemplate>
-                    <DataTemplate DataType="vm:TabItemViewModel">
-                        <TextBlock Text="{Binding Title}" />
-                    </DataTemplate>
-                </TabControl.ItemTemplate>
-                <TabControl.ContentTemplate>
-                    <DataTemplate DataType="vm:TabItemViewModel">
-                        <Panel>
-                            <Grid IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hex'}"
-                                  RowDefinitions="Auto,*">
-                                <Border Grid.Row="0"
-                                        Background="{DynamicResource CinderBackground1Brush}"
-                                        BorderBrush="{DynamicResource CinderBorderBrush}"
-                                        BorderThickness="0,0,0,1"
-                                        Padding="6,3">
-                                    <ItemsControl ItemsSource="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenBuffers}">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal" Spacing="2" />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate DataType="vm:HexViewModel">
-                                                <Border Padding="0" CornerRadius="4">
-                                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                                        <Button Background="Transparent"
-                                                                BorderThickness="0"
-                                                                Padding="10,4"
-                                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SetActiveBufferCommand}"
-                                                                CommandParameter="{Binding}">
-                                                            <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='(empty)'}"
-                                                                       Foreground="{DynamicResource CinderForegroundBrush}" />
-                                                        </Button>
-                                                        <Button Background="Transparent"
-                                                                BorderThickness="0"
-                                                                Padding="4,0"
-                                                                Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                                                                Content="×"
-                                                                ToolTip.Tip="Close tab"
-                                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CloseBufferCommand}"
-                                                                CommandParameter="{Binding}" />
-                                                    </StackPanel>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </Border>
-                                <ContentControl Grid.Row="1"
-                                                Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex}">
-                                    <ContentControl.ContentTemplate>
-                                        <DataTemplate DataType="vm:HexViewModel">
-                                            <views:HexView />
-                                        </DataTemplate>
-                                    </ContentControl.ContentTemplate>
-                                </ContentControl>
-                            </Grid>
-                            <TextBlock IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='gallery'}"
-                                       Text="Image gallery — Phase 4 deliverable. Drop a folder to scan."
-                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            <TextBlock IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='timeline'}"
-                                       Text="Super-timeline — Phase 6 deliverable."
-                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            <TextBlock IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='reports'}"
-                                       Text="Report builder — Phase 8 deliverable."
-                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Panel>
-                    </DataTemplate>
-                </TabControl.ContentTemplate>
-            </TabControl>
+            <!-- Center: tool content -->
+            <Border Grid.Column="2" Background="{DynamicResource CinderBackground0Brush}">
+                <Grid RowDefinitions="Auto,*">
+                    <!-- Tool header strip -->
+                    <Border Grid.Row="0"
+                            Background="{DynamicResource CinderBackground1Brush}"
+                            BorderBrush="{DynamicResource CinderBorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="18,10"
+                            IsVisible="{Binding Workspace.SelectedTool, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <StackPanel Orientation="Horizontal" Spacing="14">
+                            <TextBlock Text="{Binding Workspace.SelectedTool.Icon}"
+                                       FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                       FontSize="{DynamicResource CinderFontSizeMd}"
+                                       Foreground="{DynamicResource CinderAccentBrush}"
+                                       VerticalAlignment="Center" />
+                            <StackPanel>
+                                <TextBlock Text="{Binding Workspace.SelectedTool.Title}"
+                                           FontWeight="600"
+                                           FontSize="{DynamicResource CinderFontSizeMd}" />
+                                <TextBlock Text="{Binding Workspace.SelectedTool.Subtitle}"
+                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                            </StackPanel>
+                            <Border Padding="6,2" CornerRadius="3"
+                                    Background="{DynamicResource CinderBackground2Brush}"
+                                    IsVisible="{Binding Workspace.SelectedTool.Phase, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Workspace.SelectedTool.Phase, StringFormat='Phase {0}'}"
+                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Tool content selector -->
+                    <ContentControl Grid.Row="1"
+                                    Content="{Binding Workspace.SelectedTool}"
+                                    ContentTemplate="{StaticResource ToolContentTemplate}" />
+                </Grid>
+            </Border>
 
             <GridSplitter Grid.Column="3" Background="{DynamicResource CinderBorderBrush}" />
 
+            <!-- Right: properties (still hex-focused) -->
             <Border Grid.Column="4" Background="{DynamicResource CinderBackground1Brush}">
-                <DockPanel Margin="14">
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="PROPERTIES"
-                               FontWeight="600"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               Margin="0,0,0,12" />
-                    <StackPanel Spacing="16">
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="Offset"
-                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                            <SelectableTextBlock FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                                 FontSize="{DynamicResource CinderFontSizeMd}">
-                                <Run Text="{Binding Hex.CaretOffsetHex}"
-                                     Foreground="{DynamicResource CinderForegroundBrush}" />
-                                <Run Text="  " />
-                                <Run Text="{Binding Hex.CaretOffsetDec}"
-                                     Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                            </SelectableTextBlock>
-                        </StackPanel>
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="Byte at caret"
-                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                            <SelectableTextBlock FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                                 FontSize="{DynamicResource CinderFontSizeSm}"
-                                                 TextWrapping="Wrap">
-                                <Run Text="{Binding Hex.CaretByteHex}"
-                                     Foreground="{DynamicResource CinderForegroundBrush}" />
-                                <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                                <Run Text="{Binding Hex.CaretByteDec}"
-                                     Foreground="{DynamicResource CinderForegroundBrush}" />
-                                <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                                <Run Text="{Binding Hex.CaretByteAscii}"
-                                     Foreground="{DynamicResource CinderForegroundBrush}" />
-                                <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                                <Run Text="{Binding Hex.CaretByteBinary}"
-                                     Foreground="{DynamicResource CinderForegroundBrush}" />
-                            </SelectableTextBlock>
-                            <TextBlock Text="hex · dec · ascii · binary"
-                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                        </StackPanel>
-                        <StackPanel Spacing="4"
-                                    IsVisible="{Binding Hex.DetectedFormat, Converter={x:Static ObjectConverters.IsNotNull}}">
-                            <TextBlock Text="Detected format"
-                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                            <TextBlock Text="{Binding Hex.DetectedFormat}"
-                                       Foreground="{DynamicResource CinderForegroundBrush}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                        <StackPanel Spacing="4"
-                                    IsVisible="{Binding Hex.QuickHashSha256, Converter={x:Static ObjectConverters.IsNotNull}}">
-                            <TextBlock Text="Quick hash (first 4 MiB) — click to copy"
-                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                            <Button Background="Transparent"
-                                    BorderThickness="0"
-                                    HorizontalAlignment="Stretch"
-                                    HorizontalContentAlignment="Left"
-                                    Padding="0"
-                                    Command="{Binding Hex.CopyQuickHashCommand}"
-                                    ToolTip.Tip="Click to copy full SHA-256 to clipboard">
-                                <TextBlock Text="{Binding Hex.QuickHashSha256}"
-                                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <DockPanel Margin="14">
+                        <TextBlock DockPanel.Dock="Top"
+                                   Text="PROPERTIES"
+                                   FontWeight="600"
+                                   FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                   Margin="0,0,0,12" />
+                        <StackPanel Spacing="16">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Offset"
                                            FontSize="{DynamicResource CinderFontSizeXs}"
-                                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                            </Button>
+                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                <SelectableTextBlock FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                     FontSize="{DynamicResource CinderFontSizeMd}">
+                                    <Run Text="{Binding Hex.CaretOffsetHex}"
+                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    <Run Text="  " />
+                                    <Run Text="{Binding Hex.CaretOffsetDec}"
+                                         Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                </SelectableTextBlock>
+                            </StackPanel>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Byte at caret"
+                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                <SelectableTextBlock FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                     FontSize="{DynamicResource CinderFontSizeSm}"
+                                                     TextWrapping="Wrap">
+                                    <Run Text="{Binding Hex.CaretByteHex}"
+                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                    <Run Text="{Binding Hex.CaretByteDec}"
+                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                    <Run Text="{Binding Hex.CaretByteAscii}"
+                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    <Run Text=" · " Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                    <Run Text="{Binding Hex.CaretByteBinary}"
+                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                                </SelectableTextBlock>
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Inspector"
+                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                <ItemsControl ItemsSource="{Binding Hex.InspectorRows}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="vm:InspectorRow">
+                                            <Grid ColumnDefinitions="92,*" Margin="0,2,0,2">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Label}"
+                                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                                <SelectableTextBlock Grid.Column="1"
+                                                                     Text="{Binding Value}"
+                                                                     FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                                     FontSize="{DynamicResource CinderFontSizeXs}"
+                                                                     Foreground="{DynamicResource CinderForegroundBrush}"
+                                                                     TextWrapping="Wrap" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                            <StackPanel Spacing="6"
+                                        IsVisible="{Binding Hex.Bookmarks.Count}">
+                                <TextBlock Text="Bookmarks (Ctrl+D)"
+                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                <ItemsControl ItemsSource="{Binding Hex.Bookmarks}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Background="Transparent"
+                                                    BorderThickness="0"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Padding="2,3"
+                                                    Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex.GotoBookmarkCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <TextBlock Text="{Binding Label}"
+                                                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                                           Foreground="{DynamicResource CinderForegroundBrush}" />
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </StackPanel>
-
-                        <!-- Inspector: caret bytes interpreted as common types -->
-                        <StackPanel Spacing="6">
-                            <TextBlock Text="Inspector"
-                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                            <ItemsControl ItemsSource="{Binding Hex.InspectorRows}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate DataType="vm:InspectorRow">
-                                        <Grid ColumnDefinitions="92,*" Margin="0,2,0,2">
-                                            <TextBlock Grid.Column="0"
-                                                       Text="{Binding Label}"
-                                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                                            <SelectableTextBlock Grid.Column="1"
-                                                                 Text="{Binding Value}"
-                                                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                                                 FontSize="{DynamicResource CinderFontSizeXs}"
-                                                                 Foreground="{DynamicResource CinderForegroundBrush}"
-                                                                 TextWrapping="Wrap" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-
-                        <!-- Bookmarks list -->
-                        <StackPanel Spacing="6"
-                                    IsVisible="{Binding Hex.Bookmarks.Count}">
-                            <TextBlock Text="Bookmarks (Ctrl+D)"
-                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                            <ItemsControl ItemsSource="{Binding Hex.Bookmarks}">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Button Background="Transparent"
-                                                BorderThickness="0"
-                                                HorizontalAlignment="Stretch"
-                                                HorizontalContentAlignment="Left"
-                                                Padding="2,3"
-                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex.GotoBookmarkCommand}"
-                                                CommandParameter="{Binding}">
-                                            <TextBlock Text="{Binding Label}"
-                                                       FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                                       FontSize="{DynamicResource CinderFontSizeXs}"
-                                                       Foreground="{DynamicResource CinderForegroundBrush}" />
-                                        </Button>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
-                    </StackPanel>
-                </DockPanel>
+                    </DockPanel>
+                </ScrollViewer>
             </Border>
         </Grid>
 
