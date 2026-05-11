@@ -62,7 +62,9 @@ When defense counsel can audit the tool that produced your evidence, methodology
 winget install AffluentLabs.Cinder
 ```
 
-Or download the signed `.msix` from [Releases](https://github.com/AffluentMods/cinder/releases).
+Or download the signed `.exe` from [Releases](https://github.com/AffluentMods/cinder/releases).
+
+Windows builds of Cinder are code-signed by [SignPath.io](https://signpath.io), with a certificate issued by the [SignPath Foundation](https://signpath.org)'s free signing program for open-source projects. The certificate's name and authority are visible in the executable's digital signature properties on every signed release. If you encounter an unsigned Windows build labelled as a Cinder release, treat it as untrusted.
 
 ### Linux
 
@@ -128,6 +130,12 @@ Looking for a place to start? Issues tagged [`good first issue`](https://github.
 ## Telemetry
 
 **None.** Cinder does not phone home. Ever. No analytics, no crash reporting that uploads to a server, no update pings beyond a public GitHub API call you can disable.
+
+## Code signing
+
+Windows builds of Cinder are signed under the [SignPath Foundation](https://signpath.org)'s free code-signing program for open-source projects. The signing certificate is issued in the SignPath Foundation's name, with Cinder as the subject; the actual signing is performed by [SignPath.io](https://signpath.io) as part of the release pipeline. The SignPath Foundation may revoke the certificate at any time for violations of its [Code of Conduct](https://signpath.org/policies/code-of-conduct).
+
+Releases prior to SignPath Foundation approval are distributed unsigned and clearly marked as such in their release notes. Build provenance for every signed release is published via GitHub Actions and is independently verifiable.
 
 ## Sponsor
 

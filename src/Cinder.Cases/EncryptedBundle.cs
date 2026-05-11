@@ -40,8 +40,8 @@ public static class EncryptedBundle
             // 2. Derive key, encrypt, write framed.
             var salt = RandomNumberGenerator.GetBytes(SaltLen);
             var nonce = RandomNumberGenerator.GetBytes(NonceLen);
-            using var kdf = new Rfc2898DeriveBytes(passphrase, salt, Iterations, HashAlgorithmName.SHA256);
-            var key = kdf.GetBytes(KeyLen);
+            // SYSLIB0060 — Rfc2898DeriveBytes constructors are obsolete; use Pbkdf2.
+            var key = Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, Iterations, HashAlgorithmName.SHA256, KeyLen);
 
             var plaintext = await File.ReadAllBytesAsync(zipPath, ct).ConfigureAwait(false);
             var ciphertext = new byte[plaintext.Length];
@@ -88,8 +88,7 @@ public static class EncryptedBundle
         var ciphertext = new byte[bodyLen]; await input.ReadExactlyAsync(ciphertext, ct).ConfigureAwait(false);
         var tag = new byte[TagLen]; await input.ReadExactlyAsync(tag, ct).ConfigureAwait(false);
 
-        using var kdf = new Rfc2898DeriveBytes(passphrase, salt, Iterations, HashAlgorithmName.SHA256);
-        var key = kdf.GetBytes(KeyLen);
+        var key = Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, Iterations, HashAlgorithmName.SHA256, KeyLen);
         var plaintext = new byte[ciphertext.Length];
         using (var aes = new AesGcm(key, TagLen))
         {

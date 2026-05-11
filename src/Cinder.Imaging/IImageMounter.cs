@@ -16,10 +16,19 @@ public sealed record MountedImage(
 
 public static class ImageMounterFactory
 {
-    public static IImageMounter ForCurrentPlatform(string parsersDir, string? mountRoot = null) =>
-        OperatingSystem.IsWindows()
-            ? new WindowsImageMounter(parsersDir)
-            : new LinuxLoopMounter(mountRoot ?? "/mnt/cinder");
+    public static IImageMounter ForCurrentPlatform(string parsersDir, string? mountRoot = null)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new WindowsImageMounter(parsersDir);
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            return new LinuxLoopMounter(mountRoot ?? "/mnt/cinder");
+        }
+        throw new PlatformNotSupportedException(
+            $"Image mounting is not yet implemented for {RuntimeInformation.OSDescription}.");
+    }
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("linux")]

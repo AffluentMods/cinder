@@ -18,6 +18,13 @@
     <PackageVersion Include="FluentAvaloniaUI" Version="2.1.0" />
     <PackageVersion Include="Avalonia.Controls.DataGrid" Version="11.2.1" />
 
+    <!--
+      Avalonia.FreeDesktop transitively pulls Tmds.DBus.Protocol 0.20.0 which
+      has a known high-severity vulnerability (GHSA-xrw6-gwf8-vvr9). We pin a
+      patched version explicitly so Release builds don't fail NU1903.
+    -->
+    <PackageVersion Include="Tmds.DBus.Protocol" Version="0.21.3" />
+
     <!-- MVVM -->
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
 

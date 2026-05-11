@@ -58,10 +58,11 @@ public sealed class OllamaProvider : IAiProvider
         resp.EnsureSuccessStatusCode();
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var reader = new StreamReader(stream, Encoding.UTF8);
-        while (!reader.EndOfStream)
+        // CA2024 — read until ReadLineAsync returns null (async EOF). reader.EndOfStream
+        // forces a synchronous read and defeats the purpose of streaming.
+        while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
         {
             ct.ThrowIfCancellationRequested();
-            var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
             if (string.IsNullOrEmpty(line))
             {
                 continue;

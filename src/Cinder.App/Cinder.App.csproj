@@ -26,6 +26,12 @@
     <PackageReference Include="Serilog.Sinks.Async" />
     <PackageReference Include="Serilog.Sinks.Console" />
     <PackageReference Include="Avalonia.Diagnostics" Condition="'$(Configuration)' == 'Debug'" />
+
+    <!--
+      Pin a patched Tmds.DBus.Protocol over the vulnerable 0.20.0 that
+      Avalonia.FreeDesktop ships transitively. See Directory.Packages.props.
+    -->
+    <PackageReference Include="Tmds.DBus.Protocol" />
   </ItemGroup>
 
   <ItemGroup>

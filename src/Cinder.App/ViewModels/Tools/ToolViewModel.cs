@@ -39,7 +39,7 @@ public abstract partial class ToolViewModel : ViewModelBase
 /// <summary>
 /// Generic "load evidence and call the sidecar" tool. Most parser tabs (registry / EVTX / etc.)
 /// inherit this. Subclasses fill in <see cref="LoadAsync"/> with the actual sidecar invocation;
-/// the view layer binds to <see cref="LoadCommand"/> and <see cref="Rows"/>.
+/// the view layer binds to the source-generated <c>LoadCommand</c> and to <see cref="Rows"/>.
 /// </summary>
 public abstract partial class SidecarToolViewModel : ToolViewModel
 {

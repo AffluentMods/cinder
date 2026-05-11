@@ -4,6 +4,7 @@ obj/
 out/
 artifacts/
 publish/
+publish-test/
 
 # Test results
 TestResults/

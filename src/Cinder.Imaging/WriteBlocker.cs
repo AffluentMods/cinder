@@ -6,10 +6,26 @@ namespace Cinder.Imaging;
 
 public static class WriteBlockerService
 {
-    public static IWriteBlocker ForCurrentPlatform() =>
-        OperatingSystem.IsWindows()
-            ? new WindowsWriteBlocker()
-            : new LinuxBlockdevWriteBlocker();
+    public static IWriteBlocker ForCurrentPlatform()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new WindowsWriteBlocker();
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            return new LinuxBlockdevWriteBlocker();
+        }
+        return new NullWriteBlocker();
+    }
+
+    /// <summary>Fallback when the host platform has no first-party write-blocker yet.</summary>
+    private sealed class NullWriteBlocker : IWriteBlocker
+    {
+        public bool IsActive => false;
+        public bool TryEngage() => false;
+        public bool TryDisengage() => true;
+    }
 }
 
 /// <summary>

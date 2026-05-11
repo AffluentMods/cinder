@@ -12,10 +12,24 @@ namespace Cinder.Imaging;
 /// </summary>
 public static class ShadowCopyService
 {
-    public static IShadowCopyEnumerator ForCurrentPlatform() =>
-        OperatingSystem.IsWindows()
-            ? new VssEnumerator()
-            : new LinuxSnapshotEnumerator();
+    public static IShadowCopyEnumerator ForCurrentPlatform()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new VssEnumerator();
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            return new LinuxSnapshotEnumerator();
+        }
+        return new NullShadowCopyEnumerator();
+    }
+
+    /// <summary>Fallback for platforms with no snapshot story yet (e.g. macOS).</summary>
+    private sealed class NullShadowCopyEnumerator : IShadowCopyEnumerator
+    {
+        public IReadOnlyList<ShadowCopy> Enumerate() => [];
+    }
 }
 
 [SupportedOSPlatform("windows")]

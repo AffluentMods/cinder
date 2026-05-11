@@ -1,9 +1,16 @@
 name: Release
 
+# Triggered by a semver tag (v1.2.3) or manually from the Actions tab.
 on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to publish (without leading v, e.g. 0.1.0)."
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,30 +19,74 @@ permissions:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
 
 jobs:
+
+  # =========================================================================
+  # WINDOWS — produces a self-contained single-file .exe.
+  # SignPath signing engages automatically once the repo variable
+  # SIGNPATH_ENABLED is set to "true" and SIGNPATH_API_TOKEN is in secrets.
+  # Until then, the unsigned artifact is uploaded and shipped as-is.
+  # =========================================================================
   build-windows:
     name: Build Windows
     runs-on: windows-latest
+    outputs:
+      artifact-path: ${{ steps.publish.outputs.path }}
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: true
-      - uses: actions/setup-dotnet@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
-      - name: Publish self-contained
+      - name: Resolve version
+        id: version
+        shell: bash
         run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            v="${{ inputs.version }}"
+          else
+            v="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Building version $v"
+
+      - name: Publish self-contained
+        id: publish
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
           dotnet publish src/Cinder.App `
             --configuration Release `
             --runtime win-x64 `
             --self-contained `
             -p:PublishSingleFile=true `
-            -p:Version=${{ github.ref_name }} `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:Version=$version `
             -o publish/win-x64
+          "path=publish/win-x64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - name: Upload unsigned artifact
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinder-windows-unsigned
+          path: publish/win-x64/
+          if-no-files-found: error
+
+      # ------------------------------------------------------------------
+      # SignPath integration — runs only when the repo variable
+      # SIGNPATH_ENABLED is exactly "true" (set under Settings → Variables).
+      # Until then the workflow happily produces an unsigned build.
+      # ------------------------------------------------------------------
       - name: Submit to SignPath
+        id: signpath
+        if: vars.SIGNPATH_ENABLED == 'true'
         uses: signpath/github-action-submit-signing-request@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -46,14 +97,19 @@ jobs:
           github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
           wait-for-completion: true
           output-artifact-directory: publish/win-x64-signed
-        # Note: Wire this up after SignPath approves your OSS application.
 
-      - name: Upload Windows artifact
+      - name: Upload signed artifact
+        if: vars.SIGNPATH_ENABLED == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: cinder-windows
-          path: publish/win-x64/
+          name: cinder-windows-signed
+          path: publish/win-x64-signed/
+          if-no-files-found: error
 
+  # =========================================================================
+  # LINUX — produces a self-contained binary. AppImage / .deb / .rpm
+  # packaging will be wired in once the recipes under installer/linux/ land.
+  # =========================================================================
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
@@ -61,9 +117,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
-      - uses: actions/setup-dotnet@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            v="${{ inputs.version }}"
+          else
+            v="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Publish self-contained
         run: |
@@ -72,34 +140,31 @@ jobs:
             --runtime linux-x64 \
             --self-contained \
             -p:PublishSingleFile=true \
-            -p:Version=${{ github.ref_name }} \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:Version=${{ steps.version.outputs.version }} \
             -o publish/linux-x64
 
-      - name: Build AppImage
+      - name: Tar the Linux build
         run: |
-          # placeholder — wire up appimagetool once installer/linux/appimage/ has the recipe
-          echo "TODO: build AppImage"
-
-      - name: GPG sign Linux artifacts
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          # gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
-          #   --output Cinder.AppImage.sig --detach-sign Cinder.AppImage
-          echo "TODO: enable once AppImage build lands"
+          cd publish
+          tar czf cinder-linux-x64.tar.gz -C linux-x64 .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: cinder-linux
-          path: publish/linux-x64/
+          path: publish/cinder-linux-x64.tar.gz
+          if-no-files-found: error
 
+  # =========================================================================
+  # RELEASE — collects all artifacts and publishes a GitHub Release.
+  # Auto-generated notes come from PR titles since the previous tag.
+  # =========================================================================
   release:
     name: Create GitHub Release
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -108,9 +173,57 @@ jobs:
         with:
           path: artifacts
 
+      - name: Compute checksums
+        run: |
+          mkdir -p release-files
+          # Flatten every artifact into release-files/, prefixed with origin.
+          find artifacts -type f \
+            -not -name '*.pdb' \
+            -not -name '*.xml' \
+            | while read f; do
+            cp "$f" "release-files/$(basename "$f")"
+          done
+          cd release-files
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/**/*
           fail_on_unmatched_files: false
+          files: release-files/*
+          body: |
+            ## Cinder ${{ github.ref_name }}
+
+            Open-source forensics toolkit by Affluent Labs.
+
+            ### Downloads
+
+            - **Windows** — `Cinder.exe` (self-contained, single-file build).
+              Windows builds are code-signed under the [SignPath
+              Foundation](https://signpath.org)'s free signing program for
+              open-source projects (active once SignPath approval lands).
+            - **Linux** — `cinder-linux-x64.tar.gz` (self-contained, single-file
+              binary; extract and run).
+
+            ### Verification
+
+            `SHA256SUMS.txt` contains hashes for every artifact in this release.
+
+            ```
+            sha256sum -c SHA256SUMS.txt
+            ```
+
+            ### Permissions
+
+            Forensic tools need raw disk access.
+
+            - Windows: launch with administrator privileges.
+            - Linux: `sudo cinder`, or grant once with
+              `sudo setcap cap_sys_rawio,cap_sys_admin+ep $(which cinder)`.
+
+            ### Status
+
+            See [ROADMAP.md](https://github.com/AffluentMods/cinder/blob/main/ROADMAP.md)
+            for what's shipping when.
