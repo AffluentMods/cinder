@@ -285,12 +285,14 @@ public sealed class HexViewer : Control, ILogicalScrollable
         }
         x += bytesPerRow * _glyphAdvance + 12;
 
-        // UTF-16LE column (one glyph per 2 bytes)
+        // UTF-16LE column (one glyph per 2 bytes). Random binary will land all over CJK; only
+        // emit characters that are actually informative for a forensic examiner — basic Latin
+        // printable + Latin-1 supplement printable. Everything else becomes '·'.
         var utfX = x;
         for (int i = 0; i + 1 < row.Length; i += 2)
         {
             var ch = (char)(row[i] | (row[i + 1] << 8));
-            var glyph = char.IsControl(ch) || ch > 0xFFFD ? '.' : ch;
+            var glyph = IsUsefulUtf16Char(ch) ? ch : '·';
             DrawText(context, glyph.ToString(), new Point(utfX + i * _glyphAdvance / 2, y), BrushMuted);
         }
     }
@@ -351,6 +353,12 @@ public sealed class HexViewer : Control, ILogicalScrollable
             _rowHeight);
         context.FillRectangle(brush, rect);
     }
+
+    private static bool IsUsefulUtf16Char(char c) =>
+        c is >= (char)0x20 and <= (char)0x7E       // basic Latin printable
+          or >= (char)0xA1 and <= (char)0xFF       // Latin-1 supplement
+          or >= (char)0x100 and <= (char)0x17F     // Latin Extended-A
+          or >= (char)0x180 and <= (char)0x24F;    // Latin Extended-B
 
     private bool IsBookmarked(long offset)
     {

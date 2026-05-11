@@ -31,7 +31,7 @@ public static class Inspector
     {
         if (seconds is < -62135596800 or > 253402300799)
         {
-            return "out of range";
+            return "—";
         }
         try
         {
@@ -39,7 +39,7 @@ public static class Inspector
         }
         catch
         {
-            return "out of range";
+            return "—";
         }
     }
 
@@ -48,7 +48,7 @@ public static class Inspector
         // Windows FILETIME: 100-ns intervals since 1601-01-01 UTC.
         if (ft <= 0 || ft > 2650467744000000000L) // ~year 9999
         {
-            return "out of range";
+            return "—";
         }
         try
         {
@@ -56,7 +56,7 @@ public static class Inspector
         }
         catch
         {
-            return "out of range";
+            return "—";
         }
     }
 }

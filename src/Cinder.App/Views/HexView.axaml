@@ -6,40 +6,47 @@
              x:DataType="vm:HexViewModel">
     <Grid RowDefinitions="Auto,*">
 
-        <!-- Header strip: filename + format + signature mismatch + quick hash -->
+        <!-- Header strip: filename + format chip + sig-mismatch badge / SHA on primary line,
+             DetectedRouting hint demoted to a smaller secondary line below. -->
         <Border Grid.Row="0"
                 Background="{DynamicResource CinderBackground1Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="14,10">
-            <StackPanel Orientation="Horizontal" Spacing="18">
-                <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='No file open'}"
-                           FontWeight="500"
-                           Foreground="{DynamicResource CinderForegroundBrush}"
-                           VerticalAlignment="Center" />
-                <Border Padding="6,2"
-                        CornerRadius="3"
-                        Background="{DynamicResource CinderBackground2Brush}"
-                        IsVisible="{Binding DetectedFormat, Converter={x:Static ObjectConverters.IsNotNull}}">
-                    <TextBlock Text="{Binding DetectedFormat}"
+                Padding="14,8">
+            <StackPanel Spacing="3">
+                <!-- Primary line -->
+                <StackPanel Orientation="Horizontal" Spacing="14">
+                    <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='No file open'}"
+                               FontWeight="500"
+                               Foreground="{DynamicResource CinderForegroundBrush}"
+                               VerticalAlignment="Center" />
+                    <Border Padding="6,2"
+                            CornerRadius="3"
+                            Background="{DynamicResource CinderBackground2Brush}"
+                            VerticalAlignment="Center"
+                            IsVisible="{Binding DetectedFormat, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <TextBlock Text="{Binding DetectedFormat}"
+                                   FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    </Border>
+                    <TextBlock Text="{Binding DetectedFormatBadge}"
+                               Foreground="{DynamicResource CinderWarnBrush}"
+                               VerticalAlignment="Center"
                                FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                </Border>
-                <TextBlock Text="{Binding DetectedFormatBadge}"
-                           Foreground="{DynamicResource CinderWarnBrush}"
-                           VerticalAlignment="Center"
-                           IsVisible="{Binding DetectedFormatBadge, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                               IsVisible="{Binding DetectedFormatBadge, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    <TextBlock Text="{Binding QuickHashSha256, StringFormat='SHA-256 {0}'}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               VerticalAlignment="Center"
+                               FontFamily="{DynamicResource CinderFontFamilyMono}"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               IsVisible="{Binding QuickHashSha256, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+                <!-- Secondary line: routing hint, demoted -->
                 <TextBlock Text="{Binding DetectedRouting}"
-                           Foreground="{DynamicResource CinderAccentBrush}"
-                           VerticalAlignment="Center"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                           FontSize="10"
+                           LetterSpacing="0.2"
                            IsVisible="{Binding DetectedRouting, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                <TextBlock Text="{Binding QuickHashSha256, StringFormat='SHA-256 {0}'}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                           VerticalAlignment="Center"
-                           FontFamily="{DynamicResource CinderFontFamilyMono}"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           IsVisible="{Binding QuickHashSha256, Converter={x:Static ObjectConverters.IsNotNull}}" />
             </StackPanel>
         </Border>
 

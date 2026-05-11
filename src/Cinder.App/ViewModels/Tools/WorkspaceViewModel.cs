@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -93,10 +94,43 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
             },
         ];
 
+        // Group each section by Phase (ascending). Tools with no phase fall to the bottom,
+        // preserving their original declaration order within each phase bucket. Hex stays at the
+        // top of Examine because it's Phase 1.
+        foreach (var section in Sections)
+        {
+            SortByPhase(section.Tools);
+        }
+
         // Hex selected by default.
         SelectedTool = Sections[0].Tools[0];
         ApplySelection(SelectedTool);
     }
+
+    private static void SortByPhase(ObservableCollection<ToolViewModel> tools)
+    {
+        // Stable sort: pair each tool with its original index, sort by (phase, index), then rewrite.
+        var ordered = tools
+            .Select((tool, index) => (tool, index, phase: ParsePhase(tool.Phase)))
+            .OrderBy(t => t.phase)
+            .ThenBy(t => t.index)
+            .Select(t => t.tool)
+            .ToList();
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var currentIndex = tools.IndexOf(ordered[i]);
+            if (currentIndex != i)
+            {
+                tools.Move(currentIndex, i);
+            }
+        }
+    }
+
+    private static int ParsePhase(string phase) =>
+        int.TryParse(phase, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+            ? n
+            : int.MaxValue;
 
     partial void OnSelectedToolChanged(ToolViewModel? value) => ApplySelection(value);
 
