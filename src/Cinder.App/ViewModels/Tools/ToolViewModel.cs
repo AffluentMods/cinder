@@ -45,9 +45,84 @@ public abstract partial class ToolViewModel : ViewModelBase
     /// <summary>Whether the "?" button should appear in the tool header.</summary>
     public bool HasHelp => !string.IsNullOrWhiteSpace(HelpMarkdown);
 
+    private IReadOnlyList<HelpBlock>? _helpBlocks;
+
+    /// <summary>
+    /// <see cref="HelpMarkdown"/> parsed into a list of typed blocks the view can render with a
+    /// data-template per Kind. Parsing happens once and is cached. Moving the parser out of
+    /// code-behind into the view-model means the help body is purely binding-driven (no
+    /// fragile FindControl / Application.Current.Resources lookups).
+    /// </summary>
+    public IReadOnlyList<HelpBlock> HelpBlocks => _helpBlocks ??= ParseHelp(HelpMarkdown);
+
     [ObservableProperty]
     private bool _isSelected;
+
+    private static IReadOnlyList<HelpBlock> ParseHelp(string source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return Array.Empty<HelpBlock>();
+        }
+
+        var blocks = new List<HelpBlock>();
+        var paragraph = new List<string>();
+
+        void Flush()
+        {
+            if (paragraph.Count == 0)
+            {
+                return;
+            }
+            blocks.Add(new HelpBlock(HelpBlockKind.Paragraph,
+                string.Join(" ", paragraph.Select(l => l.TrimEnd()))));
+            paragraph.Clear();
+        }
+
+        foreach (var raw in source.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = raw.TrimEnd();
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                Flush();
+                continue;
+            }
+            if (line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                Flush();
+                blocks.Add(new HelpBlock(HelpBlockKind.Heading, line[3..].Trim().ToUpperInvariant()));
+                continue;
+            }
+            if (line.StartsWith("- ", StringComparison.Ordinal))
+            {
+                Flush();
+                blocks.Add(new HelpBlock(HelpBlockKind.Bullet, line[2..].Trim(), Marker: "•"));
+                continue;
+            }
+            var dot = line.IndexOf(". ", StringComparison.Ordinal);
+            if (dot is > 0 and < 4 && int.TryParse(line[..dot], out _))
+            {
+                Flush();
+                blocks.Add(new HelpBlock(HelpBlockKind.Bullet, line[(dot + 2)..].Trim(), Marker: line[..dot] + "."));
+                continue;
+            }
+            paragraph.Add(line);
+        }
+        Flush();
+
+        return blocks;
+    }
 }
+
+/// <summary>One renderable block in a tool's help body.</summary>
+public sealed record HelpBlock(HelpBlockKind Kind, string Text, string Marker = "")
+{
+    public bool IsHeading   => Kind == HelpBlockKind.Heading;
+    public bool IsParagraph => Kind == HelpBlockKind.Paragraph;
+    public bool IsBullet    => Kind == HelpBlockKind.Bullet;
+}
+
+public enum HelpBlockKind { Heading, Paragraph, Bullet }
 
 /// <summary>
 /// Generic "load evidence and call the sidecar" tool. Most parser tabs (registry / EVTX / etc.)

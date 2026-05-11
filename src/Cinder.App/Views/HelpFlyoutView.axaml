@@ -1,14 +1,16 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Cinder.App.ViewModels"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.HelpFlyoutView"
              x:DataType="vm:MainWindowViewModel">
     <!--
-        Help flyout. Sits as a Grid.RowSpan="3" overlay child of the MainWindow. The host
-        toggles visibility through MainWindowViewModel.IsHelpOpen.
+        Help flyout. Bound directly to MainWindowViewModel.Workspace.SelectedTool.HelpBlocks
+        via an ItemsControl — no code-behind parsing or resource lookups. Each block exposes
+        IsHeading / IsParagraph / IsBullet booleans so we toggle child visibility.
     -->
     <Grid Background="#CC000000">
-        <!-- Click the backdrop to dismiss -->
+        <!-- Click the backdrop to dismiss. -->
         <Button Background="Transparent"
                 BorderThickness="0"
                 Command="{Binding CloseHelpCommand}"
@@ -24,6 +26,7 @@
                 HorizontalAlignment="Center" VerticalAlignment="Center"
                 Margin="24">
             <Grid RowDefinitions="Auto,*,Auto">
+
                 <!-- Header -->
                 <Border Grid.Row="0" Padding="22,16"
                         BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
@@ -65,12 +68,51 @@
                     </Grid>
                 </Border>
 
-                <!-- Body (filled in code-behind from HelpMarkdown) -->
+                <!-- Body -->
                 <ScrollViewer Grid.Row="1"
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
                               Padding="22,16">
-                    <StackPanel x:Name="HelpBody" Spacing="10" />
+                    <ItemsControl ItemsSource="{Binding Workspace.SelectedTool.HelpBlocks}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="tools:HelpBlock">
+                                <Panel>
+                                    <!-- Heading -->
+                                    <TextBlock Text="{Binding Text}"
+                                               Classes="section"
+                                               Foreground="{DynamicResource CinderAccentBrush}"
+                                               Margin="0,10,0,2"
+                                               IsVisible="{Binding IsHeading}" />
+                                    <!-- Paragraph -->
+                                    <SelectableTextBlock Text="{Binding Text}"
+                                                         TextWrapping="Wrap"
+                                                         LineHeight="19"
+                                                         FontSize="{DynamicResource CinderFontSizeSm}"
+                                                         Foreground="{DynamicResource CinderForegroundBrush}"
+                                                         IsVisible="{Binding IsParagraph}" />
+                                    <!-- Bullet -->
+                                    <Grid IsVisible="{Binding IsBullet}"
+                                          ColumnDefinitions="28,*" Margin="4,1,0,1">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding Marker}"
+                                                   FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                   FontSize="{DynamicResource CinderFontSizeSm}"
+                                                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                                   VerticalAlignment="Top" />
+                                        <SelectableTextBlock Grid.Column="1"
+                                                             Text="{Binding Text}"
+                                                             TextWrapping="Wrap"
+                                                             LineHeight="19"
+                                                             FontSize="{DynamicResource CinderFontSizeSm}"
+                                                             Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    </Grid>
+                                </Panel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </ScrollViewer>
 
                 <!-- Footer -->
