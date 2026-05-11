@@ -6,16 +6,72 @@
         scrollbars, tabs, buttons, and textboxes wear the Cinder palette.
     -->
 
+    <!-- ===================== Section labels (small caps + tracking) ===================== -->
+    <Style Selector="TextBlock.section">
+        <Setter Property="FontSize" Value="{DynamicResource CinderFontSizeXs}" />
+        <Setter Property="FontWeight" Value="600" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+        <Setter Property="LetterSpacing" Value="{DynamicResource CinderLetterSpacingTracked}" />
+    </Style>
+    <Style Selector="Border.section-rule">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="Margin" Value="0,4,0,8" />
+    </Style>
+
+    <!-- ===================== Activity rail item ===================== -->
+    <Style Selector="Button.rail">
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="3,0,0,0" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Padding" Value="11,7" />
+        <Setter Property="MinHeight" Value="34" />
+    </Style>
+    <Style Selector="Button.rail:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderRailHoverBrush}" />
+    </Style>
+    <Style Selector="Button.rail.selected">
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentBrush}" />
+    </Style>
+    <Style Selector="Button.rail.selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderRailSelectedBrush}" />
+    </Style>
+
+    <!-- ===================== Status dot ===================== -->
+    <Style Selector="Ellipse.status-dot">
+        <Setter Property="Width" Value="8" />
+        <Setter Property="Height" Value="8" />
+    </Style>
+    <Style Selector="Ellipse.status-dot.ok">     <Setter Property="Fill" Value="{DynamicResource CinderOkBrush}" />    </Style>
+    <Style Selector="Ellipse.status-dot.warn">   <Setter Property="Fill" Value="{DynamicResource CinderWarnBrush}" />  </Style>
+    <Style Selector="Ellipse.status-dot.danger"> <Setter Property="Fill" Value="{DynamicResource CinderDangerBrush}" /></Style>
+    <Style Selector="Ellipse.status-dot.muted">  <Setter Property="Fill" Value="{DynamicResource CinderForegroundDisabledBrush}" /></Style>
+    <Style Selector="Ellipse.status-dot.accent"> <Setter Property="Fill" Value="{DynamicResource CinderAccentBrush}" /></Style>
+
+    <!-- ===================== Mono content ===================== -->
+    <!-- FontFeatures isn't reliably stylable in Avalonia 11.2 across all text inlines; tabular
+         numerics rely on the chosen monospace font's defaults. -->
+    <Style Selector="TextBlock.mono">
+        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+    </Style>
+    <Style Selector="SelectableTextBlock.mono">
+        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+    </Style>
+
     <!-- ===================== ScrollBar ===================== -->
     <Style Selector="ScrollBar:vertical">
         <Setter Property="Width" Value="10" />
         <Setter Property="MinWidth" Value="10" />
-        <Setter Property="Background" Value="{DynamicResource CinderBackground1Brush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
     </Style>
     <Style Selector="ScrollBar:horizontal">
         <Setter Property="Height" Value="10" />
         <Setter Property="MinHeight" Value="10" />
-        <Setter Property="Background" Value="{DynamicResource CinderBackground1Brush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
     </Style>
     <Style Selector="ScrollBar /template/ Thumb">
         <Setter Property="Background" Value="{DynamicResource CinderBorderStrongBrush}" />
@@ -24,10 +80,10 @@
         <Setter Property="MinWidth" Value="20" />
     </Style>
     <Style Selector="ScrollBar /template/ Thumb:pointerover">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderAccentDimBrush}" />
     </Style>
     <Style Selector="ScrollBar /template/ Thumb:pressed">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentHoverBrush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
     </Style>
     <Style Selector="ScrollBar /template/ RepeatButton">
         <Setter Property="Opacity" Value="0" />
@@ -45,7 +101,7 @@
         <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
     </Style>
     <Style Selector="TabControl > TabItem:pointerover /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource CinderBackground2Brush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderRailHoverBrush}" />
     </Style>
     <Style Selector="TabControl > TabItem:selected">
         <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
@@ -76,6 +132,15 @@
         <Setter Property="Background" Value="{DynamicResource CinderAccentHoverBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentHoverBrush}" />
         <Setter Property="Foreground" Value="White" />
+    </Style>
+
+    <!-- ===================== Kbd chip ===================== -->
+    <Style Selector="Border.kbd">
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="Padding" Value="5,1" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
     </Style>
 
     <!-- ===================== TextBox ===================== -->

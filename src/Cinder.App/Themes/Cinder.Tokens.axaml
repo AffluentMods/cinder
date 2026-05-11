@@ -4,8 +4,11 @@
     <!--
         Cinder design tokens — see docs/plan.md §5.
         Theme variants: Dark (default), Light. Tokens are exposed under semantic keys
-        (CinderBackground0/1/2, CinderForeground, CinderAccent, etc.) so views never
-        reference raw hex values.
+        so views never reference raw hex values.
+
+        Surface scale: Surface0 (deepest — title bar / status bar)
+                     → Surface4 (highest — popovers / dropdowns).
+        The legacy Background0/1/2 keys map onto the scale and stay for back-compat.
     -->
 
     <ResourceDictionary.ThemeDictionaries>
@@ -15,7 +18,18 @@
             <Color x:Key="CinderBackground0Color">#0E0F12</Color>
             <Color x:Key="CinderBackground1Color">#16181D</Color>
             <Color x:Key="CinderBackground2Color">#1E2128</Color>
-            <Color x:Key="CinderBorderColor">#2A2D35</Color>
+
+            <!-- Five-step elevation. 0 deepest, 4 highest. -->
+            <Color x:Key="CinderSurface0Color">#0B0C0F</Color>
+            <Color x:Key="CinderSurface1Color">#101216</Color>
+            <Color x:Key="CinderSurface2Color">#16181D</Color>
+            <Color x:Key="CinderSurface3Color">#1C1F25</Color>
+            <Color x:Key="CinderSurface4Color">#23262E</Color>
+
+            <Color x:Key="CinderRailHoverColor">#1A1D23</Color>
+            <Color x:Key="CinderRailSelectedColor">#23262E</Color>
+
+            <Color x:Key="CinderBorderColor">#2F323B</Color>
             <Color x:Key="CinderBorderStrongColor">#3A3D47</Color>
 
             <Color x:Key="CinderForegroundColor">#ECEDEE</Color>
@@ -37,6 +51,16 @@
             <Color x:Key="CinderBackground0Color">#FAFAFA</Color>
             <Color x:Key="CinderBackground1Color">#F2F3F5</Color>
             <Color x:Key="CinderBackground2Color">#E7E9ED</Color>
+
+            <Color x:Key="CinderSurface0Color">#FFFFFF</Color>
+            <Color x:Key="CinderSurface1Color">#FAFAFA</Color>
+            <Color x:Key="CinderSurface2Color">#F2F3F5</Color>
+            <Color x:Key="CinderSurface3Color">#E7E9ED</Color>
+            <Color x:Key="CinderSurface4Color">#D5D8DE</Color>
+
+            <Color x:Key="CinderRailHoverColor">#EDEEF0</Color>
+            <Color x:Key="CinderRailSelectedColor">#E0E3E8</Color>
+
             <Color x:Key="CinderBorderColor">#D5D8DE</Color>
             <Color x:Key="CinderBorderStrongColor">#B6BAC4</Color>
 
@@ -60,6 +84,16 @@
     <SolidColorBrush x:Key="CinderBackground0Brush" Color="{DynamicResource CinderBackground0Color}" />
     <SolidColorBrush x:Key="CinderBackground1Brush" Color="{DynamicResource CinderBackground1Color}" />
     <SolidColorBrush x:Key="CinderBackground2Brush" Color="{DynamicResource CinderBackground2Color}" />
+
+    <SolidColorBrush x:Key="CinderSurface0Brush" Color="{DynamicResource CinderSurface0Color}" />
+    <SolidColorBrush x:Key="CinderSurface1Brush" Color="{DynamicResource CinderSurface1Color}" />
+    <SolidColorBrush x:Key="CinderSurface2Brush" Color="{DynamicResource CinderSurface2Color}" />
+    <SolidColorBrush x:Key="CinderSurface3Brush" Color="{DynamicResource CinderSurface3Color}" />
+    <SolidColorBrush x:Key="CinderSurface4Brush" Color="{DynamicResource CinderSurface4Color}" />
+
+    <SolidColorBrush x:Key="CinderRailHoverBrush" Color="{DynamicResource CinderRailHoverColor}" />
+    <SolidColorBrush x:Key="CinderRailSelectedBrush" Color="{DynamicResource CinderRailSelectedColor}" />
+
     <SolidColorBrush x:Key="CinderBorderBrush" Color="{DynamicResource CinderBorderColor}" />
     <SolidColorBrush x:Key="CinderBorderStrongBrush" Color="{DynamicResource CinderBorderStrongColor}" />
     <SolidColorBrush x:Key="CinderForegroundBrush" Color="{DynamicResource CinderForegroundColor}" />
@@ -82,6 +116,10 @@
     <x:Double x:Key="CinderFontSizeMd">15</x:Double>
     <x:Double x:Key="CinderFontSizeLg">18</x:Double>
     <x:Double x:Key="CinderFontSizeXl">24</x:Double>
-    <x:Double x:Key="CinderFontSize2xl">32</x:Double>
+    <x:Double x:Key="CinderFontSize2xl">28</x:Double>
+    <x:Double x:Key="CinderFontSize3xl">40</x:Double>
+
+    <!-- Tracking for small-caps section labels (PROPERTIES, OFFSET, BYTE AT CARET, …). -->
+    <x:Double x:Key="CinderLetterSpacingTracked">1.4</x:Double>
 
 </ResourceDictionary>

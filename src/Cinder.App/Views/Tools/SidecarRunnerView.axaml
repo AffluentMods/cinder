@@ -4,11 +4,10 @@
              x:Class="Cinder.App.Views.Tools.SidecarRunnerView"
              x:DataType="tools:SidecarToolViewModel">
     <Grid RowDefinitions="Auto,Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+        <Border Grid.Row="0" Background="{DynamicResource CinderSurface2Brush}" Padding="14,10"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Pick evidence…"
-                        Click="OnPickEvidenceClick" />
+                <Button Classes="accent" Content="Pick evidence…" Click="OnPickEvidenceClick" />
                 <Button Content="Run"
                         Command="{Binding LoadEvidenceCommand}"
                         CommandParameter="{Binding EvidencePath}"
@@ -16,22 +15,77 @@
                 <TextBlock VerticalAlignment="Center" Margin="14,0"
                            Text="{Binding EvidencePath, FallbackValue='No evidence loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                           Classes="mono"
                            FontSize="{DynamicResource CinderFontSizeXs}" />
             </StackPanel>
         </Border>
+
         <Border Grid.Row="1" Padding="14,8" Background="{DynamicResource CinderBackground0Brush}"
                 IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
             <SelectableTextBlock Text="{Binding ErrorMessage}"
+                                 Classes="mono"
                                  Foreground="{DynamicResource CinderDangerBrush}"
                                  TextWrapping="Wrap"
-                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
                                  FontSize="{DynamicResource CinderFontSizeXs}" />
         </Border>
-        <Grid Grid.Row="2" RowDefinitions="*,Auto">
+
+        <!-- Empty state — shown until the user loads evidence -->
+        <Border Grid.Row="2" Padding="40"
+                Background="{DynamicResource CinderBackground0Brush}"
+                IsVisible="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNull}}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                        MaxWidth="540" Spacing="16">
+                <Border Width="56" Height="56" CornerRadius="8"
+                        Background="{DynamicResource CinderSurface3Brush}"
+                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                        HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding Icon}"
+                               FontFamily="{DynamicResource CinderFontFamilyMono}"
+                               FontSize="{DynamicResource CinderFontSizeXl}"
+                               Foreground="{DynamicResource CinderAccentBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="{Binding Title}"
+                           FontWeight="600"
+                           FontSize="{DynamicResource CinderFontSizeXl}"
+                           LetterSpacing="-0.4"
+                           Foreground="{DynamicResource CinderForegroundBrush}"
+                           HorizontalAlignment="Center" />
+                <TextBlock Text="{Binding EmptyStateHint}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           TextAlignment="Center" TextWrapping="Wrap"
+                           FontSize="{DynamicResource CinderFontSizeSm}" />
+                <StackPanel Spacing="6" HorizontalAlignment="Center"
+                            IsVisible="{Binding RequiredPythonPackages.Count}">
+                    <TextBlock Text="REQUIRES" Classes="section" HorizontalAlignment="Center" />
+                    <ItemsControl ItemsSource="{Binding RequiredPythonPackages}" HorizontalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel HorizontalAlignment="Center" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource CinderSurface3Brush}"
+                                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                                        CornerRadius="3" Padding="8,3" Margin="3">
+                                    <TextBlock Text="{Binding}" Classes="mono"
+                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                               Foreground="{DynamicResource CinderForegroundBrush}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+                <Button Classes="accent" Content="Pick evidence…" Click="OnPickEvidenceClick"
+                        HorizontalAlignment="Center" />
+            </StackPanel>
+        </Border>
+
+        <!-- Populated state — DataGrid + footer -->
+        <Grid Grid.Row="2" RowDefinitions="*,Auto"
+              IsVisible="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}">
             <DataGrid Grid.Row="0" ItemsSource="{Binding Rows}" AutoGenerateColumns="True" IsReadOnly="True"
                       Background="{DynamicResource CinderBackground0Brush}" />
-            <Border Grid.Row="1" Background="{DynamicResource CinderBackground1Brush}" Padding="14,4">
+            <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0" Text="{Binding StatusLine, FallbackValue='Pick evidence to begin.'}"
                                FontSize="{DynamicResource CinderFontSizeXs}"
