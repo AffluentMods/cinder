@@ -24,9 +24,10 @@
         <KeyBinding Gesture="Alt+Right" Command="{Binding Hex.NavigateForwardCommand}" />
         <KeyBinding Gesture="Ctrl+C" Command="{Binding Hex.CopySelectionAsHexCommand}" />
         <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding OpenSettingsCommand}" />
+        <KeyBinding Gesture="F1" Command="{Binding OpenHelpCommand}" />
     </Window.KeyBindings>
 
-    <Grid RowDefinitions="Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
 
         <!-- ============================ TITLE BAR ============================ -->
         <Border Grid.Row="0"
@@ -127,8 +128,84 @@
             </Grid>
         </Border>
 
+        <!-- ============================ CASE TABS ============================ -->
+        <!-- Shown only when at least one case is open. Lets the user juggle multiple
+             cases at once, like browser tabs for investigations. -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource CinderSurface1Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="14,0"
+                IsVisible="{Binding OpenCases.Count}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled">
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <ItemsControl ItemsSource="{Binding OpenCases}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="2" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:CaseSession">
+                                <Border CornerRadius="6,6,0,0"
+                                        BorderBrush="Transparent"
+                                        BorderThickness="0,0,0,2"
+                                        Margin="0,6,0,0">
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <!-- Tab itself — clicking switches active case -->
+                                        <Button Background="Transparent" BorderThickness="0"
+                                                Padding="14,8"
+                                                CornerRadius="6,6,0,0"
+                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SelectCaseCommand}"
+                                                CommandParameter="{Binding}">
+                                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <TextBlock Text="📁"
+                                                           FontSize="{DynamicResource CinderFontSizeSm}"
+                                                           Foreground="{DynamicResource CinderAccentBrush}"
+                                                           VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Name}"
+                                                           FontWeight="500"
+                                                           Foreground="{DynamicResource CinderForegroundBrush}"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+                                        <!-- Close X -->
+                                        <Button Background="Transparent" BorderThickness="0"
+                                                Padding="6,4"
+                                                Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                                Content="×"
+                                                FontSize="{DynamicResource CinderFontSizeMd}"
+                                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CloseCaseCommand}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <!-- + tab — create a new case -->
+                    <Button Background="Transparent" BorderThickness="0"
+                            Padding="12,8"
+                            Margin="6,6,0,0"
+                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                            ToolTip.Tip="Create a new case"
+                            Command="{Binding CreateCaseCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="+"
+                                       FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                       FontSize="{DynamicResource CinderFontSizeMd}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="New case"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
         <!-- ============================ BODY ============================ -->
-        <Grid Grid.Row="1" ColumnDefinitions="240,4,*,4,300">
+        <Grid Grid.Row="2" ColumnDefinitions="240,4,*,4,300">
 
             <!-- ===== Left activity rail ===== -->
             <Border Grid.Column="0" Background="{DynamicResource CinderSurface1Brush}"
@@ -192,7 +269,7 @@
                             BorderThickness="0,0,0,1"
                             Padding="24,16"
                             IsVisible="{Binding Workspace.SelectedTool, Converter={x:Static ObjectConverters.IsNotNull}}">
-                        <Grid ColumnDefinitions="Auto,*">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
                             <Border Grid.Column="0" Width="44" Height="44" CornerRadius="6"
                                     Background="{DynamicResource CinderSurface3Brush}"
                                     BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
@@ -214,6 +291,22 @@
                                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                                            TextWrapping="Wrap" />
                             </StackPanel>
+                            <!-- Contextual help: opens an "About this tool" flyout. -->
+                            <Button Grid.Column="2"
+                                    Width="36" Height="36"
+                                    Padding="0"
+                                    VerticalAlignment="Top"
+                                    Background="{DynamicResource CinderSurface3Brush}"
+                                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                                    Command="{Binding OpenHelpCommand}"
+                                    ToolTip.Tip="About this tool — what it is, when to use it, how">
+                                <TextBlock Text="?"
+                                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                           FontSize="{DynamicResource CinderFontSizeMd}"
+                                           FontWeight="600"
+                                           Foreground="{DynamicResource CinderAccentBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Button>
                         </Grid>
                     </Border>
 
@@ -324,7 +417,7 @@
         </Grid>
 
         <!-- ============================ STATUS BAR ============================ -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Background="{DynamicResource CinderSurface0Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}"
                 BorderThickness="0,1,0,0"
@@ -362,8 +455,13 @@
                            IsVisible="{Binding Hex.Buffer, Converter={x:Static ObjectConverters.IsNotNull}}" />
 
                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <Border Classes="kbd"><TextBlock Text="Ctrl+K" Classes="mono" FontSize="10"
+                    <Border Classes="kbd"><TextBlock Text="F1" Classes="mono" FontSize="10"
                                                      Foreground="{DynamicResource CinderForegroundDisabledBrush}" /></Border>
+                    <TextBlock Text="help"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                    <Border Classes="kbd" Margin="6,0,0,0"><TextBlock Text="Ctrl+K" Classes="mono" FontSize="10"
+                                                                     Foreground="{DynamicResource CinderForegroundDisabledBrush}" /></Border>
                     <TextBlock Text="commands"
                                FontSize="{DynamicResource CinderFontSizeXs}"
                                Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
@@ -377,8 +475,13 @@
         </Border>
 
         <views:CommandPaletteView Grid.Row="0"
-                                  Grid.RowSpan="3"
+                                  Grid.RowSpan="4"
                                   DataContext="{Binding Palette}"
                                   IsVisible="{Binding IsOpen}" />
+
+        <!-- Contextual help flyout. Bound directly to the MainWindowViewModel. -->
+        <views:HelpFlyoutView Grid.Row="0"
+                              Grid.RowSpan="4"
+                              IsVisible="{Binding IsHelpOpen}" />
     </Grid>
 </Window>

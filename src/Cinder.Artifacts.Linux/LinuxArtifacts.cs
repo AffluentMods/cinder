@@ -15,7 +15,7 @@ public sealed record SyslogEntry(DateTimeOffset? Timestamp, string Host, string 
     : ArtifactBase("linux.syslog", null, Timestamp, $"{Process}: {Message}");
 
 public sealed record CronEntry(string User, string Schedule, string Command, string Source)
-    : ArtifactBase("linux.cron", User, null, $"{Schedule} → {Command}");
+    : ArtifactBase("linux.cron", User, null, $"{Schedule} → {Command} ({Source})");
 
 public sealed record AtJob(string User, DateTimeOffset? Scheduled, string Command)
     : ArtifactBase("linux.at", User, Scheduled, Command);

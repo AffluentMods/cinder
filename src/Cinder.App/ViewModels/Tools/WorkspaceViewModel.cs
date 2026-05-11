@@ -16,10 +16,23 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
     [ObservableProperty]
     private ToolViewModel? _selectedTool;
 
+    /// <summary>
+    /// The Dashboard / Home tool. Kept as a typed reference so the rest of the app can update
+    /// "recent cases" and "recent evidence" on it without re-resolving through FindByKind.
+    /// </summary>
+    public DashboardTool Dashboard { get; }
+
     public WorkspaceViewModel()
     {
+        Dashboard = new DashboardTool();
+
         Sections =
         [
+            new()
+            {
+                Title = "Home",
+                Tools = [Dashboard],
+            },
             new()
             {
                 Title = "Examine",
@@ -102,8 +115,8 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
             SortByPhase(section.Tools);
         }
 
-        // Hex selected by default.
-        SelectedTool = Sections[0].Tools[0];
+        // Home / Dashboard is selected by default — beginners never land on a blank parser.
+        SelectedTool = Dashboard;
         ApplySelection(SelectedTool);
     }
 

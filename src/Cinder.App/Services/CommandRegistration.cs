@@ -144,6 +144,7 @@ public static class CommandRegistration
                     Dispatcher.UIThread.Post(() =>
                     {
                         mainVm.ActiveCaseName = c.Name;
+                        mainVm.OpenCase(c.Id, c.Name, c.Examiner, path);
                         mainVm.Announce($"Case created: {c.Name}");
                     });
                 }

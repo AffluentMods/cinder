@@ -32,6 +32,19 @@ public abstract partial class ToolViewModel : ViewModelBase
     /// <summary>Python packages a sidecar-driven tool needs in the bundled venv.</summary>
     public virtual IReadOnlyList<string> RequiredPythonPackages => Array.Empty<string>();
 
+    /// <summary>
+    /// Long-form help for the "?" affordance in the tool header. Plain text with newline
+    /// paragraphs and "## Section" headings; rendered by the help flyout into bold/regular runs.
+    /// Tools that don't override this get a placeholder.
+    /// </summary>
+    public virtual string HelpMarkdown =>
+        $"## What this is\n{Title} — {Subtitle}\n\n" +
+        "## Status\nDetailed help for this tool is not yet written. " +
+        "Check ROADMAP.md for what's planned, or visit the project's GitHub for usage notes.";
+
+    /// <summary>Whether the "?" button should appear in the tool header.</summary>
+    public bool HasHelp => !string.IsNullOrWhiteSpace(HelpMarkdown);
+
     [ObservableProperty]
     private bool _isSelected;
 }

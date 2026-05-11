@@ -1,0 +1,264 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.DashboardView"
+             x:DataType="tools:DashboardTool">
+    <!--
+        Home / Dashboard view. Reads recent cases + evidence from the bound DashboardTool,
+        and uses {Binding $parent[Window]…} to invoke commands on the MainWindowViewModel
+        for create / open actions.
+    -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="32,28,32,32" ColumnDefinitions="*,28,360" RowDefinitions="Auto,18,Auto">
+
+            <!-- ==================== HERO ==================== -->
+            <Border Grid.Row="0" Grid.ColumnSpan="3"
+                    CornerRadius="10"
+                    Background="{DynamicResource CinderSurface2Brush}"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                    Padding="28,24">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="WELCOME"
+                                   Classes="section"
+                                   Foreground="{DynamicResource CinderAccentBrush}" />
+                        <TextBlock Text="Cinder"
+                                   FontSize="{DynamicResource CinderFontSize3xl}"
+                                   FontWeight="600"
+                                   LetterSpacing="-0.8"
+                                   Foreground="{DynamicResource CinderForegroundBrush}" />
+                        <TextBlock Text="What remains tells the story."
+                                   FontSize="{DynamicResource CinderFontSizeMd}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBlock TextWrapping="Wrap"
+                                   MaxWidth="640"
+                                   Margin="0,6,0,0"
+                                   FontSize="{DynamicResource CinderFontSizeSm}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                   Text="An open-source forensics workstation. Examine evidence safely, build timelines across artifacts, and export court-ready reports with a tamper-evident chain of custody. Every tool on the left has a built-in &quot;?&quot; that explains what it does, when to use it, and how — no prior forensics background required." />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="10" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Button Classes="accent"
+                                Padding="20,10"
+                                HorizontalContentAlignment="Center"
+                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CreateCaseCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock Text="+"
+                                           FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                           FontSize="{DynamicResource CinderFontSizeMd}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="New case" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Padding="20,10"
+                                HorizontalContentAlignment="Center"
+                                Background="{DynamicResource CinderSurface3Brush}"
+                                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenFileCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock Text="📂" FontSize="{DynamicResource CinderFontSizeMd}" VerticalAlignment="Center" />
+                                <TextBlock Text="Open evidence (no case)" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ==================== LEFT COLUMN — RECENT ==================== -->
+            <StackPanel Grid.Row="2" Grid.Column="0" Spacing="22">
+
+                <!-- Recent cases -->
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="RECENT CASES" Classes="section" />
+                        <Border Classes="kbd">
+                            <TextBlock Text="{Binding RecentCases.Count}"
+                                       Classes="mono" FontSize="10"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                        </Border>
+                    </StackPanel>
+                    <Border Classes="section-rule" Margin="0,0,0,6" />
+
+                    <!-- Empty state -->
+                    <Border Padding="20,16"
+                            CornerRadius="6"
+                            Background="{DynamicResource CinderSurface1Brush}"
+                            BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                            IsVisible="{Binding RecentCases.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="No cases yet"
+                                       FontWeight="500"
+                                       Foreground="{DynamicResource CinderForegroundBrush}" />
+                            <TextBlock TextWrapping="Wrap"
+                                       FontSize="{DynamicResource CinderFontSizeSm}"
+                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                       Text="Click &quot;New case&quot; up top to start one. A case is just a named folder Cinder uses to organise evidence, parsed results, and the chain-of-custody log." />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Populated list -->
+                    <ItemsControl ItemsSource="{Binding RecentCases}"
+                                  IsVisible="{Binding RecentCases.Count}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="tools:RecentCaseRow">
+                                <Border Padding="14,10" Margin="0,0,0,6"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource CinderSurface1Brush}"
+                                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontWeight="500"
+                                                       Foreground="{DynamicResource CinderForegroundBrush}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                                <TextBlock Text="{Binding Examiner}"
+                                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                                <TextBlock Text="·"
+                                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                                <TextBlock Text="{Binding OpenedDisplay}"
+                                                           FontSize="{DynamicResource CinderFontSizeXs}"
+                                                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                                           FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="→"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- Recent evidence -->
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="RECENT EVIDENCE" Classes="section" />
+                        <Border Classes="kbd">
+                            <TextBlock Text="{Binding RecentEvidence.Count}"
+                                       Classes="mono" FontSize="10"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                        </Border>
+                    </StackPanel>
+                    <Border Classes="section-rule" Margin="0,0,0,6" />
+
+                    <Border Padding="20,16"
+                            CornerRadius="6"
+                            Background="{DynamicResource CinderSurface1Brush}"
+                            BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                            IsVisible="{Binding RecentEvidence.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="No evidence opened yet"
+                                       FontWeight="500"
+                                       Foreground="{DynamicResource CinderForegroundBrush}" />
+                            <TextBlock TextWrapping="Wrap"
+                                       FontSize="{DynamicResource CinderFontSizeSm}"
+                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                       Text="Press Ctrl+O or use &quot;Open evidence&quot; above to look at a single file without a case. Useful for a quick peek at something." />
+                        </StackPanel>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding RecentEvidence}"
+                                  IsVisible="{Binding RecentEvidence.Count}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="tools:RecentEvidenceRow">
+                                <Border Padding="14,10" Margin="0,0,0,6"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource CinderSurface1Brush}"
+                                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding FileName}"
+                                                   FontWeight="500"
+                                                   Classes="mono"
+                                                   Foreground="{DynamicResource CinderForegroundBrush}" />
+                                        <TextBlock Text="{Binding Path}"
+                                                   FontSize="{DynamicResource CinderFontSizeXs}"
+                                                   Classes="mono"
+                                                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding OpenedDisplay}"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                                                   FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+            </StackPanel>
+
+            <!-- ==================== RIGHT COLUMN — GUIDE ==================== -->
+            <StackPanel Grid.Row="2" Grid.Column="2" Spacing="12">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="FIRST TIME?" Classes="section" />
+                    <Border Classes="kbd">
+                        <TextBlock Text="5 STEPS" Classes="mono" FontSize="10"
+                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                    </Border>
+                </StackPanel>
+                <Border Classes="section-rule" Margin="0,0,0,6" />
+
+                <ItemsControl ItemsSource="{Binding Guide}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="tools:GuideStep">
+                            <Border Margin="0,0,0,8" Padding="14,12"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource CinderSurface1Brush}"
+                                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1">
+                                <Grid ColumnDefinitions="32,*">
+                                    <Border Grid.Column="0" Width="24" Height="24" CornerRadius="12"
+                                            Background="{DynamicResource CinderAccentDimBrush}"
+                                            VerticalAlignment="Top">
+                                        <TextBlock Text="{Binding Number}"
+                                                   FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                                   FontSize="{DynamicResource CinderFontSizeXs}"
+                                                   FontWeight="600"
+                                                   Foreground="White"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="3">
+                                        <TextBlock Text="{Binding Title}"
+                                                   FontWeight="600"
+                                                   FontSize="{DynamicResource CinderFontSizeSm}"
+                                                   Foreground="{DynamicResource CinderForegroundBrush}" />
+                                        <TextBlock Text="{Binding Body}"
+                                                   FontSize="{DynamicResource CinderFontSizeXs}"
+                                                   LineHeight="17"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border Padding="14,12" CornerRadius="6"
+                        Background="{DynamicResource CinderSurface1Brush}"
+                        BorderBrush="{DynamicResource CinderAccentDimBrush}" BorderThickness="1">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="DON'T KNOW WHAT A TOOL DOES?"
+                                   Classes="section"
+                                   Foreground="{DynamicResource CinderAccentBrush}" />
+                        <TextBlock TextWrapping="Wrap"
+                                   FontSize="{DynamicResource CinderFontSizeSm}"
+                                   Foreground="{DynamicResource CinderForegroundBrush}">
+                            <Run Text="Click the " />
+                            <Run Text="?" FontWeight="700" Foreground="{DynamicResource CinderAccentBrush}" />
+                            <Run Text=" button in the top-right of any tool's header, or press " />
+                            <Run Text="F1" FontFamily="{DynamicResource CinderFontFamilyMono}" Foreground="{DynamicResource CinderAccentBrush}" />
+                            <Run Text=". You get a written explanation: what the artifact is, when an examiner uses it, and how to use Cinder's view of it." />
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

@@ -40,6 +40,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private string? _activeCaseName;
 
+    /// <summary>Whether the contextual "?" help flyout is open over the current tool.</summary>
+    [ObservableProperty]
+    private bool _isHelpOpen;
+
+    /// <summary>
+    /// All cases currently "open" in the shell (i.e. shown as tabs). The user can have several
+    /// at once — useful for comparing two laptops in the same investigation, or for keeping a
+    /// reference case open beside an active one.
+    /// </summary>
+    public ObservableCollection<CaseSession> OpenCases { get; } = new();
+
+    [ObservableProperty]
+    private CaseSession? _activeCase;
+
     public MainWindowViewModel(CommandRegistry commands)
     {
         Commands = commands ?? throw new ArgumentNullException(nameof(commands));
@@ -60,7 +74,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     /// <summary>
     /// Open a file into a fresh hex buffer (a new tab). If the same path is already open the
-    /// existing buffer is brought to focus instead.
+    /// existing buffer is brought to focus instead. Also records the path on the Dashboard's
+    /// "recent evidence" list so the user has a one-click path back to it.
     /// </summary>
     public void OpenFileInNewBuffer(string path)
     {
@@ -69,6 +84,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         if (existing is not null)
         {
             Hex = existing;
+            Workspace.Dashboard.NoteEvidenceOpened(path);
             return;
         }
 
@@ -81,6 +97,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
         slot.OpenFile(path);
         Hex = slot;
+        Workspace.Dashboard.NoteEvidenceOpened(path);
         Announce($"Opened {System.IO.Path.GetFileName(path)}");
     }
 
@@ -133,6 +150,54 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         HeaderSubtitle = string.IsNullOrEmpty(value) ? "Affluent Labs · pre-alpha" : value;
     }
 
+    partial void OnActiveCaseChanged(CaseSession? value)
+    {
+        ActiveCaseName = value?.Name;
+    }
+
+    /// <summary>
+    /// Opens (or re-activates if already open) a case in the top-of-window tab strip. Also
+    /// records the case in the Dashboard's "recent cases" list so the user gets a one-click
+    /// path back to it.
+    /// </summary>
+    public void OpenCase(Guid id, string name, string examiner, string? path)
+    {
+        var existing = OpenCases.FirstOrDefault(c => c.Id == id);
+        if (existing is null)
+        {
+            existing = new CaseSession(id, name, examiner, path, DateTimeOffset.UtcNow);
+            OpenCases.Add(existing);
+        }
+        ActiveCase = existing;
+        Workspace.Dashboard.NoteCaseOpened(id, name, examiner);
+    }
+
+    [RelayCommand]
+    private void SelectCase(CaseSession? session)
+    {
+        if (session is not null && OpenCases.Contains(session))
+        {
+            ActiveCase = session;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseCase(CaseSession? session)
+    {
+        if (session is null)
+        {
+            return;
+        }
+        var idx = OpenCases.IndexOf(session);
+        OpenCases.Remove(session);
+        if (ActiveCase == session)
+        {
+            ActiveCase = OpenCases.Count == 0
+                ? null
+                : OpenCases[Math.Max(0, Math.Min(idx, OpenCases.Count - 1))];
+        }
+    }
+
     [RelayCommand]
     private void OpenPalette() => Palette.IsOpen = true;
 
@@ -178,5 +243,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             await cmd.Invoke(ct).ConfigureAwait(false);
         }
     }
+
+    [RelayCommand]
+    private void OpenHelp() => IsHelpOpen = true;
+
+    [RelayCommand]
+    private void CloseHelp() => IsHelpOpen = false;
 }
+
+/// <summary>
+/// One open case in the top-of-window tab strip. Holds just enough to display and switch back
+/// to — the actual case database is reopened on demand by services that need it.
+/// </summary>
+public sealed record CaseSession(
+    Guid Id,
+    string Name,
+    string Examiner,
+    string? Path,
+    DateTimeOffset OpenedUtc);
 

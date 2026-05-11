@@ -1,0 +1,100 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             x:Class="Cinder.App.Views.HelpFlyoutView"
+             x:DataType="vm:MainWindowViewModel">
+    <!--
+        Help flyout. Sits as a Grid.RowSpan="3" overlay child of the MainWindow. The host
+        toggles visibility through MainWindowViewModel.IsHelpOpen.
+    -->
+    <Grid Background="#CC000000">
+        <!-- Click the backdrop to dismiss -->
+        <Button Background="Transparent"
+                BorderThickness="0"
+                Command="{Binding CloseHelpCommand}"
+                HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+
+        <!-- The card. Click inside doesn't close. -->
+        <Border CornerRadius="8"
+                Background="{DynamicResource CinderSurface2Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                BoxShadow="0 18 40 0 #99000000"
+                MaxWidth="640" MaxHeight="700"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                Margin="24">
+            <Grid RowDefinitions="Auto,*,Auto">
+                <!-- Header -->
+                <Border Grid.Row="0" Padding="22,16"
+                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                    <Grid ColumnDefinitions="44,*,Auto">
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6"
+                                Background="{DynamicResource CinderSurface3Brush}"
+                                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Workspace.SelectedTool.Icon}"
+                                       FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                       FontSize="{DynamicResource CinderFontSizeMd}"
+                                       Foreground="{DynamicResource CinderAccentBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1" Margin="14,0,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="ABOUT" Classes="section" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding Workspace.SelectedTool.Title}"
+                                           FontSize="{DynamicResource CinderFontSizeLg}"
+                                           FontWeight="600"
+                                           LetterSpacing="-0.3"
+                                           Foreground="{DynamicResource CinderForegroundBrush}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding Workspace.SelectedTool.Subtitle}"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button Grid.Column="2"
+                                Content="×"
+                                Width="32" Height="32"
+                                FontSize="20"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                Command="{Binding CloseHelpCommand}" />
+                    </Grid>
+                </Border>
+
+                <!-- Body (filled in code-behind from HelpMarkdown) -->
+                <ScrollViewer Grid.Row="1"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="22,16">
+                    <StackPanel x:Name="HelpBody" Spacing="10" />
+                </ScrollViewer>
+
+                <!-- Footer -->
+                <Border Grid.Row="2" Padding="22,12"
+                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0"
+                        Background="{DynamicResource CinderSurface1Brush}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Border Classes="kbd">
+                                <TextBlock Text="Esc" Classes="mono" FontSize="10"
+                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            </Border>
+                            <TextBlock Text="close this help"
+                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                       Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Classes="accent"
+                                Content="Got it"
+                                Command="{Binding CloseHelpCommand}" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

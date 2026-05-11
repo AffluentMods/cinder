@@ -72,6 +72,15 @@
                 </ContentControl.ContentTemplate>
             </ContentControl>
 
+            <!-- Home / Dashboard. Bound to the typed Workspace.Dashboard so it always gets the
+                 same instance (recent-cases live there). -->
+            <ContentControl IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='dashboard'}"
+                            Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Workspace.Dashboard}">
+                <ContentControl.ContentTemplate>
+                    <DataTemplate DataType="tools:DashboardTool"><tv:DashboardView /></DataTemplate>
+                </ContentControl.ContentTemplate>
+            </ContentControl>
+
             <tv:GalleryView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='gallery'}" />
             <tv:StringsView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='strings'}" />
             <tv:DocumentsView  IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='documents'}" />
