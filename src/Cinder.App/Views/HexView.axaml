@@ -58,27 +58,42 @@
                     IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNull}}">
                 <StackPanel HorizontalAlignment="Center"
                             VerticalAlignment="Center"
-                            Spacing="14"
-                            MaxWidth="420">
+                            Spacing="16"
+                            MaxWidth="460">
                     <Border CornerRadius="8"
                             Background="{DynamicResource CinderBackground1Brush}"
+                            BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                             Padding="22"
                             HorizontalAlignment="Center">
                         <TextBlock Text="🔥" FontSize="56"
                                    Foreground="{DynamicResource CinderAccentBrush}" />
                     </Border>
-                    <TextBlock Text="Drop a file to begin"
-                               FontSize="{DynamicResource CinderFontSizeLg}"
+                    <TextBlock Text="No file open"
+                               FontSize="{DynamicResource CinderFontSizeXl}"
                                FontWeight="600"
+                               LetterSpacing="-0.4"
                                Foreground="{DynamicResource CinderForegroundBrush}"
                                HorizontalAlignment="Center" />
                     <TextBlock TextAlignment="Center"
                                TextWrapping="Wrap"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}">
-                        <Run Text="Drop a file anywhere on this pane, or press " />
-                        <Run Text="Ctrl+O" Foreground="{DynamicResource CinderAccentBrush}" />
-                        <Run Text=" to pick one. Cinder reads memory-mapped — opening a 100 GB image is instant." />
-                    </TextBlock>
+                               FontSize="{DynamicResource CinderFontSizeSm}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               Text="Pick any file to inspect its raw bytes. Cinder reads memory-mapped, so even a 100 GB disk image opens instantly. Drop a file anywhere on this pane, or click below." />
+
+                    <!-- Primary CTA: opens the file picker via the MainWindowViewModel command. -->
+                    <Button Classes="accent"
+                            HorizontalAlignment="Center"
+                            Padding="20,10"
+                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenFileCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <TextBlock Text="📂" FontSize="{DynamicResource CinderFontSizeMd}" VerticalAlignment="Center" />
+                            <TextBlock Text="Open file…" VerticalAlignment="Center" />
+                            <Border Classes="kbd" Margin="6,0,0,0">
+                                <TextBlock Text="Ctrl+O" Classes="mono" FontSize="10"
+                                           Foreground="White" />
+                            </Border>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Border>
 

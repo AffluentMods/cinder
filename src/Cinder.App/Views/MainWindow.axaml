@@ -24,6 +24,7 @@
         <KeyBinding Gesture="Alt+Right" Command="{Binding Hex.NavigateForwardCommand}" />
         <KeyBinding Gesture="Ctrl+C" Command="{Binding Hex.CopySelectionAsHexCommand}" />
         <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding OpenSettingsCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+O" Command="{Binding OpenCaseFromPickerCommand}" />
         <KeyBinding Gesture="F1" Command="{Binding OpenHelpCommand}" />
     </Window.KeyBindings>
 

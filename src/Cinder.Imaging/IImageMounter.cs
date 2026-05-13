@@ -38,50 +38,54 @@ public sealed class LinuxLoopMounter(string mountRoot) : IImageMounter
 
     public async Task<MountedImage> MountReadOnlyAsync(string imagePath, CancellationToken ct = default)
     {
-        // 1. losetup --read-only --find --show <imagePath>
-        var loop = await RunCaptureAsync("losetup", $"--read-only --find --show \"{imagePath}\"", ct).ConfigureAwait(false);
-        loop = loop.Trim();
+        // SECURITY: arguments are passed individually via ArgumentList so neither imagePath nor
+        // mountPoint can break out of their slot via shell metacharacters or embedded quotes.
+        var loop = (await RunCaptureAsync("losetup",
+            ["--read-only", "--find", "--show", imagePath], ct).ConfigureAwait(false)).Trim();
         if (string.IsNullOrEmpty(loop))
         {
             throw new InvalidOperationException("losetup did not return a loop device.");
         }
 
-        // 2. mount -o ro,noload,noexec,nosuid <loop> <mount_point>
         Directory.CreateDirectory(_mountRoot);
         var mountPoint = Path.Combine(_mountRoot, $"img-{Guid.NewGuid():N}");
         Directory.CreateDirectory(mountPoint);
-        await RunAsync("mount", $"-o ro,noload,noexec,nosuid \"{loop}\" \"{mountPoint}\"", ct).ConfigureAwait(false);
+        await RunCaptureAsync("mount",
+            ["-o", "ro,noload,noexec,nosuid", loop, mountPoint], ct).ConfigureAwait(false);
 
         return new MountedImage(imagePath, mountPoint, loop, DateTimeOffset.UtcNow);
     }
 
     public async Task UnmountAsync(MountedImage handle, CancellationToken ct = default)
     {
-        await RunAsync("umount", $"\"{handle.MountPoint}\"", ct).ConfigureAwait(false);
-        await RunAsync("losetup", $"-d \"{handle.LoopDevice}\"", ct).ConfigureAwait(false);
+        await RunCaptureAsync("umount", [handle.MountPoint], ct).ConfigureAwait(false);
+        await RunCaptureAsync("losetup", ["-d", handle.LoopDevice], ct).ConfigureAwait(false);
         try { Directory.Delete(handle.MountPoint, recursive: false); } catch { }
     }
 
-    private static async Task<string> RunCaptureAsync(string file, string args, CancellationToken ct)
+    private static async Task<string> RunCaptureAsync(string file, IReadOnlyList<string> args, CancellationToken ct)
     {
-        using var p = new System.Diagnostics.Process
+        var psi = new System.Diagnostics.ProcessStartInfo(file)
         {
-            StartInfo = new System.Diagnostics.ProcessStartInfo(file, args)
-            {
-                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
-            },
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+        using var p = new System.Diagnostics.Process { StartInfo = psi };
         p.Start();
         var stdout = await p.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
         await p.WaitForExitAsync(ct).ConfigureAwait(false);
         if (p.ExitCode != 0)
         {
-            throw new InvalidOperationException($"{file} {args}: exit {p.ExitCode}");
+            throw new InvalidOperationException($"{file}: exit {p.ExitCode}");
         }
         return stdout;
     }
-
-    private static Task RunAsync(string file, string args, CancellationToken ct) => RunCaptureAsync(file, args, ct);
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -96,21 +100,19 @@ public sealed class WindowsImageMounter(string parsersDir) : IImageMounter
     /// </summary>
     public async Task<MountedImage> MountReadOnlyAsync(string imagePath, CancellationToken ct = default)
     {
+        // SECURITY: PowerShell single-quoted strings escape via doubled single-quote (''). We
+        // sanitize the path AND pass it as an explicit -Args entry rather than interpolating
+        // it into the command string. The path itself never crosses parser boundaries.
         var ext = Path.GetExtension(imagePath).ToLowerInvariant();
         if (ext is ".vhd" or ".vhdx" or ".iso" or ".img")
         {
-            // PowerShell native path — works on Win10+ without third-party.
-            using var p = new System.Diagnostics.Process
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo("powershell.exe",
-                    $"-NoProfile -NonInteractive -Command \"Mount-DiskImage -Access ReadOnly -ImagePath '{imagePath}' | Out-Null; (Get-DiskImage -ImagePath '{imagePath}' | Get-Volume).DriveLetter\"")
-                {
-                    RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
-                },
-            };
-            p.Start();
-            var letter = (await p.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false)).Trim();
-            await p.WaitForExitAsync(ct).ConfigureAwait(false);
+            var letter = await RunPowerShellAsync(
+                command:
+                    "Mount-DiskImage -Access ReadOnly -ImagePath $args[0] | Out-Null; " +
+                    "(Get-DiskImage -ImagePath $args[0] | Get-Volume).DriveLetter",
+                args: [imagePath],
+                ct: ct).ConfigureAwait(false);
+            letter = letter.Trim();
             if (string.IsNullOrEmpty(letter))
             {
                 throw new InvalidOperationException("Mount-DiskImage returned no drive letter.");
@@ -127,15 +129,49 @@ public sealed class WindowsImageMounter(string parsersDir) : IImageMounter
             "See LIMITATIONS.md → windows-e01-mount.");
     }
 
-    public Task UnmountAsync(MountedImage handle, CancellationToken ct = default)
+    public async Task UnmountAsync(MountedImage handle, CancellationToken ct = default)
     {
         if (handle.LoopDevice.StartsWith("DiskImage:", StringComparison.Ordinal))
         {
             var path = handle.LoopDevice["DiskImage:".Length..];
-            using var p = System.Diagnostics.Process.Start("powershell.exe",
-                $"-NoProfile -NonInteractive -Command \"Dismount-DiskImage -ImagePath '{path}'\"");
-            return p?.WaitForExitAsync(ct) ?? Task.CompletedTask;
+            await RunPowerShellAsync(
+                command: "Dismount-DiskImage -ImagePath $args[0] | Out-Null",
+                args: [path],
+                ct: ct).ConfigureAwait(false);
         }
-        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs a PowerShell command. The command itself is hardcoded; the variable parts are
+    /// passed via <c>$args[]</c> so an attacker can't escape into the command stream by
+    /// crafting a malicious filename. ArgumentList handles the CLI quoting on the .NET side.
+    /// </summary>
+    private static async Task<string> RunPowerShellAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(command);
+        psi.ArgumentList.Add("--");
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+        using var p = new System.Diagnostics.Process { StartInfo = psi };
+        p.Start();
+        var stdout = await p.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
+        await p.WaitForExitAsync(ct).ConfigureAwait(false);
+        if (p.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"powershell: exit {p.ExitCode}");
+        }
+        return stdout;
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Cinder.App.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -60,6 +61,8 @@ mental model: case → evidence → parsers → timeline → report.
     /// <summary>True once at least one recent case/evidence row exists, used to swap empty states.</summary>
     public bool HasHistory => RecentCases.Count > 0 || RecentEvidence.Count > 0;
 
+    private RecentsStore? _store;
+
     public DashboardTool()
     {
         RecentCases.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasHistory));
@@ -67,21 +70,61 @@ mental model: case → evidence → parsers → timeline → report.
     }
 
     /// <summary>
-    /// Push a "just opened" case onto the top of the recent list. Caller is responsible for
-    /// persistence; this is purely UI memory.
+    /// Attach a backing <see cref="RecentsStore"/> and hydrate from disk. Subsequent
+    /// NoteCaseOpened / NoteEvidenceOpened / Clear calls persist back automatically.
     /// </summary>
-    public void NoteCaseOpened(Guid id, string name, string? examiner)
+    public void AttachStore(RecentsStore store)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        var snap = store.Load();
+        RecentCases.Clear();
+        foreach (var c in snap.Cases)
+        {
+            RecentCases.Add(new RecentCaseRow(c.Id, c.Name, c.Examiner, c.Path, c.OpenedUtc));
+        }
+        RecentEvidence.Clear();
+        foreach (var e in snap.Evidence)
+        {
+            var name = System.IO.Path.GetFileName(e.Path);
+            if (string.IsNullOrEmpty(name))
+            {
+                name = e.Path;
+            }
+            RecentEvidence.Add(new RecentEvidenceRow(e.Path, name, e.OpenedUtc));
+        }
+        OnPropertyChanged(nameof(HasHistory));
+    }
+
+    private void Persist()
+    {
+        _store?.Save(new RecentsSnapshot
+        {
+            Cases = RecentCases
+                .Select(r => new RecentCaseEntry(r.Id, r.Name, r.Examiner, r.Path ?? "", r.OpenedUtc))
+                .ToList(),
+            Evidence = RecentEvidence
+                .Select(r => new RecentEvidenceEntry(r.Path, r.OpenedUtc))
+                .ToList(),
+        });
+    }
+
+    /// <summary>
+    /// Push a "just opened" case onto the top of the recent list. The <paramref name="path"/>
+    /// is the .cinder file path; without it we can't reopen the case from the dashboard.
+    /// </summary>
+    public void NoteCaseOpened(Guid id, string name, string? examiner, string? path)
     {
         var existing = RecentCases.FirstOrDefault(r => r.Id == id);
         if (existing is not null)
         {
             RecentCases.Remove(existing);
         }
-        RecentCases.Insert(0, new RecentCaseRow(id, name, examiner ?? "", DateTimeOffset.UtcNow));
+        RecentCases.Insert(0, new RecentCaseRow(id, name, examiner ?? "", path, DateTimeOffset.UtcNow));
         while (RecentCases.Count > 8)
         {
             RecentCases.RemoveAt(RecentCases.Count - 1);
         }
+        Persist();
     }
 
     public void NoteEvidenceOpened(string path)
@@ -101,6 +144,7 @@ mental model: case → evidence → parsers → timeline → report.
         {
             RecentEvidence.RemoveAt(RecentEvidence.Count - 1);
         }
+        Persist();
     }
 
     [RelayCommand]
@@ -108,13 +152,20 @@ mental model: case → evidence → parsers → timeline → report.
     {
         RecentCases.Clear();
         RecentEvidence.Clear();
+        Persist();
     }
 }
 
-/// <summary>One row in the Dashboard's "recent cases" pane.</summary>
-public sealed record RecentCaseRow(Guid Id, string Name, string Examiner, DateTimeOffset OpenedUtc)
+/// <summary>
+/// One row in the Dashboard's "recent cases" pane. <see cref="Path"/> is the .cinder file
+/// path — required to reopen the case from the dashboard.
+/// </summary>
+public sealed record RecentCaseRow(Guid Id, string Name, string Examiner, string? Path, DateTimeOffset OpenedUtc)
 {
     public string OpenedDisplay => OpenedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    /// <summary>True only when we have a path to reopen from — drives IsEnabled on the click button.</summary>
+    public bool CanReopen => !string.IsNullOrEmpty(Path);
 }
 
 /// <summary>One row in the Dashboard's "recent evidence" pane.</summary>

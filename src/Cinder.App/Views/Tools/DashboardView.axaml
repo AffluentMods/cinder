@@ -55,6 +55,16 @@
                                 HorizontalContentAlignment="Center"
                                 Background="{DynamicResource CinderSurface3Brush}"
                                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenCaseFromPickerCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock Text="📁" FontSize="{DynamicResource CinderFontSizeMd}" VerticalAlignment="Center" />
+                                <TextBlock Text="Open existing case…" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Padding="20,10"
+                                HorizontalContentAlignment="Center"
+                                Background="{DynamicResource CinderSurface3Brush}"
+                                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                                 Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenFileCommand}">
                             <StackPanel Orientation="Horizontal" Spacing="10">
                                 <TextBlock Text="📂" FontSize="{DynamicResource CinderFontSizeMd}" VerticalAlignment="Center" />
@@ -97,15 +107,22 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Populated list -->
+                    <!-- Populated list — each row is a Button that reopens the case. -->
                     <ItemsControl ItemsSource="{Binding RecentCases}"
                                   IsVisible="{Binding RecentCases.Count}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="tools:RecentCaseRow">
-                                <Border Padding="14,10" Margin="0,0,0,6"
+                                <Button Background="{DynamicResource CinderSurface1Brush}"
+                                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                                         CornerRadius="6"
-                                        Background="{DynamicResource CinderSurface1Brush}"
-                                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1">
+                                        Padding="14,10"
+                                        Margin="0,0,0,6"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch"
+                                        IsEnabled="{Binding CanReopen}"
+                                        ToolTip.Tip="{Binding Path}"
+                                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ReopenRecentCaseCommand}"
+                                        CommandParameter="{Binding}">
                                     <Grid ColumnDefinitions="*,Auto">
                                         <StackPanel Grid.Column="0" Spacing="2">
                                             <TextBlock Text="{Binding Name}"
@@ -127,9 +144,9 @@
                                         <TextBlock Grid.Column="1"
                                                    Text="→"
                                                    VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                                                   Foreground="{DynamicResource CinderAccentBrush}" />
                                     </Grid>
-                                </Border>
+                                </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -167,10 +184,16 @@
                                   IsVisible="{Binding RecentEvidence.Count}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="tools:RecentEvidenceRow">
-                                <Border Padding="14,10" Margin="0,0,0,6"
+                                <Button Background="{DynamicResource CinderSurface1Brush}"
+                                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                                         CornerRadius="6"
-                                        Background="{DynamicResource CinderSurface1Brush}"
-                                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1">
+                                        Padding="14,10"
+                                        Margin="0,0,0,6"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch"
+                                        ToolTip.Tip="{Binding Path}"
+                                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ReopenRecentEvidenceCommand}"
+                                        CommandParameter="{Binding}">
                                     <StackPanel Spacing="2">
                                         <TextBlock Text="{Binding FileName}"
                                                    FontWeight="500"
@@ -186,7 +209,7 @@
                                                    Foreground="{DynamicResource CinderForegroundDisabledBrush}"
                                                    FontFamily="{DynamicResource CinderFontFamilyMono}" />
                                     </StackPanel>
-                                </Border>
+                                </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

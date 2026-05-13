@@ -39,6 +39,25 @@ public sealed class CustodyLog : ICustodyLog
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
         detailsJson = string.IsNullOrEmpty(detailsJson) ? "{}" : detailsJson;
 
+        // SECURITY: the chain hash uses U+001F as a field separator. If any field were allowed
+        // to contain U+001F, an attacker could craft two semantically different entries that
+        // hash to the same value (separator-injection / Length-extension-style preimage). We
+        // reject the separator (and other C0 control characters that have no business in
+        // examiner / action / details) up front. Defense for the court-defensible custody
+        // chain.
+        if (ContainsSeparatorOrControl(examiner))
+        {
+            throw new ArgumentException("Examiner contains forbidden control characters.", nameof(examiner));
+        }
+        if (ContainsSeparatorOrControl(action))
+        {
+            throw new ArgumentException("Action contains forbidden control characters.", nameof(action));
+        }
+        if (detailsJson.Contains(Separator))
+        {
+            throw new ArgumentException("DetailsJson contains the chain-hash separator (U+001F).", nameof(detailsJson));
+        }
+
         await using var conn = _store.Open();
         await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
 
@@ -174,6 +193,27 @@ public sealed class CustodyLog : ICustodyLog
 
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexStringLower(digest);
+    }
+
+    /// <summary>
+    /// Returns true if the input contains the chain-hash separator (U+001F) or any other C0
+    /// control character below U+0020 except plain space / tab / newline / carriage return.
+    /// Used to keep examiner / action strings clean of bytes that could collide field bounds.
+    /// </summary>
+    private static bool ContainsSeparatorOrControl(string s)
+    {
+        foreach (var c in s)
+        {
+            if (c == Separator)
+            {
+                return true;
+            }
+            if (c < 0x20 && c != '\t' && c != '\n' && c != '\r')
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private sealed class TipRow

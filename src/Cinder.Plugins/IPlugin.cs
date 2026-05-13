@@ -40,12 +40,56 @@ public interface IViewerExtension
 
 public sealed class PluginLoader
 {
-    public IReadOnlyList<IPlugin> LoadFromDirectory(string directory)
+    /// <summary>
+    /// Sentinel filename inside the plugin directory that opts the user in to loading plugins.
+    /// The user must create this file (with an explicit click in the Plugins tool, or by hand)
+    /// before any plugin DLLs are loaded. Without it the loader returns an empty list. This is a
+    /// defense-in-depth measure against malware that drops a .dll into the plugin folder and
+    /// expects it to auto-load on next Cinder launch.
+    /// </summary>
+    public const string TrustSentinelFile = ".cinder-trusted";
+
+    /// <summary>
+    /// Per-plugin trust manifest. Each line is a SHA-256 hex digest of a plugin DLL the user has
+    /// explicitly approved. The loader skips any DLL whose hash is not in this list.
+    /// </summary>
+    public const string TrustManifestFile = ".cinder-plugins.sha256";
+
+    public IReadOnlyList<PluginLoadResult> LoadFromDirectory(string directory)
     {
         Directory.CreateDirectory(directory);
-        var found = new List<IPlugin>();
+
+        // SECURITY: do nothing unless the user has explicitly opted in.
+        if (!File.Exists(Path.Combine(directory, TrustSentinelFile)))
+        {
+            return Array.Empty<PluginLoadResult>();
+        }
+
+        var trustedHashes = LoadTrustedHashes(directory);
+        var results = new List<PluginLoadResult>();
+
         foreach (var dll in Directory.EnumerateFiles(directory, "*.dll"))
         {
+            var fileName = Path.GetFileName(dll);
+            string hash;
+            try
+            {
+                hash = ComputeSha256Hex(dll);
+            }
+            catch (Exception ex)
+            {
+                results.Add(PluginLoadResult.Failed(fileName, $"Could not hash plugin: {ex.Message}"));
+                continue;
+            }
+
+            // SECURITY: only load DLLs whose hash the user has explicitly trusted. The trust
+            // manifest is plain text the user maintains via the Plugins UI.
+            if (!trustedHashes.Contains(hash))
+            {
+                results.Add(PluginLoadResult.Untrusted(fileName, hash));
+                continue;
+            }
+
             try
             {
                 var asm = Assembly.LoadFrom(dll);
@@ -54,17 +98,70 @@ public sealed class PluginLoader
                 {
                     if (Activator.CreateInstance(type) is IPlugin plugin)
                     {
-                        found.Add(plugin);
+                        results.Add(PluginLoadResult.Loaded(fileName, hash, plugin));
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Skip malformed plugin DLLs; surface in UI but don't crash the host.
+                results.Add(PluginLoadResult.Failed(fileName, ex.Message));
             }
         }
-        return found;
+        return results;
     }
+
+    private static HashSet<string> LoadTrustedHashes(string directory)
+    {
+        var path = Path.Combine(directory, TrustManifestFile);
+        if (!File.Exists(path))
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        var hashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in File.ReadAllLines(path))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+            {
+                continue;
+            }
+            // Accept either "hash" alone or "hash  filename" (sha256sum format).
+            var hash = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)[0];
+            if (hash.Length == 64)
+            {
+                hashes.Add(hash);
+            }
+        }
+        return hashes;
+    }
+
+    private static string ComputeSha256Hex(string path)
+    {
+        using var stream = File.OpenRead(path);
+        var digest = System.Security.Cryptography.SHA256.HashData(stream);
+        return Convert.ToHexStringLower(digest);
+    }
+}
+
+/// <summary>
+/// Result of an individual plugin DLL load attempt. Status drives UI surfacing: "loaded" goes
+/// green, "untrusted" prompts the user to approve the hash, "failed" shows the error.
+/// </summary>
+public sealed record PluginLoadResult(
+    string FileName,
+    string? Sha256,
+    IPlugin? Plugin,
+    string Status,
+    string? Error)
+{
+    public static PluginLoadResult Loaded(string fileName, string hash, IPlugin plugin)
+        => new(fileName, hash, plugin, Status: "loaded", Error: null);
+
+    public static PluginLoadResult Untrusted(string fileName, string hash)
+        => new(fileName, hash, Plugin: null, Status: "untrusted", Error: null);
+
+    public static PluginLoadResult Failed(string fileName, string error)
+        => new(fileName, Sha256: null, Plugin: null, Status: "failed", Error: error);
 }
 
 public sealed class PluginContext : IPluginContext

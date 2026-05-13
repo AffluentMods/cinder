@@ -18,6 +18,11 @@ public partial class App : Avalonia.Application
             var registry = new CommandRegistry();
             var vm = new MainWindowViewModel(registry);
             CommandRegistration.RegisterBuiltIns(registry, vm);
+
+            // Hydrate persisted "recent cases" + "recent evidence" so the Home dashboard
+            // shows the user's last few sessions across app restarts.
+            vm.Workspace.Dashboard.AttachStore(new RecentsStore());
+
             desktop.MainWindow = new MainWindow { DataContext = vm };
         }
 

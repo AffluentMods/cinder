@@ -18,30 +18,59 @@
                            FontSize="{DynamicResource CinderFontSizeXs}" />
             </Grid>
         </Border>
-        <ScrollViewer Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
-            <ItemsControl ItemsSource="{Binding Items}" Margin="14">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="tools:GalleryItem">
-                        <Border Background="{DynamicResource CinderBackground1Brush}"
-                                CornerRadius="4" Padding="6" Margin="4" Width="180">
-                            <StackPanel Spacing="6">
-                                <Image Source="{Binding Thumbnail}" Stretch="Uniform" Height="120" />
-                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
-                                           FontSize="{DynamicResource CinderFontSizeXs}"
-                                           Foreground="{DynamicResource CinderForegroundBrush}" />
-                                <TextBlock Text="{Binding SizeBytes, StringFormat='{}{0:N0} bytes'}"
-                                           FontSize="{DynamicResource CinderFontSizeXs}"
-                                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+        <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
+            <!-- Empty state -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Spacing="14" MaxWidth="460"
+                        IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNull}}">
+                <Border Width="64" Height="64" CornerRadius="8"
+                        Background="{DynamicResource CinderSurface3Brush}"
+                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                        HorizontalAlignment="Center">
+                    <TextBlock Text="🖼" FontSize="32"
+                               Foreground="{DynamicResource CinderAccentBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="No folder loaded"
+                           FontSize="{DynamicResource CinderFontSizeXl}" FontWeight="600"
+                           LetterSpacing="-0.4"
+                           Foreground="{DynamicResource CinderForegroundBrush}"
+                           HorizontalAlignment="Center" />
+                <TextBlock TextAlignment="Center" TextWrapping="Wrap"
+                           FontSize="{DynamicResource CinderFontSizeSm}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           Text="Point at any folder of images. Cinder walks subfolders, extracts EXIF metadata, and renders a thumbnail grid you can sort by date, size, or filename." />
+                <Button Classes="accent" Content="Pick folder…"
+                        Command="{Binding PickFolderCommand}"
+                        HorizontalAlignment="Center" Padding="20,10" />
+            </StackPanel>
+
+            <!-- Populated state -->
+            <ScrollViewer IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <ItemsControl ItemsSource="{Binding Items}" Margin="14">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="tools:GalleryItem">
+                            <Border Background="{DynamicResource CinderBackground1Brush}"
+                                    CornerRadius="4" Padding="6" Margin="4" Width="180">
+                                <StackPanel Spacing="6">
+                                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" Height="120" />
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                               Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    <TextBlock Text="{Binding SizeBytes, StringFormat='{}{0:N0} bytes'}"
+                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Panel>
     </Grid>
 </UserControl>

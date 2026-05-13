@@ -80,6 +80,34 @@ public sealed class CaseService
         return row?.ToCase();
     }
 
+    /// <summary>
+    /// Loads the (single) case row from an already-existing .cinder file. Each .cinder file
+    /// holds exactly one case, so this is the canonical "open an existing case by path" path.
+    /// Returns null if the file has no cases row.
+    /// </summary>
+    public async Task<Case?> GetFirstAsync(CancellationToken ct = default)
+    {
+        _store.Migrate();
+        await using var conn = _store.Open();
+        const string sql = """
+            SELECT id            AS Id,
+                   name          AS Name,
+                   examiner      AS Examiner,
+                   description   AS Description,
+                   created_utc   AS CreatedUtc,
+                   schema_version AS SchemaVersion
+            FROM cases
+            ORDER BY created_utc ASC
+            LIMIT 1;
+            """;
+
+        var row = await conn.QueryFirstOrDefaultAsync<CaseRow?>(new CommandDefinition(
+            sql,
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return row?.ToCase();
+    }
+
     private sealed class CaseRow
     {
         public string Id { get; set; } = "";

@@ -169,7 +169,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             OpenCases.Add(existing);
         }
         ActiveCase = existing;
-        Workspace.Dashboard.NoteCaseOpened(id, name, examiner);
+        Workspace.Dashboard.NoteCaseOpened(id, name, examiner, path);
     }
 
     [RelayCommand]
@@ -245,10 +245,90 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private async Task OpenCaseFromPickerAsync(CancellationToken ct)
+    {
+        var cmd = Commands.Commands.FirstOrDefault(c => c.Id == "case.open");
+        if (cmd is not null)
+        {
+            await cmd.Invoke(ct).ConfigureAwait(false);
+        }
+    }
+
+    [RelayCommand]
     private void OpenHelp() => IsHelpOpen = true;
 
     [RelayCommand]
     private void CloseHelp() => IsHelpOpen = false;
+
+    /// <summary>
+    /// Reopen a case the user already worked on. Skips the file picker — uses the path
+    /// recorded with the recent-case entry. If the file is gone, OpenCaseFromPathAsync
+    /// announces a friendly error.
+    /// </summary>
+    [RelayCommand]
+    private async Task ReopenRecentCaseAsync(Tools.RecentCaseRow? row)
+    {
+        if (row is null || string.IsNullOrEmpty(row.Path))
+        {
+            return;
+        }
+        await OpenCaseFromPathAsync(row.Path).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reopen a previously seen evidence file. Routes through OpenFileInNewBuffer so the Hex
+    /// viewer becomes the active tool, mirroring what Ctrl+O does.
+    /// </summary>
+    [RelayCommand]
+    private void ReopenRecentEvidence(Tools.RecentEvidenceRow? row)
+    {
+        if (row is null || string.IsNullOrEmpty(row.Path) || !File.Exists(row.Path))
+        {
+            return;
+        }
+        OpenFileInNewBuffer(row.Path);
+        var hexTool = Workspace.FindByKind("hex");
+        if (hexTool is not null)
+        {
+            Workspace.SelectedTool = hexTool;
+        }
+    }
+
+    /// <summary>
+    /// Open an existing .cinder case file by path. Reads the single case row, registers a
+    /// session for it, and announces. Errors are swallowed into the activity headline so the
+    /// app doesn't crash on a stale recent-cases entry.
+    /// </summary>
+    public async Task OpenCaseFromPathAsync(string casePath)
+    {
+        if (string.IsNullOrEmpty(casePath) || !File.Exists(casePath))
+        {
+            Announce($"Case file not found: {System.IO.Path.GetFileName(casePath)}");
+            return;
+        }
+        try
+        {
+            var store = new Cinder.Core.Cases.CaseStore(casePath);
+            var custody = new Cinder.Core.Custody.CustodyLog(store);
+            var svc = new Cinder.Core.Cases.CaseService(store, custody);
+            var c = await svc.GetFirstAsync().ConfigureAwait(false);
+            if (c is null)
+            {
+                Announce($"No case row in {System.IO.Path.GetFileName(casePath)}");
+                return;
+            }
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                ActiveCaseName = c.Name;
+                OpenCase(c.Id, c.Name, c.Examiner, casePath);
+                Announce($"Case opened: {c.Name}");
+            });
+        }
+        catch (Exception ex)
+        {
+            Announce($"Failed to open case: {ex.Message}");
+        }
+    }
 }
 
 /// <summary>

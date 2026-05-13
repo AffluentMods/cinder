@@ -907,7 +907,7 @@ public sealed partial class WorkflowsTool
 
 public sealed partial class PluginsTool
 {
-    public ObservableCollection<Cinder.Plugins.IPlugin> Loaded { get; } = new();
+    public ObservableCollection<Cinder.Plugins.PluginLoadResult> Loaded { get; } = new();
 
     [ObservableProperty] private string? _folder;
     [ObservableProperty] private string? _statusLine;
@@ -930,7 +930,10 @@ public sealed partial class PluginsTool
             {
                 Loaded.Add(p);
             }
-            StatusLine = $"{Loaded.Count} plugin{(Loaded.Count == 1 ? "" : "s")} loaded.";
+            var loadedCount = Loaded.Count(r => r.Status == "loaded");
+            var untrustedCount = Loaded.Count(r => r.Status == "untrusted");
+            var failedCount = Loaded.Count(r => r.Status == "failed");
+            StatusLine = $"{loadedCount} loaded · {untrustedCount} untrusted · {failedCount} failed";
         }
         catch (Exception ex)
         {

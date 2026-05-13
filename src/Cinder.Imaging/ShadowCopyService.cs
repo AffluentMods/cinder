@@ -38,15 +38,16 @@ public sealed partial class VssEnumerator : IShadowCopyEnumerator
     public IReadOnlyList<ShadowCopy> Enumerate()
     {
         // `vssadmin list shadows` requires Administrator. We tolerate the failure and return [].
+        // Arguments fixed at compile time — no user input feeds vssadmin.
         try
         {
-            using var p = new Process
+            var psi = new ProcessStartInfo("vssadmin.exe")
             {
-                StartInfo = new ProcessStartInfo("vssadmin.exe", "list shadows")
-                {
-                    RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
-                },
+                RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
             };
+            psi.ArgumentList.Add("list");
+            psi.ArgumentList.Add("shadows");
+            using var p = new Process { StartInfo = psi };
             p.Start();
             var output = p.StandardOutput.ReadToEnd();
             p.WaitForExit();
@@ -95,7 +96,7 @@ public sealed class LinuxSnapshotEnumerator : IShadowCopyEnumerator
 
     private static IEnumerable<ShadowCopy> EnumerateBtrfs()
     {
-        var raw = RunCapture("btrfs", "subvolume list -s /");
+        var raw = RunCapture("btrfs", ["subvolume", "list", "-s", "/"]);
         foreach (var line in raw.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             yield return new ShadowCopy(
@@ -108,7 +109,11 @@ public sealed class LinuxSnapshotEnumerator : IShadowCopyEnumerator
 
     private static IEnumerable<ShadowCopy> EnumerateLvm()
     {
-        var raw = RunCapture("lvs", "--noheadings -o lv_name,origin,lv_attr,time --units b 2>/dev/null");
+        // SECURITY: each argument is a separate ArgumentList entry. The `2>/dev/null` form
+        // is a shell construct; under UseShellExecute=false it would be passed as a literal
+        // arg. We just drop the redirect — stderr from this service is read separately
+        // and the tool's "not installed" failure is caught by TryAdd.
+        var raw = RunCapture("lvs", ["--noheadings", "-o", "lv_name,origin,lv_attr,time", "--units", "b"]);
         foreach (var line in raw.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -122,7 +127,7 @@ public sealed class LinuxSnapshotEnumerator : IShadowCopyEnumerator
 
     private static IEnumerable<ShadowCopy> EnumerateZfs()
     {
-        var raw = RunCapture("zfs", "list -t snapshot -H -o name,creation 2>/dev/null");
+        var raw = RunCapture("zfs", ["list", "-t", "snapshot", "-H", "-o", "name,creation"]);
         foreach (var line in raw.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = line.Split('\t');
@@ -130,15 +135,20 @@ public sealed class LinuxSnapshotEnumerator : IShadowCopyEnumerator
         }
     }
 
-    private static string RunCapture(string file, string args)
+    private static string RunCapture(string file, IReadOnlyList<string> args)
     {
-        using var p = new Process
+        var psi = new ProcessStartInfo(file)
         {
-            StartInfo = new ProcessStartInfo(file, args)
-            {
-                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false,
-            },
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+        using var p = new Process { StartInfo = psi };
         p.Start();
         var output = p.StandardOutput.ReadToEnd();
         p.WaitForExit(5_000);

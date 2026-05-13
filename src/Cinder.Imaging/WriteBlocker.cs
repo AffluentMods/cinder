@@ -48,7 +48,14 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
             var devs = ListBlockDevices();
             foreach (var d in devs)
             {
-                Run("blockdev", $"--setro /dev/{d}");
+                // SECURITY: `d` comes from lsblk output. We allow-list valid device-name
+                // characters before splicing it into a device path — defense in depth even
+                // though blockdev runs as a separate Process invocation with ArgumentList.
+                if (!IsSafeDeviceName(d))
+                {
+                    continue;
+                }
+                Run("blockdev", ["--setro", "/dev/" + d]);
                 _frozen.Add(d);
             }
             return _frozen.Count > 0;
@@ -66,7 +73,11 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
         {
             try
             {
-                Run("blockdev", $"--setrw /dev/{d}");
+                if (!IsSafeDeviceName(d))
+                {
+                    continue;
+                }
+                Run("blockdev", ["--setrw", "/dev/" + d]);
                 _frozen.Remove(d);
             }
             catch
@@ -77,24 +88,46 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
         return ok;
     }
 
+    /// <summary>Letters, digits, dash, underscore. Linux device names are restricted to these.</summary>
+    private static bool IsSafeDeviceName(string s)
+    {
+        if (string.IsNullOrEmpty(s) || s.Length > 64)
+        {
+            return false;
+        }
+        foreach (var c in s)
+        {
+            if (!char.IsLetterOrDigit(c) && c != '-' && c != '_')
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static IEnumerable<string> ListBlockDevices()
     {
-        using var p = new Process
+        var psi = new ProcessStartInfo("lsblk")
         {
-            StartInfo = new ProcessStartInfo("lsblk", "-dno NAME")
-            {
-                RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
-            },
+            RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
         };
+        psi.ArgumentList.Add("-dno");
+        psi.ArgumentList.Add("NAME");
+        using var p = new Process { StartInfo = psi };
         p.Start();
         var raw = p.StandardOutput.ReadToEnd();
         p.WaitForExit();
         return raw.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim());
     }
 
-    private static void Run(string file, string args)
+    private static void Run(string file, IReadOnlyList<string> args)
     {
-        using var p = Process.Start(new ProcessStartInfo(file, args) { UseShellExecute = false, CreateNoWindow = true });
+        var psi = new ProcessStartInfo(file) { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var a in args)
+        {
+            psi.ArgumentList.Add(a);
+        }
+        using var p = Process.Start(psi);
         p?.WaitForExit();
     }
 }

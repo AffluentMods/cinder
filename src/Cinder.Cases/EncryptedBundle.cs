@@ -26,25 +26,46 @@ public static class EncryptedBundle
     private const int TagLen = 16;
     private const int KeyLen = 32;
 
+    /// <summary>
+    /// Hard cap on the compressed body size we'll read off disk. Decryption allocates a
+    /// plaintext buffer equal in size to the ciphertext, so an attacker who hands us a 50 GB
+    /// "bundle" would otherwise OOM the process before we even check the auth tag.
+    /// 8 GB is generous for a normal case bundle and refuses obviously hostile inputs.
+    /// </summary>
+    private const long MaxCiphertextBytes = 8L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Hard cap on the total uncompressed size we'll extract from the inner ZIP. Defense against
+    /// zip bombs (a 50 KB ZIP can decompress to petabytes). 32 GB matches the largest expected
+    /// case bundle today.
+    /// </summary>
+    private const long MaxExtractedBytes = 32L * 1024 * 1024 * 1024;
+
     public static async Task PackAsync(string sourceDir, string outputBundlePath, string passphrase, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(passphrase);
         Directory.CreateDirectory(Path.GetDirectoryName(outputBundlePath)!);
 
-        // 1. Zip the source directory into a temp file.
-        var zipPath = outputBundlePath + ".tmpzip";
+        // SECURITY: stage the zip in an isolated temp dir, never adjacent to the user-supplied
+        // outputBundlePath. Reduces collision / symlink-race surface against the destination.
+        var stagingDir = Path.Combine(Path.GetTempPath(), "cinder-bundle-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stagingDir);
+        var zipPath = Path.Combine(stagingDir, "bundle.zip");
+
+        byte[]? key = null;
+        byte[]? plaintext = null;
+        byte[]? ciphertext = null;
         try
         {
             ZipFile.CreateFromDirectory(sourceDir, zipPath, CompressionLevel.SmallestSize, includeBaseDirectory: false);
 
-            // 2. Derive key, encrypt, write framed.
+            // Derive key, encrypt, write framed.
             var salt = RandomNumberGenerator.GetBytes(SaltLen);
             var nonce = RandomNumberGenerator.GetBytes(NonceLen);
-            // SYSLIB0060 — Rfc2898DeriveBytes constructors are obsolete; use Pbkdf2.
-            var key = Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, Iterations, HashAlgorithmName.SHA256, KeyLen);
+            key = Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, Iterations, HashAlgorithmName.SHA256, KeyLen);
 
-            var plaintext = await File.ReadAllBytesAsync(zipPath, ct).ConfigureAwait(false);
-            var ciphertext = new byte[plaintext.Length];
+            plaintext = await File.ReadAllBytesAsync(zipPath, ct).ConfigureAwait(false);
+            ciphertext = new byte[plaintext.Length];
             var tag = new byte[TagLen];
             using (var aes = new AesGcm(key, TagLen))
             {
@@ -61,7 +82,13 @@ public static class EncryptedBundle
         }
         finally
         {
-            try { File.Delete(zipPath); } catch { }
+            // SECURITY: zero key + plaintext from process memory before GC. Best-effort —
+            // the strings/buffers may still survive in pinned heap or pooled buffers, but
+            // this closes the obvious "leave the AES key sitting in RAM" window.
+            if (key is not null) CryptographicOperations.ZeroMemory(key);
+            if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext);
+            if (ciphertext is not null) CryptographicOperations.ZeroMemory(ciphertext);
+            try { Directory.Delete(stagingDir, recursive: true); } catch { }
         }
     }
 
@@ -69,6 +96,7 @@ public static class EncryptedBundle
     {
         ArgumentException.ThrowIfNullOrEmpty(passphrase);
         Directory.CreateDirectory(outputDir);
+        var outputDirFull = Path.GetFullPath(outputDir);
 
         await using var input = File.OpenRead(bundlePath);
         var header = new byte[HeaderMagic.Length];
@@ -85,25 +113,82 @@ public static class EncryptedBundle
 
         var bodyLen = input.Length - input.Position - TagLen;
         if (bodyLen < 0) throw new InvalidDataException("Bundle truncated.");
-        var ciphertext = new byte[bodyLen]; await input.ReadExactlyAsync(ciphertext, ct).ConfigureAwait(false);
+        // SECURITY: refuse absurd ciphertext sizes before allocating mirrored plaintext.
+        if (bodyLen > MaxCiphertextBytes)
+        {
+            throw new InvalidDataException(
+                $"Bundle ciphertext is {bodyLen:N0} bytes, exceeds the {MaxCiphertextBytes:N0}-byte cap.");
+        }
+        var ciphertext = new byte[bodyLen];
+        await input.ReadExactlyAsync(ciphertext, ct).ConfigureAwait(false);
         var tag = new byte[TagLen]; await input.ReadExactlyAsync(tag, ct).ConfigureAwait(false);
 
-        var key = Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, Iterations, HashAlgorithmName.SHA256, KeyLen);
-        var plaintext = new byte[ciphertext.Length];
-        using (var aes = new AesGcm(key, TagLen))
-        {
-            aes.Decrypt(nonce, ciphertext, tag, plaintext);
-        }
-
-        var zipPath = Path.Combine(outputDir, "_bundle.zip");
-        await File.WriteAllBytesAsync(zipPath, plaintext, ct).ConfigureAwait(false);
+        // Decrypt into staging buffer + a fresh temp dir.
+        byte[]? key = null;
+        byte[]? plaintext = null;
+        var stagingDir = Path.Combine(Path.GetTempPath(), "cinder-unbundle-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stagingDir);
+        var zipPath = Path.Combine(stagingDir, "bundle.zip");
         try
         {
-            ZipFile.ExtractToDirectory(zipPath, outputDir, overwriteFiles: true);
+            key = Rfc2898DeriveBytes.Pbkdf2(passphrase, salt, Iterations, HashAlgorithmName.SHA256, KeyLen);
+            plaintext = new byte[ciphertext.Length];
+            using (var aes = new AesGcm(key, TagLen))
+            {
+                aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            }
+
+            await File.WriteAllBytesAsync(zipPath, plaintext, ct).ConfigureAwait(false);
+
+            // SECURITY: walk the ZIP entries manually so we can enforce:
+            //   1. ZIP-slip — refuse any entry whose resolved destination escapes outputDir.
+            //   2. Total decompressed size cap (zip-bomb defense).
+            //   3. Refuse entries whose name contains nul or other control characters.
+            using var archive = ZipFile.OpenRead(zipPath);
+            long extractedTotal = 0;
+            foreach (var entry in archive.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.FullName))
+                {
+                    continue;
+                }
+                if (entry.FullName.Contains('\0') ||
+                    entry.FullName.Contains(':', StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException($"Bundle contains an entry with invalid path: {entry.FullName}");
+                }
+
+                var destination = Path.GetFullPath(Path.Combine(outputDirFull, entry.FullName));
+                if (!destination.StartsWith(outputDirFull + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                    && destination != outputDirFull)
+                {
+                    throw new InvalidDataException($"Bundle entry escapes destination directory: {entry.FullName}");
+                }
+
+                // Directory entry?
+                if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
+                {
+                    Directory.CreateDirectory(destination);
+                    continue;
+                }
+
+                extractedTotal += entry.Length;
+                if (extractedTotal > MaxExtractedBytes)
+                {
+                    throw new InvalidDataException(
+                        $"Bundle would extract over the {MaxExtractedBytes:N0}-byte cap — possible zip bomb.");
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                entry.ExtractToFile(destination, overwrite: true);
+            }
         }
         finally
         {
-            try { File.Delete(zipPath); } catch { }
+            if (key is not null) CryptographicOperations.ZeroMemory(key);
+            if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext);
+            CryptographicOperations.ZeroMemory(ciphertext);
+            try { Directory.Delete(stagingDir, recursive: true); } catch { }
         }
     }
 }

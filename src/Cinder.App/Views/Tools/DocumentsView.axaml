@@ -17,12 +17,39 @@
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
             </Grid>
         </Border>
-        <ScrollViewer Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="20">
-            <SelectableTextBlock Text="{Binding Content, FallbackValue=''}"
-                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                 FontSize="{DynamicResource CinderFontSizeSm}"
-                                 Foreground="{DynamicResource CinderForegroundBrush}"
-                                 TextWrapping="Wrap" />
-        </ScrollViewer>
+        <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Spacing="14" MaxWidth="460"
+                        IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNull}}">
+                <Border Width="64" Height="64" CornerRadius="8"
+                        Background="{DynamicResource CinderSurface3Brush}"
+                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                        HorizontalAlignment="Center">
+                    <TextBlock Text="📄" FontSize="32"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="No document loaded"
+                           FontSize="{DynamicResource CinderFontSizeXl}" FontWeight="600"
+                           LetterSpacing="-0.4"
+                           Foreground="{DynamicResource CinderForegroundBrush}"
+                           HorizontalAlignment="Center" />
+                <TextBlock TextAlignment="Center" TextWrapping="Wrap"
+                           FontSize="{DynamicResource CinderFontSizeSm}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           Text="Preview a PDF, Word, Excel, RTF, or ODF document without launching Office or Acrobat. Cinder also surfaces hidden metadata: original author, revisions, embedded files, unresolved comments." />
+                <Button Classes="accent" Content="Pick document…"
+                        Command="{Binding PickCommand}"
+                        HorizontalAlignment="Center" Padding="20,10" />
+            </StackPanel>
+
+            <ScrollViewer Padding="20"
+                          IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <SelectableTextBlock Text="{Binding Content, FallbackValue=''}"
+                                     FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                     FontSize="{DynamicResource CinderFontSizeSm}"
+                                     Foreground="{DynamicResource CinderForegroundBrush}"
+                                     TextWrapping="Wrap" />
+            </ScrollViewer>
+        </Panel>
     </Grid>
 </UserControl>

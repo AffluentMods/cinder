@@ -112,6 +112,32 @@ public static class CommandRegistration
             }));
 
         registry.Register(new CommandDescriptor(
+            Id: "case.open",
+            Title: "Open case…",
+            Subtitle: "Open an existing .cinder case file from disk.",
+            Category: "Case",
+            Invoke: async ct =>
+            {
+                var owner = ResolveMainWindow();
+                if (owner is null)
+                {
+                    return;
+                }
+                var picked = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Open Cinder case",
+                    AllowMultiple = false,
+                    FileTypeFilter = [new FilePickerFileType("Cinder case") { Patterns = ["*.cinder"] }],
+                }).ConfigureAwait(false);
+                var path = picked.FirstOrDefault()?.TryGetLocalPath();
+                if (string.IsNullOrEmpty(path))
+                {
+                    return;
+                }
+                await mainVm.OpenCaseFromPathAsync(path).ConfigureAwait(false);
+            }));
+
+        registry.Register(new CommandDescriptor(
             Id: "case.create",
             Title: "Create case…",
             Subtitle: "Set up a new case file (.cinder) with chain-of-custody log.",

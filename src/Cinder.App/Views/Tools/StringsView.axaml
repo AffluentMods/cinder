@@ -17,13 +17,41 @@
                 <Button Grid.Column="4" Margin="8,0,0,0" Content="Re-scan" Command="{Binding RunCommand}" />
             </Grid>
         </Border>
-        <DataGrid Grid.Row="1" ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
-                  Background="{DynamicResource CinderBackground0Brush}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="Offset"   Binding="{Binding Offset, StringFormat='0x{0:X12}'}" Width="160" />
-                <DataGridTextColumn Header="Encoding" Binding="{Binding Encoding}" Width="100" />
-                <DataGridTextColumn Header="String"   Binding="{Binding Value}" Width="*" />
-            </DataGrid.Columns>
-        </DataGrid>
+        <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Spacing="14" MaxWidth="460"
+                        IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNull}}">
+                <Border Width="64" Height="64" CornerRadius="8"
+                        Background="{DynamicResource CinderSurface3Brush}"
+                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                        HorizontalAlignment="Center">
+                    <TextBlock Text="Aa" FontSize="24" FontWeight="600"
+                               Foreground="{DynamicResource CinderAccentBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="No file loaded"
+                           FontSize="{DynamicResource CinderFontSizeXl}" FontWeight="600"
+                           LetterSpacing="-0.4"
+                           Foreground="{DynamicResource CinderForegroundBrush}"
+                           HorizontalAlignment="Center" />
+                <TextBlock TextAlignment="Center" TextWrapping="Wrap"
+                           FontSize="{DynamicResource CinderFontSizeSm}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           Text="Pull every readable word out of any file — usernames, URLs, paths, error messages. Works on anything: executables, images, memory dumps, disk images." />
+                <Button Classes="accent" Content="Pick file…"
+                        Command="{Binding PickCommand}"
+                        HorizontalAlignment="Center" Padding="20,10" />
+            </StackPanel>
+
+            <DataGrid IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}"
+                      ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
+                      Background="{DynamicResource CinderBackground0Brush}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Offset"   Binding="{Binding Offset, StringFormat='0x{0:X12}'}" Width="160" />
+                    <DataGridTextColumn Header="Encoding" Binding="{Binding Encoding}" Width="100" />
+                    <DataGridTextColumn Header="String"   Binding="{Binding Value}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Panel>
     </Grid>
 </UserControl>

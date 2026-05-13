@@ -20,10 +20,10 @@
         <DataGrid Grid.Row="1" ItemsSource="{Binding Loaded}" AutoGenerateColumns="False" IsReadOnly="True"
                   Background="{DynamicResource CinderBackground0Brush}">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Id"          Binding="{Binding Id}" Width="200" />
-                <DataGridTextColumn Header="Display"     Binding="{Binding DisplayName}" Width="*" />
-                <DataGridTextColumn Header="Author"      Binding="{Binding Author}" Width="160" />
-                <DataGridTextColumn Header="Version"     Binding="{Binding Version}" Width="100" />
+                <DataGridTextColumn Header="File"        Binding="{Binding FileName}" Width="220" />
+                <DataGridTextColumn Header="Status"      Binding="{Binding Status}" Width="120" />
+                <DataGridTextColumn Header="SHA-256"     Binding="{Binding Sha256}" Width="*" />
+                <DataGridTextColumn Header="Error"       Binding="{Binding Error}" Width="200" />
             </DataGrid.Columns>
         </DataGrid>
     </Grid>
