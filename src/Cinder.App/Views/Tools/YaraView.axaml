@@ -4,12 +4,15 @@
              x:Class="Cinder.App.Views.Tools.YaraView"
              x:DataType="tools:YaraTool">
     <Grid ColumnDefinitions="*,4,*">
+
+        <!-- ============================ RULES (left) ============================ -->
         <DockPanel Grid.Column="0">
-            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,8"
                     BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-                <TextBlock Text="RULES" FontWeight="600"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="RULES" Classes="section" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="Load .yar…" Command="{Binding LoadRulesFileCommand}" />
+                </Grid>
             </Border>
             <TextBox Text="{Binding Rules}" AcceptsReturn="True" TextWrapping="NoWrap"
                      FontFamily="{DynamicResource CinderFontFamilyMono}"
@@ -17,22 +20,62 @@
                      VerticalContentAlignment="Top"
                      Background="{DynamicResource CinderBackground0Brush}" />
         </DockPanel>
+
         <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+
+        <!-- ============================ RESULTS (right) ============================ -->
         <DockPanel Grid.Column="2">
-            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,8"
                     BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Button Classes="accent" Content="Pick file + scan…" Command="{Binding PickAndScanCommand}" />
-                    <TextBlock Text="{Binding ScanTarget, FallbackValue='No file scanned'}"
-                               VerticalAlignment="Center"
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Button Grid.Column="0" Classes="accent" Content="Pick file + scan…"
+                            Command="{Binding PickAndScanCommand}" />
+                    <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
+                               Text="{Binding ScanTarget, FallbackValue='No file scanned'}"
+                               Classes="mono"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               TextTrimming="CharacterEllipsis"
                                Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                </StackPanel>
+                    <ProgressBar Grid.Column="2" Width="80" IsIndeterminate="True"
+                                 IsVisible="{Binding IsScanning}" />
+                </Grid>
             </Border>
-            <TextBlock DockPanel.Dock="Bottom" Margin="14,4"
-                       Text="{Binding StatusLine}"
-                       FontSize="{DynamicResource CinderFontSizeXs}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            <ListBox ItemsSource="{Binding Hits}" Background="{DynamicResource CinderBackground0Brush}" />
+            <Border DockPanel.Dock="Bottom" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0">
+                <TextBlock Text="{Binding StatusLine}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+            </Border>
+
+            <Grid RowDefinitions="*,4,180">
+                <DataGrid Grid.Row="0" ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
+                          Background="{DynamicResource CinderBackground0Brush}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Rule"      Binding="{Binding Rule}"       Width="160" />
+                        <DataGridTextColumn Header="Pattern"   Binding="{Binding Identifier}" Width="80" />
+                        <DataGridTextColumn Header="Offset"    Binding="{Binding OffsetHex}"  Width="140" />
+                        <DataGridTextColumn Header="Matched"   Binding="{Binding Matched}"    Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                <GridSplitter Grid.Row="1" Background="{DynamicResource CinderBorderBrush}" />
+                <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" Padding="14,6"
+                                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                            <TextBlock Text="RULE SUMMARY" Classes="section" />
+                        </Border>
+                        <DataGrid ItemsSource="{Binding RuleSummary}" AutoGenerateColumns="False" IsReadOnly="True"
+                                  Background="{DynamicResource CinderBackground0Brush}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Rule"   Binding="{Binding Name}"   Width="180" />
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100" />
+                                <DataGridTextColumn Header="Hits"   Binding="{Binding Hits}"   Width="80" />
+                                <DataGridTextColumn Header="Note"   Binding="{Binding Note}"   Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+                </Border>
+            </Grid>
         </DockPanel>
     </Grid>
 </UserControl>

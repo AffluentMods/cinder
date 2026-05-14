@@ -7,14 +7,22 @@
     <Grid RowDefinitions="Auto,Auto,*">
         <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Pick index folder…"
-                        Command="{Binding PickIndexFolderCommand}"
-                        Margin="6,0,0,0" />
-                <TextBlock Text="{Binding IndexPath, FallbackValue='No index loaded'}"
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding IndexPath, FallbackValue='No index loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           Classes="mono"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center" />
-            </DockPanel>
+                <ProgressBar Grid.Column="1" Width="80" Margin="6,0" IsIndeterminate="True"
+                             IsVisible="{Binding IsIndexing}" />
+                <Button Grid.Column="2" Content="Pick index folder…"
+                        Command="{Binding PickIndexFolderCommand}"
+                        Margin="6,0" />
+                <Button Grid.Column="3" Classes="accent" Content="Build index from folder…"
+                        Command="{Binding BuildIndexCommand}"
+                        Margin="6,0,0,0" />
+            </Grid>
         </Border>
         <Border Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="14,10">
             <Grid ColumnDefinitions="*,Auto">

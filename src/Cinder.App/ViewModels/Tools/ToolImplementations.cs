@@ -578,17 +578,38 @@ public sealed partial class YaraTool
 rule example_strings {
     meta:
         author = "you"
-        description = "Sample — flag any file that contains the literal 'cinder'"
+        description = "Flag any file that contains the literal 'cinder' or the PE magic"
     strings:
-        $a = "cinder" ascii nocase
+        $a = "cinder" nocase
+        $b = "malware"
+        $mz = { 4D 5A }
     condition:
-        $a
+        any of them
 }
 """;
 
     [ObservableProperty] private string? _scanTarget;
     [ObservableProperty] private string? _statusLine;
-    public ObservableCollection<string> Hits { get; } = new();
+    [ObservableProperty] private bool _isScanning;
+
+    public ObservableCollection<YaraHitRow> Hits { get; } = new();
+    public ObservableCollection<RuleSummaryRow> RuleSummary { get; } = new();
+
+    [RelayCommand]
+    private async Task LoadRulesFileAsync(CancellationToken ct)
+    {
+        var path = await ToolDialog.PickFileAsync("Pick a YARA rules file", "YARA rules", "*.yar");
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            Rules = await File.ReadAllTextAsync(path, ct);
+            StatusLine = $"Loaded {path}";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Failed to read {path}: {ex.Message}";
+        }
+    }
 
     [RelayCommand]
     private async Task PickAndScanAsync(CancellationToken ct)
@@ -597,64 +618,56 @@ rule example_strings {
         if (string.IsNullOrEmpty(path)) return;
         ScanTarget = path;
         Hits.Clear();
+        RuleSummary.Clear();
+        IsScanning = true;
+        StatusLine = "Scanning…";
         try
         {
-            // For Phase 6 the wired path is a python-yara sidecar (parsers/yara/). Until that
-            // sidecar is bundled, fall back to a straight literal-pattern scan derived from the
-            // rule's strings — gives a usable smoke test for "this binary contains X".
-            var literals = ExtractLiterals(Rules);
-            if (literals.Count == 0)
+            var parsed = await Task.Run(() => YaraLiteParser.Parse(Rules), ct);
+            if (parsed.Count == 0)
             {
-                StatusLine = "No literal `$x = \"...\"` strings found in the rule. Wire python-yara to enable full rules.";
+                StatusLine = "No rules parsed from the editor. Check the syntax.";
                 return;
             }
-            var bytes = await File.ReadAllBytesAsync(path, ct);
-            foreach (var lit in literals)
+            var ruleset = await Task.Run(() => YaraLiteRuleset.Compile(parsed), ct);
+            await foreach (var hit in ruleset.ScanAsync(path, ct))
             {
-                var idx = IndexOfBytes(bytes, Encoding.UTF8.GetBytes(lit));
-                if (idx >= 0)
-                {
-                    Hits.Add($"{lit} @ 0x{idx:X}");
-                }
+                Hits.Add(new YaraHitRow(
+                    Rule: hit.RuleName,
+                    Identifier: hit.Identifier,
+                    OffsetHex: $"0x{hit.Offset:X12}",
+                    Matched: hit.MatchedString));
+                if (Hits.Count >= 25_000) break;
             }
-            StatusLine = Hits.Count == 0 ? "No matches." : $"{Hits.Count} match(es).";
+            // Per-rule summary including skip reasons.
+            foreach (var r in parsed)
+            {
+                var ruleHits = Hits.Count(h => h.Rule == r.Name);
+                RuleSummary.Add(new RuleSummaryRow(
+                    Name: r.Name,
+                    Status: r.SkipReason is not null ? "skipped"
+                          : ruleHits > 0 ? "matched"
+                          : "no match",
+                    Hits: ruleHits,
+                    Note: r.SkipReason ?? (r.Strings.Count == 0 ? "no strings" : "")));
+            }
+            StatusLine = Hits.Count == 0
+                ? $"No matches in {System.IO.Path.GetFileName(path)} across {parsed.Count} rule(s)."
+                : $"{Hits.Count} match(es) across {RuleSummary.Count(r => r.Status == "matched")} rule(s).";
         }
         catch (Exception ex)
         {
             StatusLine = $"Failed: {ex.Message}";
         }
-    }
-
-    private static List<string> ExtractLiterals(string rule)
-    {
-        var literals = new List<string>();
-        var idx = 0;
-        while (true)
+        finally
         {
-            idx = rule.IndexOf('"', idx);
-            if (idx < 0) break;
-            var end = rule.IndexOf('"', idx + 1);
-            if (end < 0) break;
-            literals.Add(rule[(idx + 1)..end]);
-            idx = end + 1;
+            IsScanning = false;
         }
-        return literals;
-    }
-
-    private static int IndexOfBytes(byte[] hay, byte[] needle)
-    {
-        for (int i = 0; i + needle.Length <= hay.Length; i++)
-        {
-            var ok = true;
-            for (int j = 0; j < needle.Length; j++)
-            {
-                if (hay[i + j] != needle[j]) { ok = false; break; }
-            }
-            if (ok) return i;
-        }
-        return -1;
     }
 }
+
+public sealed record YaraHitRow(string Rule, string Identifier, string OffsetHex, string Matched);
+public sealed record RuleSummaryRow(string Name, string Status, int Hits, string Note);
 
 // =====================================================================================
 // VIRUSTOTAL — opt-in hash-only lookup.

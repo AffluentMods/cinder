@@ -69,6 +69,10 @@
 
     <!-- Compound documents. -->
     <PackageReference Include="OpenMcdf" />
+
+    <!-- YARA-lite pattern matcher + archive reader. -->
+    <PackageReference Include="AhoCorasick" />
+    <PackageReference Include="SharpCompress" />
   </ItemGroup>
 
   <ItemGroup>

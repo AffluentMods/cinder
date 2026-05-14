@@ -106,8 +106,12 @@
     <PackageVersion Include="Lucene.Net.Analysis.Common" Version="4.8.0-beta00017" />
     <PackageVersion Include="Lucene.Net.QueryParser" Version="4.8.0-beta00017" />
 
-    <!-- YARA -->
-    <PackageVersion Include="dnYara.NetStandard" Version="2.1.4" />
+    <!-- Multi-pattern string matching (Aho-Corasick) — backs the in-house YARA-lite scanner. -->
+    <PackageVersion Include="AhoCorasick" Version="2.0.279" />
+
+    <!-- General-purpose archive reader (TAR / GZIP / BZIP2 / ZIP / RAR / 7z) —
+         primarily for Android adb backup (.ab) inside MobileTool. -->
+    <PackageVersion Include="SharpCompress" Version="0.48.1" />
 
     <!-- Testing -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />

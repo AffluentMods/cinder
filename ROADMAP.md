@@ -155,12 +155,22 @@ libraries do the heavy lifting in-process.
 
 ## Phase 6 — Search, timeline, hash sets, YARA, VirusTotal 🟡
 
-- 🟡 Lucene.NET case-wide index — wired, awaiting artifact ingestion.
+- ✅ Lucene.NET case-wide index — full-text index with "Build index from
+  folder…" ingestion. Recursively walks an evidence folder, routes each
+  file through DocumentReader for structured formats and falls back to
+  printable-strings extraction for binaries. Standard Lucene query
+  syntax (`source:evtx`, `user:alice`, `text:"exact phrase"`, etc.).
 - 🟡 Super-timeline — view exists, merge logic pending.
 - 🟡 Map (Mapsui.Avalonia) — UI shell.
 - 🟡 Comm graph (LiveCharts2) — UI shell.
 - 🟡 Hash sets (NSRL bulk import) — UI shell.
-- 🟡 YARA (dnYara.NetStandard) — UI shell.
+- ✅ YARA-lite — in-house parser + Aho-Corasick matcher. Loads `.yar`
+  files, parses the common `rule { meta: strings: condition: }` grammar
+  (literal `"strings"`, `nocase`, hex `{ 4D 5A }` patterns; condition
+  variants `any of them` / `all of them` / boolean of string IDs), and
+  scans target files via a single Aho-Corasick automaton built across
+  every rule. Per-rule hit summary + per-pattern offset list. Regex
+  patterns and full libyara feature parity remain 🟡.
 - 🟡 VirusTotal hash-only lookup — UI shell.
 
 ## Phase 7 — Memory forensics ⬜
@@ -200,7 +210,10 @@ libraries do the heavy lifting in-process.
   Microsoft.Data.Sqlite. Enumerates every backed-up file with its
   domain + relativePath + fileID. Encrypted backups still need the
   user's iTunes backup password.
-- 🟡 Android adb backup — tracked.
+- ✅ Android adb backup (`.ab`) — header parse + deflate-stripped TAR
+  walk via SharpCompress. Surfaces per-package entries (app id, file
+  path, size, mtime). Encrypted backups surface a clear "need adb
+  password to decrypt" row.
 - 🟡 Cloud pull (Google Drive / OneDrive / Dropbox via OAuth/PKCE) — UI
   shell.
 

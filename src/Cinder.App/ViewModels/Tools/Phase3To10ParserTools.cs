@@ -718,9 +718,16 @@ public sealed partial class MobileTool
     private static List<object> Parse(string root, CancellationToken ct)
     {
         var rows = new List<object>();
+        // Android adb backup — single .ab file. Detect by extension or magic header.
         if (File.Exists(root))
         {
-            rows.Add(new { App = "info", Kind = "", Source = "", When = "", What = "Point Mobile at an iOS backup folder (the folder containing Manifest.db / Info.plist), not a single file." });
+            var ext = Path.GetExtension(root).ToLowerInvariant();
+            if (ext == ".ab" || LooksLikeAdbBackup(root))
+            {
+                ParseAdbBackup(root, rows, ct);
+                return rows;
+            }
+            rows.Add(new { App = "info", Kind = "", Source = "", When = "", What = "For iOS, point Mobile at the backup folder (containing Manifest.db). For Android, pick a .ab adb backup file." });
             return rows;
         }
         if (!Directory.Exists(root))
@@ -776,5 +783,122 @@ public sealed partial class MobileTool
             try { File.Delete(staging); } catch { }
         }
         return rows;
+    }
+
+    /// <summary>
+    /// Magic check for Android adb-backup files. The format starts with the literal ASCII
+    /// header "ANDROID BACKUP" on its own line.
+    /// </summary>
+    private static bool LooksLikeAdbBackup(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            Span<byte> head = stackalloc byte[14];
+            return fs.Read(head) == 14 &&
+                   head[0] == (byte)'A' && head[1] == (byte)'N' && head[2] == (byte)'D' && head[3] == (byte)'R' &&
+                   head[4] == (byte)'O' && head[5] == (byte)'I' && head[6] == (byte)'D' && head[7] == (byte)' ' &&
+                   head[8] == (byte)'B' && head[9] == (byte)'A' && head[10] == (byte)'C' && head[11] == (byte)'K' &&
+                   head[12] == (byte)'U' && head[13] == (byte)'P';
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Parses an Android adb backup (.ab). The file's first 4 lines are a text header:
+    ///   ANDROID BACKUP\n
+    ///   &lt;version&gt;\n     (1, 2, 3, 4, or 5)
+    ///   &lt;compression&gt;\n (0 = none, 1 = deflate)
+    ///   &lt;encryption&gt;\n  ("none" or "AES-256")
+    /// Followed by the raw payload — a TAR archive that, if compression=1, is deflate-wrapped.
+    /// Encrypted backups need the user's passphrase to derive the AES key — we don't support
+    /// that path yet and surface a clear "encrypted, can't read" row.
+    /// </summary>
+    private static void ParseAdbBackup(string path, List<object> rows, CancellationToken ct)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            // Read header (up to ~256 bytes — generous; 4 short lines).
+            var headerBytes = new byte[256];
+            var n = fs.Read(headerBytes);
+            var headerText = System.Text.Encoding.ASCII.GetString(headerBytes, 0, n);
+            var lines = headerText.Split('\n');
+            if (lines.Length < 4 || !lines[0].StartsWith("ANDROID BACKUP", StringComparison.Ordinal))
+            {
+                rows.Add(new { App = "error", Kind = "", Source = Path.GetFileName(path), When = "", What = "File starts with the ADB-backup magic but the header is malformed." });
+                return;
+            }
+            // version = lines[1], compression = lines[2], encryption = lines[3]
+            var compression = lines[2].Trim();
+            var encryption = lines[3].Trim();
+            if (!string.Equals(encryption, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                rows.Add(new
+                {
+                    App = "info",
+                    Kind = "encrypted",
+                    Source = Path.GetFileName(path),
+                    When = "",
+                    What = $"Encrypted adb backup ({encryption}) — Cinder v0.1 needs the user's adb backup password to decrypt before browsing. Tracked.",
+                });
+                return;
+            }
+            // Find the start of the payload — after the 4th newline.
+            int payloadOffset = 0, newlines = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (headerBytes[i] == (byte)'\n') { newlines++; if (newlines == 4) { payloadOffset = i + 1; break; } }
+            }
+            if (payloadOffset == 0)
+            {
+                rows.Add(new { App = "error", Kind = "", Source = Path.GetFileName(path), When = "", What = "Could not find end of adb-backup header." });
+                return;
+            }
+            fs.Seek(payloadOffset, SeekOrigin.Begin);
+
+            // The payload is a raw zlib stream (deflate with a 2-byte zlib header) when
+            // compression=1, otherwise a plain tar. We pipe through SharpCompress.
+            Stream tarStream = fs;
+            if (compression == "1")
+            {
+                // Skip the 2-byte zlib header (0x78 0x9C / 0x78 0xDA) so DeflateStream sees raw deflate.
+                fs.ReadByte();
+                fs.ReadByte();
+                tarStream = new System.IO.Compression.DeflateStream(fs, System.IO.Compression.CompressionMode.Decompress, leaveOpen: true);
+            }
+            using var tarReader = SharpCompress.Readers.Tar.TarReader.OpenReader(tarStream, new SharpCompress.Readers.ReaderOptions());
+            while (tarReader.MoveToNextEntry())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (rows.Count >= 50_000) break;
+                var entry = tarReader.Entry;
+                if (entry.IsDirectory) continue;
+                // Android tar layout: apps/<pkg>/_manifest, apps/<pkg>/sp/_sharedprefs, apps/<pkg>/db/<db>, shared/0/<paths>
+                var key = entry.Key ?? "(unnamed)";
+                var pkg = "";
+                var slash = key.IndexOf('/', "apps/".Length);
+                if (key.StartsWith("apps/", StringComparison.Ordinal) && slash > 0)
+                {
+                    pkg = key["apps/".Length..slash];
+                }
+                else if (key.StartsWith("shared/", StringComparison.Ordinal))
+                {
+                    pkg = "shared";
+                }
+                rows.Add(new
+                {
+                    App = pkg,
+                    Kind = "file",
+                    Source = key,
+                    When = entry.LastModifiedTime?.ToUniversalTime().ToString("u", System.Globalization.CultureInfo.InvariantCulture) ?? "",
+                    What = $"{entry.Size:N0} bytes",
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            rows.Add(new { App = "error", Kind = "", Source = Path.GetFileName(path), When = "", What = $"adb backup read failed: {ex.Message}" });
+        }
     }
 }
