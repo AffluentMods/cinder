@@ -14,6 +14,7 @@ public sealed class GeoIndex
     private readonly List<GeoPoint> _points = new();
     public int Count => _points.Count;
     public void Add(GeoPoint p) => _points.Add(p);
+    public void Clear() => _points.Clear();
     public IReadOnlyList<GeoPoint> AllPoints => _points;
 
     public IEnumerable<GeoPoint> InBounds(double southWestLat, double southWestLng, double northEastLat, double northEastLng)

@@ -73,6 +73,12 @@
     <!-- YARA-lite pattern matcher + archive reader. -->
     <PackageReference Include="AhoCorasick" />
     <PackageReference Include="SharpCompress" />
+
+    <!-- Image metadata for the Map / Gallery auto-ingest pipelines. -->
+    <PackageReference Include="MetadataExtractor" />
+
+    <!-- Settings.json secret-at-rest encryption (DPAPI on Windows). -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,6 +2,7 @@
   <ItemGroup>
     <PackageReference Include="Markdig" />
     <PackageReference Include="QuestPDF" />
+    <PackageReference Include="DocumentFormat.OpenXml" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />

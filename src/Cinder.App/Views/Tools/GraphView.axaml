@@ -4,18 +4,33 @@
              xmlns:srch="using:Cinder.Search"
              x:Class="Cinder.App.Views.Tools.GraphView"
              x:DataType="tools:GraphTool">
-    <Grid RowDefinitions="Auto,*">
+    <Grid RowDefinitions="Auto,Auto,*">
         <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBox Width="200" Text="{Binding From}" Watermark="from (email/handle)" />
-                <TextBox Width="200" Text="{Binding To}"   Watermark="to" />
-                <TextBox Width="160" Text="{Binding Source}" Watermark="source" />
-                <TextBox Width="240" Text="{Binding Subject}" Watermark="subject (optional)" />
-                <Button Classes="accent" Content="Add edge" Command="{Binding AddEdgeCommand}" />
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Classes="accent" Content="Ingest email folder…"
+                        Command="{Binding IngestEmailFolderCommand}"
+                        ToolTip.Tip="Walk a folder of .eml / .msg / .mbox files, build the From → To graph automatically." />
+                <Button Content="Clear graph" Command="{Binding ClearGraphCommand}" />
+                <TextBlock Text="{Binding StatusLine}" VerticalAlignment="Center"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
             </StackPanel>
         </Border>
-        <Grid Grid.Row="1" ColumnDefinitions="*,4,*">
+        <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,8"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Add manually:" VerticalAlignment="Center"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBox Width="180" Text="{Binding From}" Watermark="from (email/handle)" />
+                <TextBox Width="180" Text="{Binding To}"   Watermark="to" />
+                <TextBox Width="120" Text="{Binding Source}" Watermark="source" />
+                <TextBox Width="200" Text="{Binding Subject}" Watermark="subject (optional)" />
+                <Button Content="Add edge" Command="{Binding AddEdgeCommand}" />
+            </StackPanel>
+        </Border>
+        <Grid Grid.Row="2" ColumnDefinitions="*,4,*">
             <DockPanel Grid.Column="0">
                 <TextBlock DockPanel.Dock="Top" Text="NODES"
                            FontWeight="600" Margin="14,8"

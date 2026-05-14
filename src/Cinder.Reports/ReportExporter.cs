@@ -109,14 +109,16 @@ public sealed class ReportExporter
         }
     }
 
-    private static Task<string> ExportDocxAsync(ReportBuilder builder, string outputPath, CancellationToken ct)
+    private static async Task<string> ExportDocxAsync(ReportBuilder builder, string outputPath, CancellationToken ct)
     {
-        // TODO 8.1: full DOCX export via OpenXML SDK (Cinder doesn't pull DocumentFormat.OpenXml in
-        // Phase 8 to keep the dep surface small). For now write a .docx-like ZIP that has the
-        // markdown inside `word/document.xml` as raw text — Word will open it as Text.
+        // Real Word document via DocumentFormat.OpenXml. We don't try to reproduce the
+        // QuestPDF visual layout 1:1 — Word's typography is its own thing — but we DO emit a
+        // well-structured document: title page, per-section bodies with paragraphs and
+        // bullets, an exhibit index table, document metadata.
+        var report = builder.Build();
         var markdown = builder.ToMarkdown();
-        File.WriteAllText(outputPath + ".md", markdown);
-        return Task.FromResult<string>(outputPath + ".md");
+        await Task.Run(() => DocxReportWriter.Write(report, markdown, outputPath), ct).ConfigureAwait(false);
+        return outputPath;
     }
 
     private static PdfConverter? FindPdfConverter()

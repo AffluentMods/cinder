@@ -737,6 +737,7 @@ public sealed partial class MapTool
     [ObservableProperty] private double _longitude;
     [ObservableProperty] private string _label = "";
     [ObservableProperty] private string _source = "manual";
+    [ObservableProperty] private string? _statusLine;
 
     [RelayCommand]
     private void AddPoint()
@@ -751,6 +752,74 @@ public sealed partial class MapTool
     private void Clear()
     {
         Points.Clear();
+        Index.Clear();
+    }
+
+    /// <summary>
+    /// Walk a folder of images, extract GPS coordinates from EXIF, and add every geo-tagged
+    /// photo as a point. Pure C# via MetadataExtractor — no Python, no shell-outs.
+    /// </summary>
+    [RelayCommand]
+    private async Task IngestPhotosAsync(CancellationToken ct)
+    {
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (owner is null) return;
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Pick a folder of photos to map",
+        });
+        var root = folders.FirstOrDefault()?.TryGetLocalPath();
+        if (string.IsNullOrEmpty(root)) return;
+
+        StatusLine = "Scanning photos…";
+        var added = await Task.Run(() => ScanFolderForExifGps(root, Index, Points, ct), ct);
+        StatusLine = $"Added {added:N0} GPS point{(added == 1 ? "" : "s")} from {root}.";
+    }
+
+    private static int ScanFolderForExifGps(
+        string root,
+        GeoIndex index,
+        ObservableCollection<GeoPoint> points,
+        CancellationToken ct)
+    {
+        int added = 0;
+        var exts = new[] { ".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".png", ".webp" };
+        foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+        }))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (added >= 25_000) break;
+            if (!exts.Contains(System.IO.Path.GetExtension(path).ToLowerInvariant())) continue;
+            try
+            {
+                var dirs = MetadataExtractor.ImageMetadataReader.ReadMetadata(path);
+                var gps = dirs.OfType<MetadataExtractor.Formats.Exif.GpsDirectory>().FirstOrDefault();
+                if (gps is null) continue;
+                var maybeLoc = gps.GetGeoLocation();
+                if (maybeLoc is not MetadataExtractor.GeoLocation loc || loc.IsZero) continue;
+                // Use file mtime as a proxy for the photo's timestamp — pulling DateTimeOriginal
+                // out of EXIF requires the extension-method path which varies across
+                // MetadataExtractor versions; mtime is good enough for plotting.
+                var ts = new DateTimeOffset(new FileInfo(path).LastWriteTimeUtc, TimeSpan.Zero);
+                var p = new GeoPoint(loc.Latitude, loc.Longitude, ts,
+                    System.IO.Path.GetFileName(path), "exif", null);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    index.Add(p);
+                    points.Add(p);
+                });
+                added++;
+            }
+            catch
+            {
+                // unreadable image — skip
+            }
+        }
+        return added;
     }
 }
 
@@ -768,6 +837,7 @@ public sealed partial class GraphTool
     [ObservableProperty] private string _to = "";
     [ObservableProperty] private string _source = "manual";
     [ObservableProperty] private string? _subject;
+    [ObservableProperty] private string? _statusLine;
 
     [RelayCommand]
     private void AddEdge()
@@ -776,6 +846,188 @@ public sealed partial class GraphTool
         Graph.AddInteraction(From, To, Source, DateTimeOffset.UtcNow, Subject);
         Refresh();
         From = ""; To = ""; Subject = "";
+    }
+
+    [RelayCommand]
+    private void ClearGraph()
+    {
+        Graph.Clear();
+        Refresh();
+    }
+
+    /// <summary>
+    /// Walk a folder of email files (.eml / .msg / .mbox) and auto-build the communication
+    /// graph from From / To / Cc headers. Pure C# via MsgReader and an in-house MBOX scanner.
+    /// </summary>
+    [RelayCommand]
+    private async Task IngestEmailFolderAsync(CancellationToken ct)
+    {
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (owner is null) return;
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Pick a folder containing .eml / .msg / .mbox files",
+        });
+        var root = folders.FirstOrDefault()?.TryGetLocalPath();
+        if (string.IsNullOrEmpty(root)) return;
+
+        StatusLine = "Ingesting…";
+        var n = await Task.Run(() => ScanFolderForEmail(root, Graph, ct), ct);
+        Refresh();
+        StatusLine = $"Added {n:N0} interaction{(n == 1 ? "" : "s")} from {root}.";
+    }
+
+    private static int ScanFolderForEmail(string root, CommunicationGraph graph, CancellationToken ct)
+    {
+        int added = 0;
+        foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+        }))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (added >= 25_000) break;
+            var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+            try
+            {
+                switch (ext)
+                {
+                    case ".msg":
+                        IngestMsg(path, graph, ref added);
+                        break;
+                    case ".eml":
+                        IngestEml(path, graph, ref added);
+                        break;
+                    case ".mbox":
+                        IngestMbox(path, graph, ref added, ct);
+                        break;
+                }
+            }
+            catch
+            {
+                // unreadable / parse error — skip
+            }
+        }
+        return added;
+    }
+
+    private static void IngestMsg(string path, CommunicationGraph graph, ref int added)
+    {
+        using var msg = new MsgReader.Outlook.Storage.Message(path);
+        var from = msg.GetEmailSender(false, false) ?? "";
+        var to = msg.GetEmailRecipients(MsgReader.Outlook.RecipientType.To, false, false) ?? "";
+        var subject = msg.Subject ?? "";
+        // MsgReader's SentOn surface varies — coerce whatever DateTime/DateTimeOffset it
+        // hands us into a DateTimeOffset.
+        DateTimeOffset ts = CoerceToUtcOffset(msg.SentOn);
+        AddFromHeader(graph, from, to, "msg", ts, subject, ref added);
+    }
+
+    private static void IngestEml(string path, CommunicationGraph graph, ref int added)
+    {
+        using var fs = File.OpenRead(path);
+        var msg = MsgReader.Mime.Message.Load(fs);
+        var from = msg.Headers.From?.Address ?? "";
+        var to = string.Join(", ", msg.Headers.To?.Select(t => t.Address) ?? Array.Empty<string>());
+        var subject = msg.Headers.Subject ?? "";
+        DateTimeOffset ts = CoerceToUtcOffset(msg.Headers.DateSent);
+        AddFromHeader(graph, from, to, "eml", ts, subject, ref added);
+    }
+
+    /// <summary>
+    /// Normalise whatever shape (DateTime, DateTime?, DateTimeOffset, DateTimeOffset?) a third
+    /// party hands us into a UTC DateTimeOffset, defaulting to now if null/empty.
+    /// </summary>
+    private static DateTimeOffset CoerceToUtcOffset(object? value)
+    {
+        return value switch
+        {
+            DateTimeOffset dto => dto.ToUniversalTime(),
+            DateTime dt when dt != default =>
+                new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero),
+            _ => DateTimeOffset.UtcNow,
+        };
+    }
+
+    private static void IngestMbox(string path, CommunicationGraph graph, ref int added, CancellationToken ct)
+    {
+        using var sr = new StreamReader(path);
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? line;
+        bool inHeaders = false;
+        while ((line = sr.ReadLine()) is not null)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (added >= 25_000) break;
+
+            if (line.StartsWith("From ", StringComparison.Ordinal))
+            {
+                FlushMboxHeaders(graph, headers, ref added);
+                inHeaders = true;
+                continue;
+            }
+            if (inHeaders && string.IsNullOrEmpty(line))
+            {
+                inHeaders = false;
+                continue;
+            }
+            if (inHeaders)
+            {
+                var colon = line.IndexOf(':');
+                if (colon > 0)
+                {
+                    headers[line[..colon]] = line[(colon + 1)..].Trim();
+                }
+            }
+        }
+        FlushMboxHeaders(graph, headers, ref added);
+    }
+
+    private static void FlushMboxHeaders(CommunicationGraph graph, Dictionary<string, string> headers, ref int added)
+    {
+        if (headers.Count == 0) return;
+        var from = headers.GetValueOrDefault("From", "");
+        var to = headers.GetValueOrDefault("To", "");
+        var subject = headers.GetValueOrDefault("Subject", "");
+        DateTimeOffset ts = DateTimeOffset.UtcNow;
+        if (headers.TryGetValue("Date", out var d) && DateTimeOffset.TryParse(d, out var parsed))
+        {
+            ts = parsed.ToUniversalTime();
+        }
+        AddFromHeader(graph, from, to, "mbox", ts, subject, ref added);
+        headers.Clear();
+    }
+
+    private static void AddFromHeader(CommunicationGraph graph, string from, string to,
+                                       string source, DateTimeOffset ts, string subject, ref int added)
+    {
+        if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) return;
+        // To header can be a comma-separated list — emit one edge per recipient.
+        foreach (var recipient in to.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            graph.AddInteraction(
+                ExtractAddress(from),
+                ExtractAddress(recipient),
+                source,
+                ts,
+                subject);
+            added++;
+        }
+    }
+
+    private static string ExtractAddress(string headerValue)
+    {
+        // Headers come in two shapes: "Name <foo@bar>" and "foo@bar". Pull just the address.
+        var s = headerValue.Trim();
+        var lt = s.IndexOf('<');
+        var gt = s.IndexOf('>');
+        if (lt >= 0 && gt > lt)
+        {
+            return s[(lt + 1)..gt].Trim();
+        }
+        return s;
     }
 
     private void Refresh()

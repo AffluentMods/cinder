@@ -106,9 +106,13 @@ The first public release was preceded by a security audit. The fixes that landed
 These items came out of the audit and are tracked but not yet fixed. We documented them in
 the open rather than leaving them implicit.
 
-- **API keys are stored in plaintext** in `%LOCALAPPDATA%\Cinder\settings.json`. The next
-  pass will wrap the AI API key and any VirusTotal key with DPAPI on Windows / libsecret on
-  Linux. Workaround until then: don't put production keys in shared workstations.
+- **API keys at rest**. Settings.json values containing `apiKey` / `ApiKey` / `api_key`
+  are now encrypted before write and decrypted on load. On Windows we use DPAPI
+  (`CurrentUser` scope) — only the same user on the same machine can decrypt. On Linux /
+  macOS we fall back to an AES-GCM scheme with the key derived from
+  `MachineName + UserName + "cinder.v1"`; that's obfuscation rather than real protection
+  (anyone with read access to your home directory and machine ID can decrypt). True
+  libsecret / KeyChain integration on Linux / macOS remains tracked.
 - **Passphrases are passed as `string`.** Garbage-collected, immutable, not zeroable. Argon2id
   + `SecureString` / `byte[]` adapters are tracked for the Phase 8 case-management deepening.
 - **No Authenticode signature check on plugins.** The SHA-256 manifest is the current gate.

@@ -139,8 +139,11 @@ libraries do the heavy lifting in-process.
   human-readable path components. Reconstructs the full traversal path
   per row.
 - ✅ SRUM — Microsoft.Database.Isam opens SRUDB.dat read-only with
-  staged-file copy and log-replay. Table catalog + ESE schema decoded;
-  per-row extraction for individual GUID tables still 🟡.
+  staged-file copy and log-replay. Per-row decoders for the three main
+  extension tables: application resource usage (per-app CPU foreground
+  + background + face time), network data usage (bytes sent / received),
+  energy estimation. Resolves AppId / UserId via SruDbIdMapTable;
+  binary SIDs render as canonical S-1-… strings.
 - ✅ Email — `.msg` (Outlook) + `.eml` + `.mbox` via `MsgReader` and an
   in-house MBOX scanner. `.pst` / `.ost` still need the libpff sidecar.
 
@@ -161,8 +164,13 @@ libraries do the heavy lifting in-process.
   printable-strings extraction for binaries. Standard Lucene query
   syntax (`source:evtx`, `user:alice`, `text:"exact phrase"`, etc.).
 - 🟡 Super-timeline — view exists, merge logic pending.
-- 🟡 Map (Mapsui.Avalonia) — UI shell.
-- 🟡 Comm graph (LiveCharts2) — UI shell.
+- ✅ Map — auto-ingest from a folder of images. MetadataExtractor pulls
+  every photo's EXIF GPS, plots one point per geo-tagged image with
+  filename + mtime. Manual add still available for non-image evidence.
+- ✅ Communication graph — auto-ingest from a folder of `.eml` / `.msg`
+  / `.mbox` files. Parses From / To headers, deduplicates identities,
+  builds a directed who-talked-to-whom graph with in/out degree counts.
+  Manual add still available.
 - 🟡 Hash sets (NSRL bulk import) — UI shell.
 - ✅ YARA-lite — in-house parser + Aho-Corasick matcher. Loads `.yar`
   files, parses the common `rule { meta: strings: condition: }` grammar
@@ -181,12 +189,13 @@ libraries do the heavy lifting in-process.
 
 ## Phase 8 — Reporting & case management ✅ (most)
 
-- ✅ Reports — Markdown / HTML / JSON playbook all in-process. PDF
-  generation now goes through **QuestPDF** in-process (no external
-  converter required); wkhtmltopdf / headless Chromium remain as
-  fallbacks if QuestPDF ever fails. Layout: cover metadata, per-section
-  bodies with embedded exhibits, full exhibit index table, every page
-  has a Cinder + case + page-number footer.
+- ✅ Reports — Markdown / HTML / PDF (QuestPDF, in-process) / DOCX
+  (DocumentFormat.OpenXml, in-process) / JSON playbook, all without
+  external converters. PDF: cover metadata, per-section bodies with
+  embedded exhibit cards, full exhibit index, header + footer on every
+  page. DOCX: structurally valid Word document with title page,
+  per-section bodies (paragraphs + bullets), exhibit cards, exhibit
+  index table, and proper Office core properties.
 - ✅ Custody chain view — fully working.
 - ✅ Case create / open / branch — working.
 - ✅ Workflows — JSON DAG loader + topological executor. Built-in

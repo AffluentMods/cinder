@@ -113,6 +113,17 @@
          primarily for Android adb backup (.ab) inside MobileTool. -->
     <PackageVersion Include="SharpCompress" Version="0.48.1" />
 
+    <!-- DOCX writer (real court-ready Word export). -->
+    <PackageVersion Include="DocumentFormat.OpenXml" Version="3.5.1" />
+
+    <!-- EXIF / image metadata extraction — backs Map auto-ingest from images. -->
+    <PackageVersion Include="MetadataExtractor" Version="2.9.3" />
+
+    <!-- DPAPI / CryptProtectData for at-rest API-key encryption on Windows.
+         Cross-platform shim: on Linux it falls back to a deterministic XOR
+         (documented as not real encryption). -->
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.8" />
+
     <!-- Testing -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.2" />

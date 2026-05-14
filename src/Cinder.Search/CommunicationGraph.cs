@@ -21,6 +21,12 @@ public sealed class CommunicationGraph
         b.InCount++;
         _edges.Add(new GraphEdge(from, to, source, timestamp, subject));
     }
+
+    public void Clear()
+    {
+        _nodes.Clear();
+        _edges.Clear();
+    }
 }
 
 public sealed class GraphNode

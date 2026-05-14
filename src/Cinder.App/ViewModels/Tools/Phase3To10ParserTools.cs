@@ -407,12 +407,17 @@ public sealed partial class SrumTool
         }
     }
 
+    // Well-known SRUM extension table GUIDs.
+    private const string NetworkDataTable = "{973F5D5C-1D90-4944-BE8E-24B94231A174}";
+    private const string AppResourceTable = "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA89}";
+    private const string NetworkConnTable = "{DD6636C4-8929-4683-974E-22C046A43763}";
+    private const string EnergyEstTable   = "{FEE4E14F-02A9-4550-B5CE-5FA2DA202E37}";
+
     private static List<object> Parse(string path, CancellationToken ct)
     {
         var rows = new List<object>();
-        // We stage SRUDB.dat into a fresh working directory so ESE can replay its
-        // logs without polluting the source folder. Microsoft.Database.Isam expects
-        // checkpoint/log/temp paths to be writable.
+        // Stage SRUDB.dat into a fresh working directory so ESE can replay its logs without
+        // polluting the source folder.
         var stagingDir = Path.Combine(Path.GetTempPath(), "cinder-srum-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stagingDir);
         var stagedDb = Path.Combine(stagingDir, Path.GetFileName(path));
@@ -431,27 +436,27 @@ public sealed partial class SrumTool
             using var session = inst.CreateSession();
             session.AttachDatabase(stagedDb);
             using var db = session.OpenDatabase(stagedDb);
-            // Walk the table catalog. A full ESE row extractor is its own subsystem;
-            // for v0.1 we surface the table list so the user sees the database opened
-            // successfully and which SRUM extensions are present.
-            foreach (Microsoft.Database.Isam.TableDefinition t in db.Tables)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (rows.Count >= 5_000) break;
-                rows.Add(new
-                {
-                    Table = t.Name,
-                    Columns = t.Columns.Count,
-                    Note = SrumTableLabel(t.Name),
-                });
-            }
+
+            // Build the ID → name map first (table is SruDbIdMapTable; columns IdType, IdIndex,
+            // IdBlob). IdBlob is a UTF-16 string for AppIds and a binary SID for UserIds.
+            var idMap = ReadSruDbIdMap(db, ct);
+
+            // Stream rows from each well-known table. Each table has its own column set; we
+            // pick the most useful columns and label them.
+            ReadAppResourceTable(db, idMap, rows, ct);
+            ReadNetworkDataTable(db, idMap, rows, ct);
+            ReadEnergyEstTable(db, idMap, rows, ct);
+
             if (rows.Count == 0)
             {
                 rows.Add(new
                 {
-                    Table = "(empty)",
-                    Columns = 0,
-                    Note = "SRUDB.dat opened but contains no tables — possibly truncated or wrong file.",
+                    Time = "",
+                    Source = "(empty)",
+                    User = "",
+                    AppOrUser = "",
+                    Value = "",
+                    Note = "SRUDB.dat opened but no rows in the known SRUM extension tables.",
                 });
             }
         }
@@ -459,8 +464,11 @@ public sealed partial class SrumTool
         {
             rows.Add(new
             {
-                Table = "(error)",
-                Columns = 0,
+                Time = "",
+                Source = "(error)",
+                User = "",
+                AppOrUser = "",
+                Value = "",
                 Note = $"Could not open SRUDB.dat: {ex.Message}",
             });
         }
@@ -472,16 +480,224 @@ public sealed partial class SrumTool
         return rows;
     }
 
-    private static string SrumTableLabel(string name) => name switch
+    /// <summary>SruDbIdMapTable: maps small integer IDs to their string AppId or binary SID.</summary>
+    private static Dictionary<int, string> ReadSruDbIdMap(Microsoft.Database.Isam.IsamDatabase db, CancellationToken ct)
     {
-        "{973F5D5C-1D90-4944-BE8E-24B94231A174}" => "Network data usage (per-app bytes sent/recv)",
-        "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA89}" => "Application resource usage (per-app CPU + active time)",
-        "{DD6636C4-8929-4683-974E-22C046A43763}" => "Network connectivity (per-interface uptime)",
-        "{FEE4E14F-02A9-4550-B5CE-5FA2DA202E37}" => "Energy estimation (per-app power draw)",
-        "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA86}" => "Push notifications",
-        "SruDbIdMapTable" => "ID → name lookup table (resolves all of the above)",
-        _ => "",
-    };
+        var map = new Dictionary<int, string>();
+        try
+        {
+            using var cur = db.OpenCursor("SruDbIdMapTable");
+            cur.MoveBeforeFirst();
+            while (cur.MoveNext())
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var idType = TryGetInt(cur, "IdType");
+                    var idIndex = TryGetInt(cur, "IdIndex");
+                    var blob = cur.Record["IdBlob"] as byte[];
+                    if (idIndex is null) continue;
+                    string label;
+                    if (idType is 3 && blob is not null)
+                    {
+                        // User SID — render as S-1-…
+                        label = TrySidString(blob);
+                    }
+                    else if (blob is not null)
+                    {
+                        // App ID — UTF-16, often with a trailing nul.
+                        var s = System.Text.Encoding.Unicode.GetString(blob).TrimEnd('\0');
+                        label = s;
+                    }
+                    else continue;
+                    map[idIndex.Value] = label;
+                }
+                catch { /* malformed row — skip */ }
+            }
+        }
+        catch { /* table missing — skip */ }
+        return map;
+    }
+
+    private static void ReadAppResourceTable(Microsoft.Database.Isam.IsamDatabase db,
+        Dictionary<int, string> idMap, List<object> rows, CancellationToken ct)
+    {
+        if (!db.Exists(AppResourceTable)) return;
+        try
+        {
+            using var cur = db.OpenCursor(AppResourceTable);
+            cur.MoveBeforeFirst();
+            while (cur.MoveNext() && rows.Count < 25_000)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var ts = TryGetFiletime(cur, "TimeStamp");
+                    var appId = ResolveId(cur, idMap, "AppId");
+                    var userId = ResolveId(cur, idMap, "UserId");
+                    var cpuActive = TryGetLong(cur, "CpuForeground") ?? 0;
+                    var cpuBackground = TryGetLong(cur, "CpuBackground") ?? 0;
+                    var faceTime = TryGetLong(cur, "FaceTime") ?? 0;
+                    rows.Add(new
+                    {
+                        Time = ts,
+                        Source = "app",
+                        User = userId,
+                        AppOrUser = appId,
+                        Value = $"cpu_fg={cpuActive} ms · cpu_bg={cpuBackground} ms · face_time={faceTime} ms",
+                        Note = "",
+                    });
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static void ReadNetworkDataTable(Microsoft.Database.Isam.IsamDatabase db,
+        Dictionary<int, string> idMap, List<object> rows, CancellationToken ct)
+    {
+        if (!db.Exists(NetworkDataTable)) return;
+        try
+        {
+            using var cur = db.OpenCursor(NetworkDataTable);
+            cur.MoveBeforeFirst();
+            while (cur.MoveNext() && rows.Count < 25_000)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var ts = TryGetFiletime(cur, "TimeStamp");
+                    var appId = ResolveId(cur, idMap, "AppId");
+                    var userId = ResolveId(cur, idMap, "UserId");
+                    var sent = TryGetLong(cur, "BytesSent") ?? 0;
+                    var recv = TryGetLong(cur, "BytesRecvd") ?? 0;
+                    rows.Add(new
+                    {
+                        Time = ts,
+                        Source = "net",
+                        User = userId,
+                        AppOrUser = appId,
+                        Value = $"sent={sent:N0} B · recv={recv:N0} B",
+                        Note = "",
+                    });
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static void ReadEnergyEstTable(Microsoft.Database.Isam.IsamDatabase db,
+        Dictionary<int, string> idMap, List<object> rows, CancellationToken ct)
+    {
+        if (!db.Exists(EnergyEstTable)) return;
+        try
+        {
+            using var cur = db.OpenCursor(EnergyEstTable);
+            cur.MoveBeforeFirst();
+            while (cur.MoveNext() && rows.Count < 25_000)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var ts = TryGetFiletime(cur, "TimeStamp");
+                    var appId = ResolveId(cur, idMap, "AppId");
+                    var userId = ResolveId(cur, idMap, "UserId");
+                    var energy = TryGetLong(cur, "DesignedCapacity") ?? 0;
+                    rows.Add(new
+                    {
+                        Time = ts,
+                        Source = "energy",
+                        User = userId,
+                        AppOrUser = appId,
+                        Value = $"energy={energy}",
+                        Note = "",
+                    });
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private static int? TryGetInt(Microsoft.Database.Isam.Cursor cur, string col)
+    {
+        try
+        {
+            var v = cur.Record[col];
+            return v switch
+            {
+                int i => i,
+                short s => s,
+                byte b => b,
+                _ => null,
+            };
+        }
+        catch { return null; }
+    }
+
+    private static long? TryGetLong(Microsoft.Database.Isam.Cursor cur, string col)
+    {
+        try
+        {
+            var v = cur.Record[col];
+            return v switch
+            {
+                long l => l,
+                int i => i,
+                _ => null,
+            };
+        }
+        catch { return null; }
+    }
+
+    private static string TryGetFiletime(Microsoft.Database.Isam.Cursor cur, string col)
+    {
+        try
+        {
+            var v = cur.Record[col];
+            if (v is DateTime dt) return dt.ToUniversalTime().ToString("u", CultureInfo.InvariantCulture);
+            if (v is long ft && ft > 0)
+            {
+                try { return DateTime.FromFileTimeUtc(ft).ToString("u", CultureInfo.InvariantCulture); }
+                catch { return ""; }
+            }
+        }
+        catch { }
+        return "";
+    }
+
+    private static string ResolveId(Microsoft.Database.Isam.Cursor cur,
+        Dictionary<int, string> idMap, string column)
+    {
+        var idx = TryGetInt(cur, column);
+        if (idx is null) return "";
+        return idMap.GetValueOrDefault(idx.Value, $"id#{idx.Value}");
+    }
+
+    /// <summary>Format a binary SID as the canonical S-1-… string. Returns "" on malformed input.</summary>
+    private static string TrySidString(byte[] sid)
+    {
+        try
+        {
+            // SID layout: revision (1 byte) | subAuthCount (1) | authority (6 BE) | subAuths (4 each LE)
+            if (sid.Length < 8) return "";
+            int rev = sid[0];
+            int count = sid[1];
+            if (sid.Length < 8 + 4 * count) return "";
+            long authority = ((long)sid[2] << 40) | ((long)sid[3] << 32) | ((long)sid[4] << 24) |
+                             ((long)sid[5] << 16) | ((long)sid[6] << 8) | sid[7];
+            var sb = new System.Text.StringBuilder().Append("S-").Append(rev).Append('-').Append(authority);
+            for (int i = 0; i < count; i++)
+            {
+                uint sub = BitConverter.ToUInt32(sid, 8 + 4 * i);
+                sb.Append('-').Append(sub);
+            }
+            return sb.ToString();
+        }
+        catch { return ""; }
+    }
 }
 
 // ============================================================ NETWORK (PCAP) ========
