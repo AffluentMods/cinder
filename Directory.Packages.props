@@ -124,6 +124,10 @@
          (documented as not real encryption). -->
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.8" />
 
+    <!-- Branding icon generator (tools/icons). Dev-time only. -->
+    <PackageVersion Include="Svg.Skia" Version="4.9.0" />
+    <PackageVersion Include="SkiaSharp" Version="3.119.2" />
+
     <!-- Testing -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.2" />

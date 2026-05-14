@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/branding/cinder-logo.svg" alt="Cinder" width="120" />
+<img src="assets/branding/cinder-hero.png" alt="Cinder — open-source digital-forensics toolkit" width="100%" />
 
 # Cinder
 

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    One-shot tool that rasterises assets/branding/cinder-logo.svg into:
+      assets/branding/png/cinder-NN.png  (NN in 16, 24, 32, 48, 64, 96, 128, 256, 512)
+      assets/branding/cinder.ico         (multi-resolution Windows icon)
+      assets/branding/cinder-hero.png    (1280x640 splash for README + release)
+
+    Run:    dotnet run from tools/icons
+    Re-run any time the source SVG changes. The generated files are committed
+    to the repo so a fresh checkout does not need to rebuild them.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Cinder.Tools.IconGen</RootNamespace>
+    <!-- This tool is dev-time only — don't ship it as part of any package. -->
+    <IsPackable>false</IsPackable>
+    <!-- Tool project — opt out of the repo-wide doc-comment requirement. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;NU1701</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Svg.Skia" />
+    <PackageReference Include="SkiaSharp" />
+  </ItemGroup>
+</Project>

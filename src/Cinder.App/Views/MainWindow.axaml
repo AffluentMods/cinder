@@ -6,6 +6,7 @@
         x:Class="Cinder.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Cinder"
+        Icon="/Assets/Branding/cinder.ico"
         Width="1440" Height="900"
         MinWidth="1080" MinHeight="640"
         TransparencyLevelHint="Mica,AcrylicBlur,Blur"

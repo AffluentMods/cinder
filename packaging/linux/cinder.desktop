@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Cinder
+GenericName=Digital Forensics Toolkit
+Comment=Open-source digital-forensics toolkit — hex, disk imaging, artifact parsing, timelines, reports.
+Exec=cinder %F
+TryExec=cinder
+Icon=cinder
+Terminal=false
+StartupNotify=true
+StartupWMClass=Cinder
+Categories=Development;Utility;Security;Forensics;
+Keywords=forensics;dfir;hex;disk;evtx;registry;timeline;memory;volatility;autopsy;
+MimeType=application/x-raw-disk-image;application/x-ewf;application/vnd.ms-outlook;application/x-msdownload;application/x-ms-evtx;application/x-pcap;application/vnd.tcpdump.pcap;

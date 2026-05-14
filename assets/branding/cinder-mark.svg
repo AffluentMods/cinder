@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cinder mark — the flat flame glyph the app uses in its title bar wordmark.
+  Single colour, no gradient, so it inherits whatever Foreground the host control
+  paints with. Use this when the logo needs to match a theme accent rather than
+  carry its own colour (e.g. the small ember in the "cinder" wordmark in the
+  title bar).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="Cinder">
+  <path d="M32 4 C 22 18, 16 26, 16 38 C 16 50, 24 60, 32 60 C 40 60, 48 50, 48 38 C 48 30, 42 26, 38 22 C 36 28, 30 28, 30 22 C 30 16, 36 12, 32 4 Z"
+        fill="currentColor" />
+  <circle cx="32" cy="44" r="6" fill="currentColor" opacity="0.55" />
+</svg>
