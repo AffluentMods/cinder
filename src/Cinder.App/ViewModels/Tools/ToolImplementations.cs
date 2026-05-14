@@ -1033,8 +1033,14 @@ public sealed partial class WorkflowsTool
 {
     public ObservableCollection<Cinder.Workflow.WorkflowNode> Nodes { get; } = new();
 
+    /// <summary>One row of execution output per node, populated by the Run command.</summary>
+    public ObservableCollection<WorkflowExecutionRow> Outputs { get; } = new();
+
     [ObservableProperty] private string? _path;
     [ObservableProperty] private string? _statusLine;
+    [ObservableProperty] private bool _isRunning;
+
+    private Cinder.Workflow.Workflow? _loaded;
 
     [RelayCommand]
     private async Task LoadAsync(CancellationToken ct)
@@ -1043,19 +1049,56 @@ public sealed partial class WorkflowsTool
         if (string.IsNullOrEmpty(p)) return;
         Path = p;
         Nodes.Clear();
+        Outputs.Clear();
         try
         {
             var json = await File.ReadAllTextAsync(p, ct);
-            var wf = Cinder.Workflow.Workflow.FromJson(json);
-            foreach (var n in wf.TopologicalOrder()) Nodes.Add(n);
-            StatusLine = $"{Nodes.Count} step{(Nodes.Count == 1 ? "" : "s")}.";
+            _loaded = Cinder.Workflow.Workflow.FromJson(json);
+            foreach (var n in _loaded.TopologicalOrder()) Nodes.Add(n);
+            StatusLine = $"{Nodes.Count} step{(Nodes.Count == 1 ? "" : "s")} loaded.";
         }
         catch (Exception ex)
         {
             StatusLine = $"Failed: {ex.Message}";
         }
     }
+
+    /// <summary>
+    /// Execute the loaded workflow. Each step's handler runs in topological order; results
+    /// land in <see cref="Outputs"/> for the user to inspect. Failed steps abort the run with
+    /// a status message but don't crash the tool.
+    /// </summary>
+    [RelayCommand]
+    private async Task RunAsync(CancellationToken ct)
+    {
+        if (_loaded is null)
+        {
+            StatusLine = "Load a workflow first.";
+            return;
+        }
+        Outputs.Clear();
+        IsRunning = true;
+        StatusLine = "Running…";
+        try
+        {
+            var runner = WorkflowHandlers.BuildRunner(Outputs);
+            await Task.Run(() => runner.RunAsync(_loaded, ct), ct);
+            StatusLine = $"Done · {Outputs.Count} step{(Outputs.Count == 1 ? "" : "s")}.";
+        }
+        catch (Exception ex)
+        {
+            Outputs.Add(new WorkflowExecutionRow("(error)", "—", "failed", ex.Message));
+            StatusLine = $"Failed at step: {ex.Message}";
+        }
+        finally
+        {
+            IsRunning = false;
+        }
+    }
 }
+
+/// <summary>One execution row shown in the Workflows results pane.</summary>
+public sealed record WorkflowExecutionRow(string NodeId, string Kind, string Status, string Result);
 
 // =====================================================================================
 // PLUGINS — load .dll from a folder.

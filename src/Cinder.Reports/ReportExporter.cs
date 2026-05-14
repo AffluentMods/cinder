@@ -1,4 +1,8 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 
 namespace Cinder.Reports;
 
@@ -29,7 +33,35 @@ public sealed class ReportExporter
         }
     }
 
+    /// <summary>
+    /// PDF generation. Default path is QuestPDF in-process — fully managed, no external
+    /// converter, no SSRF/LFI surface. Falls back to wkhtmltopdf or headless Chromium only if
+    /// QuestPDF fails (it shouldn't on any reasonable report).
+    /// </summary>
     private static async Task<string> ExportPdfAsync(ReportBuilder builder, string outputPath, CancellationToken ct)
+    {
+        try
+        {
+            // QuestPDF Community licence is fine for OSS use. Set once per process.
+            QuestPDF.Settings.License = LicenseType.Community;
+
+            var report = builder.Build();
+            var markdown = builder.ToMarkdown();
+            await Task.Run(() =>
+                QuestPdfDocument.Create(report, markdown).GeneratePdf(outputPath), ct).ConfigureAwait(false);
+            return outputPath;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // QuestPDF failed — fall back to the wkhtmltopdf / Chromium path so users with the
+            // tool already installed aren't blocked. Surface the QuestPDF error in the fallback's
+            // message so a user can report it.
+            return await ExportPdfViaExternalAsync(builder, outputPath, ct, fallbackReason: ex.Message)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<string> ExportPdfViaExternalAsync(ReportBuilder builder, string outputPath, CancellationToken ct, string fallbackReason)
     {
         // SECURITY: write the staging HTML inside a fresh per-invocation temp directory.
         // Don't put the file next to the user-supplied outputPath — that path is user-influenced
@@ -47,8 +79,8 @@ public sealed class ReportExporter
             if (converter is null)
             {
                 throw new InvalidOperationException(
-                    "No PDF converter found (looked for wkhtmltopdf, chrome, msedge). HTML staged at " + htmlPath +
-                    ". Install wkhtmltopdf or run a Chromium-based browser headless to produce the PDF/A.");
+                    $"In-process PDF generation failed ({fallbackReason}) and no external converter is " +
+                    $"installed (looked for wkhtmltopdf, chrome, msedge). HTML staged at {htmlPath}.");
             }
 
             var psi = new ProcessStartInfo(converter.FileName)

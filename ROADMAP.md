@@ -131,13 +131,13 @@ libraries do the heavy lifting in-process.
   every saved SSID + last-seen.
 - ✅ Amcache — Registry-driven; reads `InventoryApplicationFile` (or `File`
   on pre-Win10) for path / hash / publisher / version / last-seen.
-- 🟡 ShimCache — Registry-driven *surface*; the binary AppCompatCache blob
-  is located and metadata exposed, but the version-specific structured
-  decoder is pending. Open the blob in the Hex viewer for byte-level
-  inspection in the meantime.
-- ✅ Shellbags — `Registry` lib walks the BagMRU tree on NTUSER /
-  UsrClass. NodeSlot, MRUListEx, LastWrite per entry. (Shell-item *path*
-  reconstruction layer is still 🟡.)
+- ✅ ShimCache — Win8 / Win10 / Win11 AppCompatCache blob decoder.
+  Streams every "10ts"/"00ts" entry: full path + last-modified FILETIME.
+- ✅ Shellbags — `Registry` lib walks BagMRU; each numbered value is
+  decoded via the `Lnk.ShellItems` shell-item parsers (drives, folders,
+  files, network shares, control panel, delegate items) into
+  human-readable path components. Reconstructs the full traversal path
+  per row.
 - ✅ SRUM — Microsoft.Database.Isam opens SRUDB.dat read-only with
   staged-file copy and log-replay. Table catalog + ESE schema decoded;
   per-row extraction for individual GUID tables still 🟡.
@@ -169,14 +169,21 @@ libraries do the heavy lifting in-process.
   driver.
 - 🟡 Volatility 3 wrapper — UI shell.
 
-## Phase 8 — Reporting & case management 🟡
+## Phase 8 — Reporting & case management ✅ (most)
 
-- 🟡 Court / IR / audit report templates (Markdown / HTML / PDF / DOCX) —
-  UI shell, template engine pending.
+- ✅ Reports — Markdown / HTML / JSON playbook all in-process. PDF
+  generation now goes through **QuestPDF** in-process (no external
+  converter required); wkhtmltopdf / headless Chromium remain as
+  fallbacks if QuestPDF ever fails. Layout: cover metadata, per-section
+  bodies with embedded exhibits, full exhibit index table, every page
+  has a Cinder + case + page-number footer.
 - ✅ Custody chain view — fully working.
 - ✅ Case create / open / branch — working.
-- 🟡 Workflows (visual node-graph automation) — UI shell, runtime pending.
-- 🟡 Plugins (C# SDK + Python scripting host) — UI shell.
+- ✅ Workflows — JSON DAG loader + topological executor. Built-in
+  handlers: `open-image`, `hash`, `registry`, `fs-enumerate`, `carve`,
+  `report`, `index`. Outputs land in a results pane row-by-row;
+  `ai-summary` step degrades gracefully when no AI provider is set.
+- 🟡 Plugins (C# SDK + Python scripting host) — UI shell with trust gate.
 
 ## Phase 9 — AI copilot ⬜
 

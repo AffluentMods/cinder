@@ -691,12 +691,10 @@ public sealed partial class ShimcacheTool
 
     private static List<object> Parse(string path, CancellationToken ct)
     {
-        // Shimcache is a single binary blob at:
-        //   ControlSet00X\Control\Session Manager\AppCompatCache\AppCompatCache
-        // The binary format depends on the Windows version; rather than re-implement the
-        // full Win10/11 parser here (which is non-trivial), we surface the raw blob's
-        // metadata and let the Hex viewer / a future shimcache.dll do the format-specific
-        // structured decode. This is a stopgap until ShimCacheParser ships on NuGet.
+        // AppCompatCache lives at ControlSet00X\Control\Session Manager\AppCompatCache.
+        // Format varies by Windows version. We decode Win10/11 ("10ts" magic 0x31307473) and
+        // Win8/8.1 ("10ts"/"00ts") which together cover 99% of modern evidence. Older formats
+        // (XP/2003/Vista/Win7) surface as a "binary blob present" row pointing at Hex viewer.
         var hive = new global::Registry.RegistryHive(path);
         hive.ParseHive();
         var rows = new List<object>();
@@ -706,16 +704,99 @@ public sealed partial class ShimcacheTool
             var key = hive.GetKey($@"{setName}\Control\Session Manager\AppCompatCache");
             if (key is null) continue;
             var val = key.Values.FirstOrDefault(v => v.ValueName == "AppCompatCache");
-            if (val is null) continue;
-            rows.Add(new
+            var blob = val?.ValueDataRaw;
+            if (blob is null || blob.Length < 16) continue;
+
+            var entries = DecodeWin10Or8(blob);
+            if (entries.Count == 0)
             {
-                ControlSet = setName,
-                BlobSize = val.ValueDataRaw?.Length ?? 0,
-                LastWrite = key.LastWriteTime?.ToString("u", CultureInfo.InvariantCulture) ?? "",
-                Note = "Binary AppCompatCache blob present — open in Hex viewer for byte-level inspection.",
-            });
+                rows.Add(new
+                {
+                    ControlSet = setName,
+                    Path = "",
+                    LastModified = "",
+                    Note = $"AppCompatCache blob present ({blob.Length:N0} bytes) but its header doesn't match Win8/Win10/Win11. Open in Hex viewer for inspection.",
+                });
+                continue;
+            }
+            foreach (var e in entries)
+            {
+                ct.ThrowIfCancellationRequested();
+                rows.Add(new
+                {
+                    ControlSet = setName,
+                    Path = e.Path,
+                    LastModified = e.LastModified?.ToString("u", CultureInfo.InvariantCulture) ?? "",
+                    Note = e.Note,
+                });
+                if (rows.Count >= 25_000) break;
+            }
         }
         return rows;
+    }
+
+    private readonly record struct ShimEntry(string Path, DateTimeOffset? LastModified, string Note);
+
+    /// <summary>
+    /// Win10/Win11 AppCompatCache parser. The cache is a stream of variable-length entries each
+    /// starting with the magic "10ts" (0x73 0x74 0x73 0x31 reversed — "10ts"). After the 4-byte
+    /// magic comes a 4-byte length, then the entry payload: { 2-byte path length, N bytes UTF-16
+    /// path, 8-byte FILETIME, 4-byte data size, … skipped … }.
+    /// Win8/8.1 uses a similar layout with magic "00ts" / "10ts".
+    /// </summary>
+    private static List<ShimEntry> DecodeWin10Or8(byte[] blob)
+    {
+        var entries = new List<ShimEntry>();
+        // Modern Win10+ cache starts with a 48-byte header. Earlier Win10 builds and Win8
+        // start at offset 128 or 0x80. We scan for the "10ts" / "00ts" signature instead of
+        // hard-coding the header size — far more robust against monthly Win10 build changes.
+        int i = 0;
+        while (i + 12 < blob.Length && entries.Count < 25_000)
+        {
+            // Look for "10ts" (0x31 0x30 0x74 0x73) or "00ts" (0x30 0x30 0x74 0x73).
+            if (!(blob[i] == 0x31 || blob[i] == 0x30) ||
+                blob[i + 1] != 0x30 || blob[i + 2] != 0x74 || blob[i + 3] != 0x73)
+            {
+                i++;
+                continue;
+            }
+
+            // Length of this entry's payload (after the magic + length fields).
+            int entryLen = BitConverter.ToInt32(blob, i + 4);
+            if (entryLen <= 0 || i + 8 + entryLen > blob.Length)
+            {
+                i++;
+                continue;
+            }
+            int p = i + 8;
+            try
+            {
+                // Path: u16 length-prefixed UTF-16 string.
+                ushort pathLen = BitConverter.ToUInt16(blob, p);
+                p += 2;
+                if (pathLen == 0 || pathLen > entryLen) { i = p; continue; }
+                if (p + pathLen > blob.Length) break;
+                var path = System.Text.Encoding.Unicode.GetString(blob, p, pathLen);
+                p += pathLen;
+
+                // FILETIME: last-modified of the executable.
+                if (p + 8 > blob.Length) break;
+                long ft = BitConverter.ToInt64(blob, p);
+                DateTimeOffset? lastMod = null;
+                if (ft > 0 && ft < 0x7FFFFFFFFFFFFFFFL)
+                {
+                    try { lastMod = DateTimeOffset.FromFileTime(ft); } catch { /* invalid */ }
+                }
+
+                entries.Add(new ShimEntry(path, lastMod, ""));
+            }
+            catch
+            {
+                // Malformed entry — skip past the magic and keep scanning.
+            }
+            i = i + 8 + entryLen;
+        }
+        return entries;
     }
 }
 

@@ -262,12 +262,14 @@ public sealed partial class ShellbagsTool
 
     private static List<object> Parse(string path, CancellationToken ct)
     {
-        // NTUSER.DAT BagMRU: Software\Microsoft\Windows\Shell\BagMRU
-        // UsrClass.dat:     Local Settings\Software\Microsoft\Windows\Shell\BagMRU
-        // We try both — the underlying key tree is the same shape.
         var hive = new global::Registry.RegistryHive(path);
         hive.ParseHive();
         var rows = new List<object>();
+        // BagMRU lives at slightly different paths depending on hive flavour:
+        //   NTUSER.DAT       Software\Microsoft\Windows\Shell\BagMRU
+        //                    Software\Microsoft\Windows\ShellNoRoam\BagMRU
+        //   UsrClass.dat     Local Settings\Software\Microsoft\Windows\Shell\BagMRU
+        //                    Local Settings\Software\Microsoft\Windows\ShellNoRoam\BagMRU
         var roots = new[]
         {
             @"Software\Microsoft\Windows\Shell\BagMRU",
@@ -280,27 +282,33 @@ public sealed partial class ShellbagsTool
             ct.ThrowIfCancellationRequested();
             var key = hive.GetKey(rootPath);
             if (key is null) continue;
-            WalkBagMru(key, "", rows, ct);
+            WalkBagMru(key, parentPath: "", rows, ct);
         }
         return rows;
     }
 
     private static void WalkBagMru(global::Registry.Abstractions.RegistryKey key,
-                                    string pathTrail, List<object> rows, CancellationToken ct)
+                                    string parentPath, List<object> rows, CancellationToken ct)
     {
         if (rows.Count >= 25_000) return;
 
-        // Each BagMRU subkey is numbered (0, 1, 2…). Its NodeSlot points at the
-        // Bags\<n>\Shell value that has the visited folder's preferences. We surface
-        // the NodeSlot + decoded MRUListEx + LastWriteTime for each step.
+        // Reconstruct this key's path component from its binary shell-item value. BagMRU
+        // entries are numbered ("0", "1", "2"...). Each numbered value at the PARENT is a
+        // shell-item blob describing that visited folder. We resolve our own component by
+        // looking at our key name (which equals the numbered value we represent) against the
+        // parent's same-named value. Root-level keys have no shell-item; just use their key
+        // name.
+        var componentName = DecodeOwnShellItem(key) ?? key.KeyName;
+        var thisPath = string.IsNullOrEmpty(parentPath)
+            ? componentName
+            : (parentPath.EndsWith('\\') ? parentPath + componentName : parentPath + "\\" + componentName);
+
         var nodeSlot = key.Values.FirstOrDefault(v => v.ValueName == "NodeSlot");
-        var mruList = key.Values.FirstOrDefault(v => v.ValueName == "MRUListEx");
         rows.Add(new
         {
-            Path = string.IsNullOrEmpty(pathTrail) ? key.KeyName : pathTrail,
+            Path = thisPath,
             NodeSlot = nodeSlot?.ValueData ?? "",
             EntryCount = key.SubKeys.Count,
-            MRUListEx = mruList?.ValueData ?? "",
             LastWrite = key.LastWriteTime?.ToString("u", CultureInfo.InvariantCulture) ?? "",
             HiveKey = key.KeyPath,
         });
@@ -308,8 +316,81 @@ public sealed partial class ShellbagsTool
         {
             ct.ThrowIfCancellationRequested();
             if (rows.Count >= 25_000) return;
-            WalkBagMru(sub, $"{pathTrail}\\{sub.KeyName}", rows, ct);
+            WalkBagMru(sub, thisPath, rows, ct);
         }
+    }
+
+    /// <summary>
+    /// Resolves a BagMRU subkey's path component to a human-readable string by parsing the
+    /// corresponding numbered value on its parent. Returns null if there's no parent or the
+    /// shell-item type isn't one we recognise.
+    /// </summary>
+    private static string? DecodeOwnShellItem(global::Registry.Abstractions.RegistryKey key)
+    {
+        var parent = key.Parent;
+        if (parent is null) return null;
+        var val = parent.Values.FirstOrDefault(v => v.ValueName == key.KeyName);
+        if (val?.ValueDataRaw is not { Length: > 2 } bytes) return null;
+        return DecodeShellItemBytes(bytes);
+    }
+
+    /// <summary>
+    /// Picks the right Lnk.ShellItems decoder based on the shell-item type byte at offset 2.
+    /// Falls back to the printable subset of the buffer for unrecognised types.
+    /// </summary>
+    internal static string? DecodeShellItemBytes(byte[] bytes)
+    {
+        try
+        {
+            // bytes[0..2] = total size (LE); bytes[2] = type code.
+            var typeCode = bytes[2];
+            string? value = typeCode switch
+            {
+                0x1F => new Lnk.ShellItems.ShellBag0X1F(bytes).Value,
+                0x23 => new Lnk.ShellItems.ShellBag0X23(bytes, codepage: 1252).Value,
+                0x2E => new Lnk.ShellItems.ShellBag0X2E(bytes).Value,
+                0x2F => new Lnk.ShellItems.ShellBag0X2F(bytes, codepage: 1252).Value,
+                0x31 or 0x32 or 0xB1 => new Lnk.ShellItems.ShellBag0X31(bytes, codepage: 1252).Value,
+                0x35 or 0x71 => new Lnk.ShellItems.ShellBag0X71(bytes).Value,
+                0x40 or 0x41 or 0x42 or 0x46 or 0x47 or 0xC3 => new Lnk.ShellItems.ShellBag0X40(bytes, codepage: 1252).Value,
+                0x4C => new Lnk.ShellItems.ShellBag0X4C(bytes).Value,
+                0x61 => new Lnk.ShellItems.ShellBag0X61(bytes, codepage: 1252).Value,
+                0x74 => new Lnk.ShellItems.ShellBag0X74(bytes, codepage: 1252).Value,
+                _ => null,
+            };
+            if (!string.IsNullOrEmpty(value)) return value;
+        }
+        catch { /* parser threw on a malformed blob — fall through */ }
+
+        // Fallback: pull out the longest run of printable Latin / UTF-16 from the blob so the
+        // user sees *something* useful instead of an empty cell.
+        return ExtractPrintable(bytes);
+    }
+
+    private static string? ExtractPrintable(byte[] bytes)
+    {
+        if (bytes.Length < 6) return null;
+        var sb = new StringBuilder();
+        // Try UTF-16LE first (most shell-items embed names this way).
+        for (int i = 4; i + 1 < bytes.Length; i += 2)
+        {
+            var ch = (char)(bytes[i] | (bytes[i + 1] << 8));
+            if (ch == 0) break;
+            if (ch is >= (char)0x20 and <= (char)0x7E or >= (char)0xA1 and <= (char)0xFF)
+            {
+                sb.Append(ch);
+            }
+        }
+        if (sb.Length >= 3) return sb.ToString();
+        // Fall back to ASCII.
+        sb.Clear();
+        foreach (var b in bytes)
+        {
+            if (b is >= 0x20 and <= 0x7E) sb.Append((char)b);
+            else if (sb.Length >= 4) break;
+            else sb.Clear();
+        }
+        return sb.Length >= 4 ? sb.ToString() : null;
     }
 }
 
