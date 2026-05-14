@@ -101,21 +101,44 @@ copies are placeholders until the platform-specific drivers ship.
 - 🟡 File carver (header+footer, 30 default signatures) — UI shell;
   carving engine pending.
 
-## Phase 4 — Windows artifacts 🟡
+## Phase 4 — Windows artifacts ✅ (most) / 🟡 (some)
 
-- 🟡 Registry (regipy sidecar — schema in place, loader stub).
-- 🟡 Event Log (python-evtx) — schema in place, loader stub.
-- 🟡 Prefetch — UI shell.
-- 🟡 Shellbags — UI shell.
-- 🟡 Jumplists — UI shell.
-- 🟡 LNK shortcuts (pylnk3) — UI shell.
-- 🟡 Browser history (Chrome / Edge / Firefox / Brave / Opera) — UI shell.
-- 🟡 USB history (USBSTOR + MountedDevices + SetupAPI) — UI shell.
-- 🟡 Wi-Fi history — UI shell.
-- 🟡 SRUM (libesedb-python) — UI shell.
-- 🟡 Amcache (regipy) — UI shell.
-- 🟡 ShimCache (regipy) — UI shell.
-- 🟡 Email PST/MBOX (libpff-python) — UI shell.
+Migrated from Python sidecars to in-process C# parsers — the Phase 4 surface
+now works on a fresh install without the Python venv bootstrap for the common
+case. Eric Zimmerman's `Registry`, `evtx`, `Lnk`, `Prefetch`, and `JumpList`
+libraries do the heavy lifting in-process.
+
+- ✅ Registry — `Registry` (Eric Zimmerman) lib in-process. Walks every key /
+  value of an NTUSER / SYSTEM / SOFTWARE / SAM / Amcache hive, including
+  transaction-log replay.
+- ✅ Event Log (.evtx) — `evtx` lib in-process. Streams every record with
+  EventId, TimeCreated, Provider, Channel, Level, User, Computer, and
+  MapDescription where available.
+- ✅ Prefetch — `Prefetch` lib in-process. Handles every known Windows version
+  (XP–11), surfaces all 8 LastRunTimes plus run count and loaded-files count.
+- ✅ LNK shortcuts — `Lnk` lib in-process. Decodes target path, working dir,
+  arguments, MAC times, machine volume serial.
+- ✅ Jumplists — `JumpList` lib in-process. Both automatic and custom
+  destinations, with per-entry timestamps and AppId resolution.
+- ✅ Browser history (Chromium / Edge / Brave / Opera / Vivaldi / Firefox) —
+  direct read of the SQLite History / places.sqlite databases. Auto-stages
+  to a temp file so locked-by-browser DBs still parse.
+- ✅ USB history — Registry-driven; walks `Enum\USBSTOR` across every
+  ControlSet for vendor / product / serial / first-install timestamps.
+- ✅ Wi-Fi history — Registry-driven; walks `NetworkList\Profiles` for
+  every saved SSID + last-seen.
+- ✅ Amcache — Registry-driven; reads `InventoryApplicationFile` (or `File`
+  on pre-Win10) for path / hash / publisher / version / last-seen.
+- 🟡 ShimCache — Registry-driven *surface*; the binary AppCompatCache blob
+  is located and metadata exposed, but the version-specific structured
+  decoder is pending. Open the blob in the Hex viewer for byte-level
+  inspection in the meantime.
+- 🟡 Shellbags — UI shell. Wiring to the `Registry` lib pending; needs the
+  shell-item parsing layer on top.
+- 🟡 SRUM (libesedb sidecar) — UI shell. Needs Microsoft.Database.Isam +
+  SRUDB.dat schema decoder.
+- ✅ Email — `.msg` (Outlook) + `.eml` + `.mbox` via `MsgReader` and an
+  in-house MBOX scanner. `.pst` / `.ost` still need the libpff sidecar.
 
 ## Phase 5 — Linux artifacts 🟡
 

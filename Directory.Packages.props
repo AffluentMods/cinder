@@ -57,6 +57,21 @@
          in-house via System.IO.Compression.ZipArchive + XML scrape — no extra dep. -->
     <PackageVersion Include="PdfPig" Version="0.1.14" />
 
+    <!--
+      DFIR parsers. Eric Zimmerman's libraries are the de-facto standard for Windows
+      forensic artifacts in .NET — Cinder consumes them in-process so Phase 4 doesn't
+      need a Python sidecar for the common cases. The Python parsers stay around for
+      formats with no good C# equivalent (libpff PST, vol3 memory).
+    -->
+    <PackageVersion Include="Registry" Version="2026.5.0" />
+    <PackageVersion Include="evtx" Version="1.5.2" />
+    <PackageVersion Include="Lnk" Version="2026.5.3" />
+    <PackageVersion Include="Prefetch" Version="2026.5.2" />
+    <PackageVersion Include="JumpList" Version="2026.5.2" />
+
+    <!-- Email / message formats — .msg + .eml + MIME. PST/OST still needs a sidecar. -->
+    <PackageVersion Include="MsgReader" Version="6.0.11" />
+
     <!-- HTTP -->
     <PackageVersion Include="Polly" Version="8.5.0" />
     <PackageVersion Include="Polly.Extensions.Http" Version="3.0.0" />

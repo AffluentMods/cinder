@@ -35,6 +35,17 @@
 
     <!-- Document text extraction. -->
     <PackageReference Include="PdfPig" />
+
+    <!-- DFIR parsers (Eric Zimmerman libs) — replace the Python sidecars for the
+         common Windows artifact types so Phase 4 works without venv bootstrap. -->
+    <PackageReference Include="Registry" />
+    <PackageReference Include="evtx" />
+    <PackageReference Include="Lnk" />
+    <PackageReference Include="Prefetch" />
+    <PackageReference Include="JumpList" />
+
+    <!-- Email — .msg + .eml + MIME. -->
+    <PackageReference Include="MsgReader" />
   </ItemGroup>
 
   <ItemGroup>

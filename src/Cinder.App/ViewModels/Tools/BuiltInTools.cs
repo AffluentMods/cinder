@@ -42,12 +42,10 @@ public sealed partial class RegistryTool : SidecarToolViewModel
     public override string Id => "registry";
     public override string Title => "Registry";
     public override string Icon => "📒";
-    public override string Subtitle => "Parse Windows hives via regipy: NTUSER, SYSTEM, SOFTWARE, SAM, Amcache, transaction logs.";
+    public override string Subtitle => "Parse Windows hives in-process: NTUSER, SYSTEM, SOFTWARE, SAM, Amcache, transaction logs.";
     public override string Phase => "4";
     public override string Kind => "registry";
     public override string EmptyStateHint => "Open a registry hive (NTUSER.DAT, SYSTEM, SOFTWARE, SAM, Amcache.hve, etc.).";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["regipy"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class EventLogTool : SidecarToolViewModel
@@ -59,8 +57,6 @@ public sealed partial class EventLogTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "evtx";
     public override string EmptyStateHint => "Open an Event Log (.evtx) file from C:\\Windows\\System32\\winevt\\Logs\\.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["python-evtx"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class PrefetchTool : SidecarToolViewModel
@@ -72,7 +68,6 @@ public sealed partial class PrefetchTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "prefetch";
     public override string EmptyStateHint => "Open a Prefetch directory (typically C:\\Windows\\Prefetch\\).";
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class ShellbagsTool : SidecarToolViewModel
@@ -97,7 +92,6 @@ public sealed partial class JumplistsTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "jumplists";
     public override string EmptyStateHint => "Open the Jumplists directory (C:\\Users\\<u>\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\AutomaticDestinations).";
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class LnkTool : SidecarToolViewModel
@@ -109,8 +103,6 @@ public sealed partial class LnkTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "lnk";
     public override string EmptyStateHint => "Open a .lnk file or a folder containing them.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["pylnk3"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class BrowserHistoryTool : SidecarToolViewModel
@@ -122,7 +114,6 @@ public sealed partial class BrowserHistoryTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "browser";
     public override string EmptyStateHint => "Point at a browser profile directory (e.g. %LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default).";
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class UsbHistoryTool : SidecarToolViewModel
@@ -134,8 +125,6 @@ public sealed partial class UsbHistoryTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "usb";
     public override string EmptyStateHint => "Open the SYSTEM hive (typically C:\\Windows\\System32\\config\\SYSTEM).";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["regipy"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class WifiHistoryTool : SidecarToolViewModel
@@ -147,8 +136,6 @@ public sealed partial class WifiHistoryTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "wifi";
     public override string EmptyStateHint => "Open the SOFTWARE hive (C:\\Windows\\System32\\config\\SOFTWARE).";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["regipy"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class SrumTool : SidecarToolViewModel
@@ -173,8 +160,6 @@ public sealed partial class AmcacheTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "amcache";
     public override string EmptyStateHint => "Open Amcache.hve (C:\\Windows\\AppCompat\\Programs\\Amcache.hve).";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["regipy"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class ShimcacheTool : SidecarToolViewModel
@@ -186,8 +171,6 @@ public sealed partial class ShimcacheTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "shimcache";
     public override string EmptyStateHint => "Open the SYSTEM hive.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["regipy"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class LinuxArtifactsTool : SidecarToolViewModel
@@ -249,9 +232,7 @@ public sealed partial class EmailTool : SidecarToolViewModel
     public override string Subtitle => "Outlook PST/OST + MBOX + EML + Apple Mail.";
     public override string Phase => "4";
     public override string Kind => "email";
-    public override string EmptyStateHint => "Open a .pst, .ost, .mbox, or .eml file.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["libpff-python"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
+    public override string EmptyStateHint => "Open a .msg, .eml, or .mbox file. PST/OST still requires the libpff sidecar.";
 }
 
 // GalleryTool, DocumentsTool, StringsTool, CasesTool, CustodyTool, HashSetsTool, YaraTool,
