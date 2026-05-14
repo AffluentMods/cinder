@@ -46,6 +46,29 @@
 
     <!-- Email — .msg + .eml + MIME. -->
     <PackageReference Include="MsgReader" />
+
+    <!-- DiscUtils — filesystem parsing in pure managed code. -->
+    <PackageReference Include="DiscUtils.Core" />
+    <PackageReference Include="DiscUtils.Streams" />
+    <PackageReference Include="DiscUtils.Ntfs" />
+    <PackageReference Include="DiscUtils.Fat" />
+    <PackageReference Include="DiscUtils.Iso9660" />
+    <PackageReference Include="DiscUtils.Ext" />
+    <PackageReference Include="DiscUtils.Vhd" />
+    <PackageReference Include="DiscUtils.Vhdx" />
+
+    <!-- Network capture parsing. -->
+    <PackageReference Include="SharpPcap" />
+    <PackageReference Include="PacketDotNet" />
+
+    <!-- ESE database access (SRUM, Windows Search, …). -->
+    <PackageReference Include="Microsoft.Database.Isam" />
+
+    <!-- PDF report generation. -->
+    <PackageReference Include="QuestPDF" />
+
+    <!-- Compound documents. -->
+    <PackageReference Include="OpenMcdf" />
   </ItemGroup>
 
   <ItemGroup>

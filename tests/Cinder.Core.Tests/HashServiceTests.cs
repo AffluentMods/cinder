@@ -83,16 +83,22 @@ public sealed class HashServiceTests
         Random.Shared.NextBytes(bytes);
         using var input = new MemoryStream(bytes);
 
-        var reports = new List<long>();
-        var progress = new Progress<long>(reports.Add);
-
-        var result = await sut.ComputeAsync(input, [HashAlgorithmKind.Sha256], progress);
+        // Use a synchronous IProgress implementation. The built-in Progress<T> queues callbacks
+        // through SynchronizationContext.Post which is non-deterministic in unit tests —
+        // callbacks may still be in-flight after ComputeAsync awaits. A direct IProgress<long>
+        // runs the Report inline on the thread that calls it, which is exactly what we want
+        // for a test that asserts "every progress tick was delivered."
+        var reports = new SynchronousProgress<long>();
+        var result = await sut.ComputeAsync(input, [HashAlgorithmKind.Sha256], reports);
 
         result.BytesHashed.Should().Be(bytes.Length);
-        // We can't await Progress<T> callbacks deterministically, but at least one tick should
-        // have fired by the time the await returns and we observe the underlying stream EOF.
-        await Task.Delay(50);
-        reports.Should().NotBeEmpty();
-        reports[^1].Should().Be(bytes.Length);
+        reports.Values.Should().NotBeEmpty();
+        reports.Values[^1].Should().Be(bytes.Length);
+    }
+
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        public List<T> Values { get; } = new();
+        public void Report(T value) => Values.Add(value);
     }
 }

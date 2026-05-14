@@ -72,6 +72,31 @@
     <!-- Email / message formats — .msg + .eml + MIME. PST/OST still needs a sidecar. -->
     <PackageVersion Include="MsgReader" Version="6.0.11" />
 
+    <!-- DiscUtils — pure-managed file-system access (NTFS / FAT / ISO9660 / ext /
+         VHD / VHDX). Lets Filesystem and Carver tools read images without pytsk3. -->
+    <PackageVersion Include="DiscUtils.Streams" Version="0.16.13" />
+    <PackageVersion Include="DiscUtils.Core" Version="0.16.13" />
+    <PackageVersion Include="DiscUtils.Ntfs" Version="0.16.13" />
+    <PackageVersion Include="DiscUtils.Fat" Version="0.16.13" />
+    <PackageVersion Include="DiscUtils.Iso9660" Version="0.16.13" />
+    <PackageVersion Include="DiscUtils.Ext" Version="0.16.13" />
+    <PackageVersion Include="DiscUtils.Vhd" Version="0.16.13" />
+    <PackageVersion Include="DiscUtils.Vhdx" Version="0.16.13" />
+
+    <!-- PCAP / PCAPNG parsing. -->
+    <PackageVersion Include="SharpPcap" Version="6.3.1" />
+    <PackageVersion Include="PacketDotNet" Version="1.4.8" />
+
+    <!-- ESE / Extensible Storage Engine — for SRUM (SRUDB.dat), Windows Search,
+         Mail, etc. The official Microsoft library. -->
+    <PackageVersion Include="Microsoft.Database.Isam" Version="3.2.0" />
+
+    <!-- PDF generation for court-ready reports. -->
+    <PackageVersion Include="QuestPDF" Version="2026.5.0" />
+
+    <!-- Compound document parsing (used by shell-item decoders, .doc/.ppt internals). -->
+    <PackageVersion Include="OpenMcdf" Version="3.1.4" />
+
     <!-- HTTP -->
     <PackageVersion Include="Polly" Version="8.5.0" />
     <PackageVersion Include="Polly.Extensions.Http" Version="3.0.0" />

@@ -29,12 +29,10 @@ public sealed partial class FilesystemTool : SidecarToolViewModel
     public override string Id => "filesystem";
     public override string Title => "Filesystem";
     public override string Icon => "🗂";
-    public override string Subtitle => "Browse NTFS / FAT / ext / APFS / HFS+ / UDF / Btrfs / XFS / ISO via pytsk3.";
+    public override string Subtitle => "Browse NTFS / FAT / ext / ISO9660 / VHD / VHDX in-process via DiscUtils.";
     public override string Phase => "3";
     public override string Kind => "filesystem";
-    public override string EmptyStateHint => "Open a disk image (.dd, .E01, .raw) or a mounted volume to browse the filesystem.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["pytsk3", "libewf-python"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
+    public override string EmptyStateHint => "Open a disk image (.dd, .raw, .vhd, .vhdx, .iso) or a partition image to browse its files.";
 }
 
 public sealed partial class RegistryTool : SidecarToolViewModel
@@ -79,8 +77,6 @@ public sealed partial class ShellbagsTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "shellbags";
     public override string EmptyStateHint => "Open NTUSER.DAT or UsrClass.dat from a user profile.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["regipy"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class JumplistsTool : SidecarToolViewModel
@@ -147,8 +143,6 @@ public sealed partial class SrumTool : SidecarToolViewModel
     public override string Phase => "4";
     public override string Kind => "srum";
     public override string EmptyStateHint => "Open SRUDB.dat (C:\\Windows\\System32\\sru\\SRUDB.dat).";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["libesedb-python"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class AmcacheTool : SidecarToolViewModel
@@ -182,7 +176,6 @@ public sealed partial class LinuxArtifactsTool : SidecarToolViewModel
     public override string Phase => "5";
     public override string Kind => "linux";
     public override string EmptyStateHint => "Point at a mounted Linux root (or a triage folder containing /etc, /home, /var).";
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class MemoryTool : SidecarToolViewModel
@@ -207,8 +200,6 @@ public sealed partial class NetworkTool : SidecarToolViewModel
     public override string Phase => "10";
     public override string Kind => "network";
     public override string EmptyStateHint => "Open a .pcap or .pcapng capture.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["dpkt", "scapy"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
 }
 
 public sealed partial class MobileTool : SidecarToolViewModel
@@ -219,9 +210,7 @@ public sealed partial class MobileTool : SidecarToolViewModel
     public override string Subtitle => "iOS / Android backup — messages · calls · apps.";
     public override string Phase => "10";
     public override string Kind => "mobile";
-    public override string EmptyStateHint => "Point at an iOS backup folder or an Android adb backup.";
-    public override IReadOnlyList<string> RequiredPythonPackages => ["iphone-backup-decrypt"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
+    public override string EmptyStateHint => "Point at an iOS backup folder (the one with Manifest.db / Info.plist).";
 }
 
 public sealed partial class EmailTool : SidecarToolViewModel

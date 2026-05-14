@@ -94,12 +94,14 @@ copies are placeholders until the platform-specific drivers ship.
   signed kernel driver in `drivers/cinder-wb-windows`.
 - 🟡 Write-blocker (Linux) — `blockdev --setro` wrapper, works.
 
-## Phase 3 — Filesystem & carving 🟡
+## Phase 3 — Filesystem & carving ✅
 
-- 🟡 Filesystem browser (NTFS / FAT / ext / APFS / HFS+ / Btrfs / XFS /
-  ISO) — UI shell; pytsk3 sidecar pending.
-- 🟡 File carver (header+footer, 30 default signatures) — UI shell;
-  carving engine pending.
+- ✅ Filesystem browser — NTFS / FAT / ext2/3/4 / ISO9660 / VHD / VHDX
+  in-process via DiscUtils. Whole-disk images route through VolumeManager
+  to enumerate per-partition filesystems. APFS / HFS+ / Btrfs / XFS still
+  need pytsk3 sidecar (tracked).
+- ✅ File carver — header+footer scan via `Cinder.Carving.FileCarver`
+  with 30+ default signatures.
 
 ## Phase 4 — Windows artifacts ✅ (most) / 🟡 (some)
 
@@ -133,17 +135,23 @@ libraries do the heavy lifting in-process.
   is located and metadata exposed, but the version-specific structured
   decoder is pending. Open the blob in the Hex viewer for byte-level
   inspection in the meantime.
-- 🟡 Shellbags — UI shell. Wiring to the `Registry` lib pending; needs the
-  shell-item parsing layer on top.
-- 🟡 SRUM (libesedb sidecar) — UI shell. Needs Microsoft.Database.Isam +
-  SRUDB.dat schema decoder.
+- ✅ Shellbags — `Registry` lib walks the BagMRU tree on NTUSER /
+  UsrClass. NodeSlot, MRUListEx, LastWrite per entry. (Shell-item *path*
+  reconstruction layer is still 🟡.)
+- ✅ SRUM — Microsoft.Database.Isam opens SRUDB.dat read-only with
+  staged-file copy and log-replay. Table catalog + ESE schema decoded;
+  per-row extraction for individual GUID tables still 🟡.
 - ✅ Email — `.msg` (Outlook) + `.eml` + `.mbox` via `MsgReader` and an
   in-house MBOX scanner. `.pst` / `.ost` still need the libpff sidecar.
 
-## Phase 5 — Linux artifacts 🟡
+## Phase 5 — Linux artifacts ✅
 
-- 🟡 shell history · auth log · journalctl · cron · SSH · trash · packages
-  · systemd — UI shell, parsers in `Cinder.Artifacts.Linux`.
+- ✅ shell history · auth.log · syslog · cron · passwd · shadow · SSH
+  known_hosts — in-process plain-text parsers walk a mounted Linux root
+  (or triage folder), tag entries by category, normalise classic
+  syslog timestamps + ISO-8601 journal timestamps to UTC.
+- 🟡 journalctl binary journal files, systemd unit metadata, package
+  manager logs — tracked.
 
 ## Phase 6 — Search, timeline, hash sets, YARA, VirusTotal 🟡
 
@@ -176,10 +184,16 @@ libraries do the heavy lifting in-process.
   UI shell.
 - ⬜ Structured artifact prompts.
 
-## Phase 10 — Network, mobile, cloud ⬜
+## Phase 10 — Network, mobile, cloud 🟡 (most)
 
-- 🟡 Network (PCAP / PCAPNG via dpkt + scapy) — UI shell.
-- 🟡 Mobile backup (iOS / Android) — UI shell.
+- ✅ Network (PCAP / PCAPNG) — SharpPcap + PacketDotNet in-process.
+  Per-packet: timestamp, protocol, source/dest IP + port, bytes,
+  TCP flags. Cap 50k packets per load.
+- ✅ Mobile backup (iOS) — reads `Manifest.db` directly via
+  Microsoft.Data.Sqlite. Enumerates every backed-up file with its
+  domain + relativePath + fileID. Encrypted backups still need the
+  user's iTunes backup password.
+- 🟡 Android adb backup — tracked.
 - 🟡 Cloud pull (Google Drive / OneDrive / Dropbox via OAuth/PKCE) — UI
   shell.
 
