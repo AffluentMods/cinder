@@ -106,7 +106,8 @@
 
                 <DataGrid Grid.Row="1"
                           ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
-                          Background="{DynamicResource CinderBackground0Brush}">
+                          Background="{DynamicResource CinderBackground0Brush}"
+                          DoubleTapped="OnHitDoubleTapped">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Offset"   Binding="{Binding Offset, StringFormat='0x{0:X12}'}" Width="160" />
                         <DataGridTextColumn Header="Encoding" Binding="{Binding Encoding}" Width="100" />

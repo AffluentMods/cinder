@@ -53,6 +53,10 @@
     <PackageVersion Include="Mapsui.Avalonia" Version="4.1.7" />
     <PackageVersion Include="Markdig" Version="0.38.0" />
 
+    <!-- Document text extraction (PDF). Office / OpenDocument / EPUB are handled
+         in-house via System.IO.Compression.ZipArchive + XML scrape — no extra dep. -->
+    <PackageVersion Include="PdfPig" Version="0.1.14" />
+
     <!-- HTTP -->
     <PackageVersion Include="Polly" Version="8.5.0" />
     <PackageVersion Include="Polly.Extensions.Http" Version="3.0.0" />

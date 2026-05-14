@@ -32,6 +32,9 @@
       Avalonia.FreeDesktop ships transitively. See Directory.Packages.props.
     -->
     <PackageReference Include="Tmds.DBus.Protocol" />
+
+    <!-- Document text extraction. -->
+    <PackageReference Include="PdfPig" />
   </ItemGroup>
 
   <ItemGroup>

@@ -295,6 +295,26 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Open <paramref name="path"/> in the hex viewer (reusing an existing buffer if it's already
+    /// open) and jump the caret to <paramref name="offset"/>. Used by the Strings tool's "click
+    /// a row to inspect that byte in hex" workflow.
+    /// </summary>
+    public void JumpToOffset(string path, long offset)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path) || offset < 0)
+        {
+            return;
+        }
+        OpenFileInNewBuffer(path);
+        var hexTool = Workspace.FindByKind("hex");
+        if (hexTool is not null)
+        {
+            Workspace.SelectedTool = hexTool;
+        }
+        Hex.JumpTo(offset);
+    }
+
+    /// <summary>
     /// Open an existing .cinder case file by path. Reads the single case row, registers a
     /// session for it, and announces. Errors are swallowed into the activity headline so the
     /// app doesn't crash on a stale recent-cases entry.

@@ -69,6 +69,15 @@ Not in the original plan; landed alongside Phase 1.
 - ✅ **PythonBootstrap** — auto-creates a per-user venv at
   `%LOCALAPPDATA%\Cinder\venv` and pip-installs forensic dependencies
   on first run.
+- ✅ **Strings tool live-filter + container-format detection** — type to
+  filter, "Hide gibberish" toggle suppresses compressed-byte coincidence,
+  HEADS-UP banner explains when the file is a ZIP/gzip/PDF/etc.
+  Double-click a row → jump to the byte in the Hex viewer.
+- ✅ **Documents tool real extraction** — DOCX/DOCM, XLSX/XLSM, PPTX,
+  ODT/ODS/ODP, EPUB, RTF, PDF (via PdfPig), HTML/XML, and 20+
+  plain-text/code formats. ZIP-based formats parse the inner XML
+  in-process; PDF uses PdfPig; RTF strips control words; HTML drops
+  tags. Hard caps at 50 MB input / 2 MB output to keep the UI fast.
 
 ## Phase 2 — Imaging & verification 🟡
 

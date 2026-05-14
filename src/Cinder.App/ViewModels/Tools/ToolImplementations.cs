@@ -305,6 +305,7 @@ public sealed partial class DocumentsTool
     [ObservableProperty] private string? _path;
     [ObservableProperty] private string? _content;
     [ObservableProperty] private string? _statusLine;
+    [ObservableProperty] private bool _isLoading;
 
     [RelayCommand]
     private async Task PickAsync(CancellationToken ct)
@@ -312,29 +313,35 @@ public sealed partial class DocumentsTool
         var path = await ToolDialog.PickFileAsync("Pick a document");
         if (string.IsNullOrEmpty(path)) return;
         Path = path;
+        IsLoading = true;
+        StatusLine = "Extracting…";
+        Content = null;
         try
         {
-            var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
-            string text;
-            if (ext == ".pdf")
+            var result = await DocumentReader.ReadAsync(path, ct);
+            if (result.Success)
             {
-                text = "(PDF text extraction lands once PdfPig is added to the bundle. For now, drop the PDF in the hex viewer to inspect bytes.)";
-            }
-            else if (ext is ".rtf" or ".txt" or ".md" or ".log" or ".csv" or ".json" or ".xml" or ".html")
-            {
-                text = await File.ReadAllTextAsync(path, ct);
+                Content = string.IsNullOrEmpty(result.Text)
+                    ? "(no extractable text in this document)"
+                    : result.Text;
+                StatusLine = result.Status;
             }
             else
             {
-                text = "(Cinder's document preview is text-only for v0.1. Open the file in the hex viewer for a full byte view.)";
+                // Surface the friendly explanation as the body so the user sees why nothing
+                // came back — and the status line stays clean.
+                Content = result.Status;
+                StatusLine = $"{new FileInfo(path).Length:N0} bytes · no preview";
             }
-            Content = text;
-            StatusLine = $"{new FileInfo(path).Length:N0} bytes";
         }
         catch (Exception ex)
         {
             StatusLine = $"Failed: {ex.Message}";
             Content = null;
+        }
+        finally
+        {
+            IsLoading = false;
         }
     }
 }
