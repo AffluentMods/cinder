@@ -61,19 +61,28 @@ corrupted document, finding evidence of a program's purpose, or extracting paths
 program touched.
 
 ## How to use it in Cinder
-1. Open the file you want to scan (any file works — executable, image, memory dump,
-   whatever).
-2. Set the minimum string length (the default of 4 catches "real" words and skips
-   junk).
-3. Choose ASCII, UTF-16, or both. Windows programs use UTF-16; Linux and macOS use
-   ASCII.
-4. Strings appear with their offset (where in the file they were found). Click an
-   offset to jump back into the Hex Viewer at that exact byte.
+1. Click "Pick file…" and select any file — executable, image, memory dump, whatever.
+2. The "Filter" box at the top lets you live-search the results (e.g. type "http" to
+   find every URL).
+3. The "Hide gibberish" checkbox suppresses 4-byte ASCII runs that are almost
+   certainly random coincidence from compressed bytes. Leave it on for sane output;
+   turn it off if you're hunting for tiny tokens.
+4. "Min length" controls how long a sequence of printable bytes has to be before it
+   counts. 6 is the sane default; raise it to cut more noise, lower it to catch
+   shorter tokens.
+5. Each row shows the offset, encoding (ASCII or UTF-16), and the string itself.
+
+## Heads-up on compressed files
+If you open a `.docx`, `.xlsx`, `.zip`, `.gz`, `.pdf`, etc., a yellow banner appears
+explaining that the strings shown are container metadata (filenames, dictionary
+entries) — the actual document body lives inside compressed streams and is not
+readable from raw bytes. For a Word doc, use the Documents tool instead.
 
 ## Tip
 "Strings" is one of the oldest tricks in forensics — it works because computers store
 plain text predictably. If a malware sample contains the string `discord.com/api/`,
-it almost certainly talks to Discord, even if you never run it.
+it almost certainly talks to Discord, even if you never run it. Filter for `http` or
+`https` first; that gets you 80% of the way on most samples.
 """;
 }
 

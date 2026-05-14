@@ -24,12 +24,28 @@ namespace Cinder.App.ViewModels.Tools;
 
 public sealed partial class StringsTool
 {
+    /// <summary>Full result set from the last scan. Filtered into <see cref="Hits"/> by the UI.</summary>
+    private readonly List<StringHit> _all = new();
+
+    /// <summary>What's actually shown in the DataGrid — already filtered by search + gibberish toggles.</summary>
     public ObservableCollection<StringHit> Hits { get; } = new();
 
     [ObservableProperty] private string? _path;
     [ObservableProperty] private int _minLength = 6;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _statusLine;
+
+    /// <summary>Live substring filter — re-applies as the user types.</summary>
+    [ObservableProperty] private string? _filter;
+
+    /// <summary>Hide strings that look like compressed-byte coincidence — no letters, mostly punctuation.</summary>
+    [ObservableProperty] private bool _hideGibberish = true;
+
+    /// <summary>One-line callout above the result grid if the file looks like a container (ZIP, gzip, etc).</summary>
+    [ObservableProperty] private string? _containerHint;
+
+    partial void OnFilterChanged(string? value) => Reproject();
+    partial void OnHideGibberishChanged(bool value) => Reproject();
 
     [RelayCommand]
     private async Task PickAsync(CancellationToken ct)
@@ -44,19 +60,19 @@ public sealed partial class StringsTool
     private async Task RunAsync(CancellationToken ct)
     {
         if (string.IsNullOrEmpty(Path)) return;
+        _all.Clear();
         Hits.Clear();
+        ContainerHint = null;
         IsLoading = true;
         StatusLine = "Scanning…";
         try
         {
+            ContainerHint = await Task.Run(() => DetectContainer(Path), ct);
             var minLen = Math.Max(3, MinLength);
             var hits = await Task.Run(() => Extract(Path, minLen, ct), ct);
-            foreach (var h in hits)
-            {
-                Hits.Add(h);
-                if (Hits.Count >= 50_000) break;
-            }
-            StatusLine = $"{Hits.Count:N0} string{(Hits.Count == 1 ? "" : "s")}.";
+            _all.AddRange(hits);
+            Reproject();
+            StatusLine = BuildStatus();
         }
         catch (Exception ex)
         {
@@ -66,6 +82,139 @@ public sealed partial class StringsTool
         {
             IsLoading = false;
         }
+    }
+
+    /// <summary>Rebuild <see cref="Hits"/> from <see cref="_all"/> using the current filter/gibberish toggle.</summary>
+    private void Reproject()
+    {
+        Hits.Clear();
+        var needle = (Filter ?? "").Trim();
+        var hasNeedle = needle.Length > 0;
+        var hideJunk = HideGibberish;
+        var shown = 0;
+        foreach (var h in _all)
+        {
+            if (hideJunk && IsGibberish(h.Value))
+            {
+                continue;
+            }
+            if (hasNeedle && h.Value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                continue;
+            }
+            Hits.Add(h);
+            if (++shown >= 50_000) break;
+        }
+        StatusLine = BuildStatus();
+    }
+
+    private string BuildStatus()
+    {
+        if (_all.Count == 0)
+        {
+            return Hits.Count == 0 ? "" : $"{Hits.Count:N0}";
+        }
+        return Hits.Count == _all.Count
+            ? $"{_all.Count:N0} string{(_all.Count == 1 ? "" : "s")}"
+            : $"{Hits.Count:N0} of {_all.Count:N0} (filtered)";
+    }
+
+    /// <summary>
+    /// A string looks like "gibberish" — i.e. compressed-byte coincidence — when it contains no
+    /// ASCII letter, OR when more than two-thirds of its characters are punctuation/symbol. Plain
+    /// English words like "Hello" pass; random four-byte ASCII runs like ":*eJ" or "y'Hn-" fail.
+    /// </summary>
+    internal static bool IsGibberish(string s)
+    {
+        int letters = 0, punctuationOrSymbol = 0;
+        foreach (var c in s)
+        {
+            if (char.IsLetter(c)) letters++;
+            else if (char.IsPunctuation(c) || char.IsSymbol(c)) punctuationOrSymbol++;
+        }
+        if (letters == 0) return true;
+        // 7+ chars: looser threshold (compressed runs of that length are rare anyway).
+        var punctRatio = (double)punctuationOrSymbol / s.Length;
+        if (s.Length <= 6)
+        {
+            return letters < 3 || punctRatio > 0.4;
+        }
+        return punctRatio > 0.55;
+    }
+
+    /// <summary>
+    /// Sniffs the first few bytes to identify common container formats. Returns null if the file
+    /// doesn't look like a known container. The caller surfaces this as a banner so users opening
+    /// a .docx / .zip / .tar.gz aren't confused when they see only metadata strings.
+    /// </summary>
+    internal static string? DetectContainer(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> head = stackalloc byte[8];
+            var n = fs.Read(head);
+            if (n < 4) return null;
+
+            // ZIP — also covers .docx / .xlsx / .pptx / .jar / .apk / .epub / .odt.
+            if (head[0] == 0x50 && head[1] == 0x4B && (head[2] == 0x03 || head[2] == 0x05 || head[2] == 0x07))
+            {
+                var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+                return ext switch
+                {
+                    ".docx" or ".docm" => "This is a Word document (a ZIP container). The strings shown are the container's internal filenames — the actual body text lives inside compressed streams. Try the Documents tool to read the content.",
+                    ".xlsx" or ".xlsm" => "This is an Excel workbook (a ZIP container). Cell text lives inside compressed streams. Try a dedicated XLSX viewer for the cell data.",
+                    ".pptx" => "This is a PowerPoint file (a ZIP container). Slide text lives inside compressed streams.",
+                    ".jar" or ".apk" => "This is a JAR/APK (ZIP). Strings shown are container metadata — extract first to read class/code strings.",
+                    ".epub" or ".odt" or ".ods" or ".odp" => "This is an OpenDocument / EPUB (ZIP container). Use a dedicated viewer for the document body.",
+                    _ => "This file is a ZIP container. The strings shown are filenames + central-directory metadata, not the compressed contents.",
+                };
+            }
+            // gzip
+            if (head[0] == 0x1F && head[1] == 0x8B)
+            {
+                return "This file is gzip-compressed. Strings shown are gzip headers; the body is compressed.";
+            }
+            // bzip2
+            if (head[0] == 0x42 && head[1] == 0x5A && head[2] == 0x68)
+            {
+                return "This file is bzip2-compressed. Strings shown are bzip2 headers; the body is compressed.";
+            }
+            // xz
+            if (head[0] == 0xFD && head[1] == 0x37 && head[2] == 0x7A && head[3] == 0x58 && head[4] == 0x5A)
+            {
+                return "This file is xz-compressed. Strings shown are xz headers; the body is compressed.";
+            }
+            // 7-Zip
+            if (head[0] == 0x37 && head[1] == 0x7A && head[2] == 0xBC && head[3] == 0xAF && head[4] == 0x27 && head[5] == 0x1C)
+            {
+                return "This file is a 7z archive. Strings shown are archive metadata; entries are compressed.";
+            }
+            // RAR
+            if (head[0] == 0x52 && head[1] == 0x61 && head[2] == 0x72 && head[3] == 0x21)
+            {
+                return "This file is a RAR archive. Strings shown are archive metadata; entries are compressed.";
+            }
+            // PDF (not compressed end-to-end but content is largely DEFLATE-streamed)
+            if (head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46)
+            {
+                return "This is a PDF. Most body text is wrapped in compressed streams — strings shown include object dictionaries and uncompressed metadata only.";
+            }
+            // ELF / Mach-O / PE — informational, not blocking.
+            if (head[0] == 0x7F && head[1] == 0x45 && head[2] == 0x4C && head[3] == 0x46)
+            {
+                return "This is a Linux ELF binary. Look for hardcoded URLs, debug symbols, and API names in the strings below.";
+            }
+            if (head[0] == 0x4D && head[1] == 0x5A)
+            {
+                return "This is a Windows PE executable. Look for hardcoded URLs, imports, and embedded resources in the strings below.";
+            }
+        }
+        catch
+        {
+            // Unreadable file — let the main scan surface the error.
+        }
+        return null;
     }
 
     private static IEnumerable<StringHit> Extract(string path, int minLen, CancellationToken ct)

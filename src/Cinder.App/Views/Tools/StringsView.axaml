@@ -3,21 +3,53 @@
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.StringsView"
              x:DataType="tools:StringsTool">
-    <Grid RowDefinitions="Auto,*">
+    <Grid RowDefinitions="Auto,Auto,*">
+        <!-- Primary action bar -->
         <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto">
                 <Button Grid.Column="0" Content="Pick file…" Classes="accent" Command="{Binding PickCommand}" />
                 <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
                            Text="{Binding Path, FallbackValue='No file loaded'}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           Classes="mono"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="2" VerticalAlignment="Center"
+                           Text="{Binding StatusLine}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBlock Grid.Column="2" Text="Min length" VerticalAlignment="Center"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" Margin="0,0,8,0" />
-                <NumericUpDown Grid.Column="3" Value="{Binding MinLength}" Minimum="3" Maximum="32" Increment="1" Width="100" />
+            </Grid>
+        </Border>
+
+        <!-- Filter + options row (only when a file is loaded) -->
+        <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,8"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+                IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
+                <TextBox Grid.Column="0"
+                         Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}"
+                         Watermark="Filter strings (case-insensitive substring) — e.g. http, password, .exe"
+                         FontSize="{DynamicResource CinderFontSizeSm}" />
+                <CheckBox Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center"
+                          IsChecked="{Binding HideGibberish}"
+                          Content="Hide gibberish"
+                          ToolTip.Tip="Suppress short ASCII runs that are almost certainly random coincidence from compressed bytes." />
+                <TextBlock Grid.Column="2" Margin="14,0,8,0" VerticalAlignment="Center"
+                           Text="Min length"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <NumericUpDown Grid.Column="3"
+                               Value="{Binding MinLength}"
+                               Minimum="3" Maximum="32" Increment="1"
+                               Width="100"
+                               FormatString="0" />
                 <Button Grid.Column="4" Margin="8,0,0,0" Content="Re-scan" Command="{Binding RunCommand}" />
             </Grid>
         </Border>
-        <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
+
+        <Panel Grid.Row="2" Background="{DynamicResource CinderBackground0Brush}">
+            <!-- Empty state -->
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                         Spacing="14" MaxWidth="460"
                         IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNull}}">
@@ -43,15 +75,45 @@
                         HorizontalAlignment="Center" Padding="20,10" />
             </StackPanel>
 
-            <DataGrid IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}"
-                      ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
-                      Background="{DynamicResource CinderBackground0Brush}">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Offset"   Binding="{Binding Offset, StringFormat='0x{0:X12}'}" Width="160" />
-                    <DataGridTextColumn Header="Encoding" Binding="{Binding Encoding}" Width="100" />
-                    <DataGridTextColumn Header="String"   Binding="{Binding Value}" Width="*" />
-                </DataGrid.Columns>
-            </DataGrid>
+            <!-- Populated state -->
+            <Grid IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}"
+                  RowDefinitions="Auto,*">
+
+                <!-- Container hint banner — only when the file looks like ZIP/gzip/etc. -->
+                <Border Grid.Row="0"
+                        Background="{DynamicResource CinderSurface2Brush}"
+                        BorderBrush="{DynamicResource CinderAccentDimBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="14,10"
+                        IsVisible="{Binding ContainerHint, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border Background="{DynamicResource CinderAccentDimBrush}"
+                                CornerRadius="3" Padding="6,2"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="HEADS UP"
+                                       FontSize="10"
+                                       FontWeight="600"
+                                       Foreground="White"
+                                       LetterSpacing="1.2" />
+                        </Border>
+                        <TextBlock Text="{Binding ContainerHint}"
+                                   FontSize="{DynamicResource CinderFontSizeSm}"
+                                   Foreground="{DynamicResource CinderForegroundBrush}"
+                                   TextWrapping="Wrap"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+
+                <DataGrid Grid.Row="1"
+                          ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
+                          Background="{DynamicResource CinderBackground0Brush}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Offset"   Binding="{Binding Offset, StringFormat='0x{0:X12}'}" Width="160" />
+                        <DataGridTextColumn Header="Encoding" Binding="{Binding Encoding}" Width="100" />
+                        <DataGridTextColumn Header="String"   Binding="{Binding Value}" Width="*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
         </Panel>
     </Grid>
 </UserControl>
