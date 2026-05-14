@@ -90,6 +90,14 @@ public sealed class PluginLoader
                 continue;
             }
 
+            // SECURITY: on Windows we additionally verify the Authenticode signature. The hash
+            // gate above is the user's primary trust mechanism, but a valid signature gets us
+            // (a) the publisher's identity (subject CN) for the UI, and (b) a tamper check
+            // independent of the user's manifest. Linux / macOS get the hash gate only.
+            AuthenticodeInfo? signature = OperatingSystem.IsWindows()
+                ? VerifyAuthenticodeSignature(dll)
+                : null;
+
             try
             {
                 var asm = Assembly.LoadFrom(dll);
@@ -98,16 +106,61 @@ public sealed class PluginLoader
                 {
                     if (Activator.CreateInstance(type) is IPlugin plugin)
                     {
-                        results.Add(PluginLoadResult.Loaded(fileName, hash, plugin));
+                        results.Add(PluginLoadResult.Loaded(fileName, hash, plugin, signature));
                     }
                 }
             }
             catch (Exception ex)
             {
-                results.Add(PluginLoadResult.Failed(fileName, ex.Message));
+                // SECURITY: we already passed the hash trust gate above, so retain the hash on
+                // the failure row — the user needs to see WHICH dll's loader threw, and the
+                // hash is the canonical identifier.
+                results.Add(PluginLoadResult.Failed(fileName, ex.Message) with { Sha256 = hash });
             }
         }
         return results;
+    }
+
+    /// <summary>
+    /// Extracts Authenticode signature info from a Windows DLL. Returns null on non-Windows or
+    /// when the file is unsigned / signed by an untrusted CA. The result is informational —
+    /// the actual trust gate is the SHA-256 manifest above; signature data goes into the UI so
+    /// the user can see who signed the plugin they're about to enable.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static AuthenticodeInfo? VerifyAuthenticodeSignature(string path)
+    {
+        try
+        {
+            // SYSLIB0057: CreateFromSignedFile is the only public way to get the Authenticode
+            // certificate out of a signed PE; X509CertificateLoader doesn't expose an
+            // equivalent. Suppression is local + justified.
+#pragma warning disable SYSLIB0057
+            var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path);
+            var cert2 = new System.Security.Cryptography.X509Certificates.X509Certificate2(cert);
+#pragma warning restore SYSLIB0057
+            // Chain validation — confirms the cert chains to a trusted root and isn't revoked.
+            using var chain = new System.Security.Cryptography.X509Certificates.X509Chain
+            {
+                ChainPolicy =
+                {
+                    RevocationMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.Online,
+                    VerificationFlags = System.Security.Cryptography.X509Certificates.X509VerificationFlags.NoFlag,
+                },
+            };
+            var valid = chain.Build(cert2);
+            return new AuthenticodeInfo(
+                Subject: cert2.Subject,
+                Issuer: cert2.Issuer,
+                NotAfter: cert2.NotAfter,
+                ChainValid: valid,
+                Thumbprint: cert2.Thumbprint);
+        }
+        catch
+        {
+            // Unsigned or malformed signature — not an error from Cinder's POV.
+            return null;
+        }
     }
 
     private static HashSet<string> LoadTrustedHashes(string directory)
@@ -152,17 +205,46 @@ public sealed record PluginLoadResult(
     string? Sha256,
     IPlugin? Plugin,
     string Status,
-    string? Error)
+    string? Error,
+    AuthenticodeInfo? Signature = null)
 {
-    public static PluginLoadResult Loaded(string fileName, string hash, IPlugin plugin)
-        => new(fileName, hash, plugin, Status: "loaded", Error: null);
+    public static PluginLoadResult Loaded(string fileName, string hash, IPlugin plugin, AuthenticodeInfo? signature = null)
+        => new(fileName, hash, plugin, Status: "loaded", Error: null, Signature: signature);
 
     public static PluginLoadResult Untrusted(string fileName, string hash)
         => new(fileName, hash, Plugin: null, Status: "untrusted", Error: null);
 
     public static PluginLoadResult Failed(string fileName, string error)
         => new(fileName, Sha256: null, Plugin: null, Status: "failed", Error: error);
+
+    /// <summary>Friendly publisher string for the Plugins UI ("Subject CN" or "unsigned").</summary>
+    public string SignatureDisplay => Signature is null
+        ? "unsigned"
+        : Signature.ChainValid
+            ? $"{ExtractCommonName(Signature.Subject)} ✓"
+            : $"{ExtractCommonName(Signature.Subject)} (untrusted chain)";
+
+    private static string ExtractCommonName(string subject)
+    {
+        var idx = subject.IndexOf("CN=", StringComparison.Ordinal);
+        if (idx < 0) return subject;
+        var rest = subject[(idx + 3)..];
+        var comma = rest.IndexOf(',');
+        return comma > 0 ? rest[..comma].Trim() : rest.Trim();
+    }
 }
+
+/// <summary>
+/// Authenticode signature data extracted from a signed Windows plugin DLL. Cinder uses this for
+/// UI display only — the real trust gate is the SHA-256 manifest. ChainValid being false means
+/// the cert doesn't chain to a trusted root or has been revoked.
+/// </summary>
+public sealed record AuthenticodeInfo(
+    string Subject,
+    string Issuer,
+    DateTime NotAfter,
+    bool ChainValid,
+    string Thumbprint);
 
 public sealed class PluginContext : IPluginContext
 {

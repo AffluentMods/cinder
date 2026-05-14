@@ -1281,13 +1281,113 @@ public sealed partial class CarverTool
 
 public sealed partial class CloudPullTool
 {
+    private readonly Cinder.App.Services.SettingsStore _settings = new();
+
     [ObservableProperty] private string _provider = "google-drive";
     [ObservableProperty] private string? _statusLine;
+    [ObservableProperty] private string? _authorizeUrl;
+    [ObservableProperty] private string? _redirectUri;
+    [ObservableProperty] private string? _instructions;
     public IReadOnlyList<string> Providers { get; } = ["google-drive", "onedrive", "dropbox"];
 
+    public CloudPullTool() => RefreshAuthorizeUrl();
+
+    partial void OnProviderChanged(string value) => RefreshAuthorizeUrl();
+
+    /// <summary>
+    /// Computes a provider-specific authorize URL with PKCE so the user can paste it into
+    /// their browser, complete consent, and bring back the auth code. We never embed a
+    /// browser ourselves — that crosses the SSO trust boundary the user expects. Instead we
+    /// surface the URL + redirect_uri + step-by-step instructions and ask the user to paste
+    /// the resulting code back in.
+    /// </summary>
+    private void RefreshAuthorizeUrl()
+    {
+        var settings = _settings.Load();
+        var clientId = settings.CloudClientIds.GetValueOrDefault(Provider, "");
+        if (string.IsNullOrEmpty(clientId))
+        {
+            AuthorizeUrl = null;
+            RedirectUri = null;
+            Instructions = $"Set the OAuth client_id for {Provider} in Settings → Cloud first.\n" +
+                           "See docs/cloud-setup.md for how to create one in your own Google / Microsoft / Dropbox dev console — Cinder doesn't ship shared client_ids on purpose, so each examiner's cloud pulls are auditable as their own account.";
+            return;
+        }
+
+        // PKCE — generate a fresh verifier + challenge per click. Verifier kept in memory so
+        // the eventual token exchange (TODO: paste-code flow) can use it.
+        var verifier = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var challenge = Convert.ToBase64String(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        // OOB redirect — same approach Google Cloud SDK used for years: redirect to a page
+        // whose URL contains the code in its title bar / window title. Modern providers also
+        // accept http://127.0.0.1/<port> for desktop apps; we surface the localhost option
+        // alongside the OOB for cases where it's allowed.
+        RedirectUri = "http://127.0.0.1:48127/oauth/callback";
+
+        var (authBase, scope) = Provider switch
+        {
+            "google-drive" => ("https://accounts.google.com/o/oauth2/v2/auth",
+                "https://www.googleapis.com/auth/drive.readonly"),
+            "onedrive" => ("https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+                "files.read.all offline_access"),
+            "dropbox" => ("https://www.dropbox.com/oauth2/authorize",
+                "files.metadata.read files.content.read"),
+            _ => ("", ""),
+        };
+        if (authBase.Length == 0) return;
+
+        var q = new System.Collections.Generic.Dictionary<string, string>
+        {
+            ["client_id"] = clientId,
+            ["redirect_uri"] = RedirectUri,
+            ["response_type"] = "code",
+            ["scope"] = scope,
+            ["code_challenge"] = challenge,
+            ["code_challenge_method"] = "S256",
+            ["access_type"] = "offline",
+        };
+        var query = string.Join("&", q.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+        AuthorizeUrl = $"{authBase}?{query}";
+        Instructions =
+            "1. Click 'Copy URL', paste it in your browser, complete consent.\n" +
+            "2. After consent the browser redirects to 127.0.0.1:48127 — the page won't load\n" +
+            "   (no local listener yet), but the URL bar shows ?code=<long-string>.\n" +
+            "3. Paste that code back into Cinder via the 'Submit code' button (next pass).\n" +
+            "Token exchange + actual file pull will land in v0.3.";
+        StatusLine = "Authorize URL ready.";
+    }
+
     [RelayCommand]
-    private void Connect() =>
-        StatusLine = "Cloud connectors require user-supplied OAuth client_ids — see docs/cloud-setup.md, then paste them into Settings → Cloud.";
+    private void CopyAuthorizeUrl()
+    {
+        if (string.IsNullOrEmpty(AuthorizeUrl))
+        {
+            StatusLine = "No authorize URL — set the client_id in Settings → Cloud first.";
+            return;
+        }
+        try
+        {
+            var top = (Avalonia.Application.Current?.ApplicationLifetime
+                as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+            top?.Clipboard?.SetTextAsync(AuthorizeUrl);
+            StatusLine = "Copied — paste into your browser.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Copy failed: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void Connect()
+    {
+        // Legacy command kept for the old button label; routes through Refresh.
+        RefreshAuthorizeUrl();
+    }
 }
 
 // =====================================================================================

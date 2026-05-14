@@ -37,7 +37,12 @@
                                  AcceptsReturn="True" TextWrapping="Wrap" Height="80"
                                  FontSize="{DynamicResource CinderFontSizeXs}" />
                     </StackPanel>
-                    <Button Content="Clear chat" Command="{Binding ClearCommand}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button Classes="accent" Content="Test connection"
+                                Command="{Binding TestCommand}"
+                                ToolTip.Tip="Pings the configured endpoint so you know it works before sending a real prompt." />
+                        <Button Content="Clear chat" Command="{Binding ClearCommand}" />
+                    </StackPanel>
                     <TextBlock Text="{Binding StatusLine}"
                                Foreground="{DynamicResource CinderForegroundMutedBrush}"
                                FontSize="{DynamicResource CinderFontSizeXs}"

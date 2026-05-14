@@ -20,8 +20,9 @@
         <DataGrid Grid.Row="1" ItemsSource="{Binding Loaded}" AutoGenerateColumns="False" IsReadOnly="True"
                   Background="{DynamicResource CinderBackground0Brush}">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="File"        Binding="{Binding FileName}" Width="220" />
-                <DataGridTextColumn Header="Status"      Binding="{Binding Status}" Width="120" />
+                <DataGridTextColumn Header="File"        Binding="{Binding FileName}" Width="200" />
+                <DataGridTextColumn Header="Status"      Binding="{Binding Status}" Width="100" />
+                <DataGridTextColumn Header="Signed by"   Binding="{Binding SignatureDisplay}" Width="200" />
                 <DataGridTextColumn Header="SHA-256"     Binding="{Binding Sha256}" Width="*" />
                 <DataGridTextColumn Header="Error"       Binding="{Binding Error}" Width="200" />
             </DataGrid.Columns>

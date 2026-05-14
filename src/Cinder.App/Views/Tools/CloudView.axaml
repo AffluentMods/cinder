@@ -3,18 +3,83 @@
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.CloudView"
              x:DataType="tools:CloudPullTool">
-    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
-        <StackPanel Spacing="14" MaxWidth="720">
-            <Grid ColumnDefinitions="120,*">
-                <TextBlock Grid.Column="0" Text="Provider" VerticalAlignment="Center"
+    <ScrollViewer Padding="24" Background="{DynamicResource CinderBackground0Brush}">
+        <StackPanel Spacing="18" MaxWidth="780">
+
+            <!-- Provider selector -->
+            <StackPanel Spacing="6">
+                <TextBlock Text="PROVIDER" Classes="section" />
+                <Border Classes="section-rule" />
+                <Grid ColumnDefinitions="160,*">
+                    <TextBlock Grid.Column="0" Text="Cloud provider"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding Providers}"
+                              SelectedItem="{Binding Provider}" />
+                </Grid>
+            </StackPanel>
+
+            <!-- Authorize URL -->
+            <StackPanel Spacing="6"
+                        IsVisible="{Binding AuthorizeUrl, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <TextBlock Text="AUTHORIZE" Classes="section" />
+                <Border Classes="section-rule" />
+                <TextBlock Text="Authorize URL"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding Providers}" SelectedItem="{Binding Provider}" />
-            </Grid>
-            <Button Classes="accent" Content="Connect…" Command="{Binding ConnectCommand}"
-                    HorizontalAlignment="Left" />
+                <SelectableTextBlock Text="{Binding AuthorizeUrl}"
+                                     Classes="mono"
+                                     FontSize="{DynamicResource CinderFontSizeXs}"
+                                     TextWrapping="Wrap" />
+                <TextBlock Text="Redirect URI"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           Margin="0,8,0,0" />
+                <SelectableTextBlock Text="{Binding RedirectUri}"
+                                     Classes="mono"
+                                     FontSize="{DynamicResource CinderFontSizeXs}" />
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
+                    <Button Classes="accent" Content="Copy URL"
+                            Command="{Binding CopyAuthorizeUrlCommand}" />
+                    <Button Content="Regenerate"
+                            Command="{Binding ConnectCommand}"
+                            ToolTip.Tip="Builds a fresh URL with a new PKCE challenge — use if the previous one expired." />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Setup needed -->
+            <Border Padding="14,12" CornerRadius="6"
+                    Background="{DynamicResource CinderSurface1Brush}"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
+                    IsVisible="{Binding AuthorizeUrl, Converter={x:Static ObjectConverters.IsNull}}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="SETUP REQUIRED" Classes="section"
+                               Foreground="{DynamicResource CinderAccentBrush}" />
+                    <SelectableTextBlock Text="{Binding Instructions}"
+                                         FontSize="{DynamicResource CinderFontSizeSm}"
+                                         TextWrapping="Wrap"
+                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Instructions for the OAuth flow -->
+            <Border Padding="14,12" CornerRadius="6"
+                    Background="{DynamicResource CinderSurface1Brush}"
+                    BorderBrush="{DynamicResource CinderAccentDimBrush}" BorderThickness="1"
+                    IsVisible="{Binding AuthorizeUrl, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="NEXT STEPS" Classes="section"
+                               Foreground="{DynamicResource CinderAccentBrush}" />
+                    <SelectableTextBlock Text="{Binding Instructions}"
+                                         FontSize="{DynamicResource CinderFontSizeSm}"
+                                         TextWrapping="Wrap"
+                                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                </StackPanel>
+            </Border>
+
             <TextBlock Text="{Binding StatusLine}"
+                       FontSize="{DynamicResource CinderFontSizeXs}"
                        Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       TextWrapping="Wrap"
                        IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
         </StackPanel>
     </ScrollViewer>

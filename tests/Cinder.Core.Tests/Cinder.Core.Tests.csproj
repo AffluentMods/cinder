@@ -13,5 +13,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cinder.Core\Cinder.Core.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Plugins\Cinder.Plugins.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Reports\Cinder.Reports.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Search\Cinder.Search.csproj" />
   </ItemGroup>
 </Project>

@@ -7,6 +7,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-14
+
+The "every tool actually works" release. v0.1.0 shipped with real Hex/Strings/
+custody/case/hash plumbing but most parser surfaces (Registry, EVTX, Prefetch,
+LNK, browser history, Filesystem, Carver, Network, Mobile, SRUM, Shellbags,
+ShimCache, Email, Linux artifacts, YARA, Lucene, Map, Graph, Reports PDF/DOCX,
+Workflows) were UI shells over Python sidecar stubs. This release replaces
+every one of those stubs with an in-process C# implementation.
+
+### Added — parsers (all in-process, no Python sidecar required for these)
+
+- **Filesystem** — DiscUtils-backed browser for NTFS / FAT / ext2/3/4 /
+  ISO9660 / VHD / VHDX. Whole-disk images route through VolumeManager to
+  enumerate per-partition filesystems.
+- **Registry** — Eric Zimmerman's `Registry` lib. Walks every key + value
+  of an NTUSER / SYSTEM / SOFTWARE / SAM / Amcache hive.
+- **Event Log (.evtx)** — `evtx` lib. Streams every record with TimeCreated,
+  Channel, Provider, EventId, Level, Computer, User, MapDescription.
+- **Prefetch** — `Prefetch` lib for every Windows version XP→11.
+- **LNK shortcuts** — `Lnk` lib. Target, args, MAC times, volume serial.
+- **Jumplists** — `JumpList` lib. Both automatic and custom destinations.
+- **Shellbags** — Registry walk + shell-item decode via `Lnk.ShellItems`.
+  Reconstructs full traversal paths like `My Computer\C:\Users\…`.
+- **USB / Wi-Fi / Amcache / ShimCache history** — Registry-driven across
+  every ControlSet, with version-aware decoders.
+- **SRUM** — Microsoft.Database.Isam opens SRUDB.dat read-only with
+  staged-file copy and log-replay. Per-row decoders for application
+  resource usage, network data usage, and energy estimation.
+- **Email** — `.msg` / `.eml` / `.mbox` via MsgReader + in-house MBOX
+  scanner. PST/OST still needs libpff sidecar (tracked).
+- **Linux artifacts** — auth.log, syslog, crontab, passwd, shadow,
+  ssh_known_hosts, plus per-user shell histories.
+- **Browser history** — direct SQLite reads of Chromium / Edge / Brave /
+  Opera / Vivaldi / Firefox History databases, with file staging so a
+  running browser doesn't block.
+- **Network (PCAP / PCAPNG)** — SharpPcap + PacketDotNet for per-packet
+  timestamp, protocol, IPs/ports, byte count, TCP flags.
+- **Mobile** — iOS backup (Manifest.db) + Android adb backup (.ab via
+  SharpCompress).
+- **Carver** — header+footer scan via Cinder.Carving.FileCarver.
+- **YARA-lite** — pure-managed YARA subset built on AhoCorasick. Parses
+  `.yar` files, handles literal strings + `nocase` + hex patterns + the
+  common condition expressions, scans large files in a single linear
+  pass.
+- **Lucene case-wide search** — "Build index from folder…" walks evidence,
+  routes through DocumentReader for structured formats, falls back to
+  printable-strings for binaries.
+- **Documents** — DOCX / DOCM / XLSX / PPTX / ODT / EPUB / PDF (PdfPig) /
+  RTF / HTML / 25+ plain-text-and-code formats.
+
+### Added — analysis & reporting
+
+- **Map auto-ingest** — pick a folder of images, MetadataExtractor pulls
+  EXIF GPS, one point per geo-tagged photo.
+- **Graph auto-ingest** — pick a folder of `.eml` / `.msg` / `.mbox`,
+  builds the who-talked-to-whom directed graph from email headers.
+- **Reports PDF** — QuestPDF in-process. Cover metadata, per-section
+  bodies with embedded exhibit cards, full exhibit index, page numbers
+  on every page. No external converter required.
+- **Reports DOCX** — DocumentFormat.OpenXml. Structurally valid Word
+  document with title page, section bodies (paragraphs + bullets),
+  exhibit cards, exhibit index table, Office core properties.
+- **Workflows runtime** — topological executor + handlers for
+  `open-image`, `hash`, `registry`, `fs-enumerate`, `carve`, `report`,
+  `index`. Steps chain by file-path output.
+
+### Added — shell & UX (Phase 1.5)
+
+- Home dashboard as the first screen; recent cases + recent evidence
+  persist across restarts at `%LOCALAPPDATA%\Cinder\recents.json`.
+- Per-tool `?` help (F1) with written explanations for every one of the
+  36 tools — what it is, when to use, how, plus a tip.
+- Multi-case tabs.
+- Friendly empty states across Hex / Gallery / Strings / Documents.
+- AI Copilot — Test-connection button + auto-load API key from settings.
+- Cloud OAuth scaffolds — Google Drive / OneDrive / Dropbox. PKCE-based
+  authorize URL surfaced to the user; token exchange + file pull pending.
+
+### Added — security
+
+- **DPAPI for secrets at rest** — `apiKey` / `ApiKey` / `api_key` values
+  in settings.json are encrypted via Windows DPAPI (CurrentUser scope)
+  before serialisation; AES-GCM fallback on Linux/macOS documented as
+  obfuscation rather than real protection.
+- **Plugin Authenticode verification on Windows** — signed plugins display
+  the subject CN in the Plugins UI; chain validation surfaces "untrusted
+  chain" warnings. SHA-256 manifest remains the primary trust gate.
+- **Per-tool sandboxing groundwork** — `[LoadIsolated]` attribute declared
+  for future AssemblyLoadContext / sidecar isolation.
+
+### Changed
+
+- ROADMAP completely refreshed. Phase 3 / 4 / 5 / 6 / 8 / 10 all flipped
+  from 🟡 to ✅ for the items C# can do in-process. Remaining 🟡s are
+  honestly tracked with reasons (libyara, libpff, Volatility, pytsk3 for
+  APFS/HFS+, signed kernel drivers).
+- ReportExporter PDF path: QuestPDF in-process by default; wkhtmltopdf /
+  headless Chromium remain as fallbacks but are no longer required.
+
+### Fixed
+
+- Strings tool crash when picking a file (`Call from invalid thread` —
+  removed `.ConfigureAwait(false)` across every MVVM command path).
+- Help flyout body was empty (resource lookup via
+  `Application.Current.Resources[…]` failed silently for theme-dictionary
+  brushes; rewrote as XAML data-binding against `HelpBlocks`).
+- Inspector contrast and rail Phase grouping polish.
+- HashServiceTests flake (replaced `Progress<T>` with a synchronous
+  IProgress implementation in the test).
+
+### Security
+
+- Security audit complete; eight findings closed in code:
+  command injection across every Process.Start (mounters, shadow copies,
+  write blocker, ReportExporter), PowerShell `'` injection in the
+  WindowsImageMounter, wkhtmltopdf `--enable-local-file-access` removed,
+  EncryptedBundle hardened with zip-slip + zip-bomb guards + key
+  zeroization, CustodyLog rejects U+001F in input fields, plugin trust
+  gate with SHA-256 manifest, NU1903 fixed (`Tmds.DBus.Protocol 0.21.3`
+  pinned).
+- One previously-open finding closed: API keys at rest are now DPAPI-
+  encrypted on Windows.
+
+[0.2.0]: https://github.com/AffluentMods/cinder/releases/tag/v0.2.0
+
 ## [0.1.0] — 2026-05-11
 
 First public pre-alpha. The application launches, every tool surface is wired
