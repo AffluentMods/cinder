@@ -45,7 +45,7 @@ public sealed partial class FindDialogViewModel : ViewModelBase
         try
         {
             var options = new HexSearchOptions(Mode, Query, CaseSensitive);
-            await _hex.SearchAsync(options, ct).ConfigureAwait(false);
+            await _hex.SearchAsync(options, ct);
             StatusLine = _hex.SearchResults.Count switch
             {
                 0 => "No matches.",

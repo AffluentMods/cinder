@@ -41,14 +41,14 @@ public sealed partial class GalleryTool : ToolViewModel
         var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = "Pick a folder of images",
-        }).ConfigureAwait(false);
+        });
         var path = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path))
         {
             return;
         }
         FolderPath = path;
-        await LoadAsync(path, ct).ConfigureAwait(false);
+        await LoadAsync(path, ct);
     }
 
     private async Task LoadAsync(string folder, CancellationToken ct)
@@ -74,7 +74,7 @@ public sealed partial class GalleryTool : ToolViewModel
                 }
                 catch { }
                 return found;
-            }, ct).ConfigureAwait(false);
+            }, ct);
 
             foreach (var p in paths)
             {

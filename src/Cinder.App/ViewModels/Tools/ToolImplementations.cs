@@ -34,10 +34,10 @@ public sealed partial class StringsTool
     [RelayCommand]
     private async Task PickAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick a file to extract strings from").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick a file to extract strings from");
         if (string.IsNullOrEmpty(path)) return;
         Path = path;
-        await RunAsync(ct).ConfigureAwait(false);
+        await RunAsync(ct);
     }
 
     [RelayCommand]
@@ -50,7 +50,7 @@ public sealed partial class StringsTool
         try
         {
             var minLen = Math.Max(3, MinLength);
-            var hits = await Task.Run(() => Extract(Path, minLen, ct), ct).ConfigureAwait(false);
+            var hits = await Task.Run(() => Extract(Path, minLen, ct), ct);
             foreach (var h in hits)
             {
                 Hits.Add(h);
@@ -160,7 +160,7 @@ public sealed partial class DocumentsTool
     [RelayCommand]
     private async Task PickAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick a document").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick a document");
         if (string.IsNullOrEmpty(path)) return;
         Path = path;
         try
@@ -173,7 +173,7 @@ public sealed partial class DocumentsTool
             }
             else if (ext is ".rtf" or ".txt" or ".md" or ".log" or ".csv" or ".json" or ".xml" or ".html")
             {
-                text = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
+                text = await File.ReadAllTextAsync(path, ct);
             }
             else
             {
@@ -223,7 +223,7 @@ public sealed partial class CasesTool
     [RelayCommand]
     private async Task CreateAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.SaveFileAsync("Create case", "case.cinder", "cinder").ConfigureAwait(false);
+        var path = await ToolDialog.SaveFileAsync("Create case", "case.cinder", "cinder");
         if (string.IsNullOrEmpty(path)) return;
         try
         {
@@ -231,7 +231,7 @@ public sealed partial class CasesTool
             var custody = new CustodyLog(store);
             var svc = new CaseService(store, custody);
             var name = System.IO.Path.GetFileNameWithoutExtension(path);
-            var c = await svc.CreateAsync(name, Environment.UserName, null, ct).ConfigureAwait(false);
+            var c = await svc.CreateAsync(name, Environment.UserName, null, ct);
             _workspace.RecordOpen(c.Id, path, name);
             _workspace.Save();
             Refresh();
@@ -246,7 +246,7 @@ public sealed partial class CasesTool
     [RelayCommand]
     private async Task OpenAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Open case", "Cinder case", "*.cinder").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Open case", "Cinder case", "*.cinder");
         if (string.IsNullOrEmpty(path)) return;
         try
         {
@@ -289,7 +289,7 @@ public sealed partial class CustodyTool
     [RelayCommand]
     private async Task PickAndVerifyAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Open Cinder case", "Cinder case", "*.cinder").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Open Cinder case", "Cinder case", "*.cinder");
         if (string.IsNullOrEmpty(path)) return;
         CasePath = path;
         Entries.Clear();
@@ -308,13 +308,13 @@ public sealed partial class CustodyTool
             while (r.Read())
             {
                 var caseId = Guid.Parse(r.GetString(0));
-                var entries = await log.ListAsync(caseId, ct).ConfigureAwait(false);
+                var entries = await log.ListAsync(caseId, ct);
                 foreach (var e in entries)
                 {
                     Entries.Add(e);
                     total++;
                 }
-                var v = await log.VerifyAsync(caseId, ct).ConfigureAwait(false);
+                var v = await log.VerifyAsync(caseId, ct);
                 if (!v.Ok)
                 {
                     allOk = false;
@@ -351,7 +351,7 @@ public sealed partial class HashSetsTool
     [RelayCommand]
     private async Task PickDatabaseAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick or create the hash-set DB", "SQLite DB", "*.db").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick or create the hash-set DB", "SQLite DB", "*.db");
         if (string.IsNullOrEmpty(path)) return;
         try
         {
@@ -375,11 +375,11 @@ public sealed partial class HashSetsTool
             StatusLine = "Pick a DB first.";
             return;
         }
-        var path = await ToolDialog.PickFileAsync("Pick NSRL minimal CSV", "NSRL minimal", "*.csv").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick NSRL minimal CSV", "NSRL minimal", "*.csv");
         if (string.IsNullOrEmpty(path)) return;
         try
         {
-            var n = await Task.Run(() => _service.ImportNsrlMinimalCsv(path, $"NSRL_{DateTime.UtcNow:yyyyMMdd}"), ct).ConfigureAwait(false);
+            var n = await Task.Run(() => _service.ImportNsrlMinimalCsv(path, $"NSRL_{DateTime.UtcNow:yyyyMMdd}"), ct);
             StatusLine = $"Imported {n:N0} rows.";
         }
         catch (Exception ex)
@@ -437,7 +437,7 @@ rule example_strings {
     [RelayCommand]
     private async Task PickAndScanAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick a file to scan").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick a file to scan");
         if (string.IsNullOrEmpty(path)) return;
         ScanTarget = path;
         Hits.Clear();
@@ -452,7 +452,7 @@ rule example_strings {
                 StatusLine = "No literal `$x = \"...\"` strings found in the rule. Wire python-yara to enable full rules.";
                 return;
             }
-            var bytes = await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+            var bytes = await File.ReadAllBytesAsync(path, ct);
             foreach (var lit in literals)
             {
                 var idx = IndexOfBytes(bytes, Encoding.UTF8.GetBytes(lit));
@@ -528,7 +528,7 @@ public sealed partial class VirusTotalTool
         try
         {
             var client = new VirusTotalClient(_http, () => ApiKey);
-            var report = await client.LookupAsync(Hash.Trim().ToLowerInvariant(), ct).ConfigureAwait(false);
+            var report = await client.LookupAsync(Hash.Trim().ToLowerInvariant(), ct);
             if (report is null)
             {
                 ResultText = "No record / not seen.";
@@ -635,7 +635,7 @@ public sealed partial class ImagerTool
     [RelayCommand]
     private async Task PickSourceAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick a source disk image / file").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick a source disk image / file");
         if (!string.IsNullOrEmpty(path)) Source = path;
     }
 
@@ -643,7 +643,7 @@ public sealed partial class ImagerTool
     private async Task PickOutputAsync(CancellationToken ct)
     {
         var ext = Format switch { "Ewf" => ".E01", "Aff4" => ".af4", "Vhd" => ".vhd", "Vhdx" => ".vhdx", _ => ".dd" };
-        var path = await ToolDialog.SaveFileAsync("Output image", $"image{ext}", ext.TrimStart('.')).ConfigureAwait(false);
+        var path = await ToolDialog.SaveFileAsync("Output image", $"image{ext}", ext.TrimStart('.'));
         if (!string.IsNullOrEmpty(path)) Output = path;
     }
 
@@ -663,7 +663,7 @@ public sealed partial class ImagerTool
             var fmt = Enum.Parse<ImageFormat>(Format);
             var job = new ImageJob(Source, Output, fmt);
             var progress = new Progress<ImageJobProgress>(p => BytesRead = p.BytesRead);
-            var result = await imager.ImageAsync(job, progress, ct).ConfigureAwait(false);
+            var result = await imager.ImageAsync(job, progress, ct);
             StatusLine = $"Done. SHA-256 {result.Sha256?[..16]}… · {result.BytesWritten:N0} bytes · {result.BadSectors} bad sectors";
         }
         catch (Exception ex)
@@ -682,7 +682,7 @@ public sealed partial class VerifyTool
     [RelayCommand]
     private async Task PickAndRunAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick image to verify").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick image to verify");
         if (string.IsNullOrEmpty(path)) return;
         ImagePath = path;
         StatusLine = "Verifying…";
@@ -690,7 +690,7 @@ public sealed partial class VerifyTool
         {
             var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
             var verifier = new ImageVerifier(() => SidecarDiskImager.DefaultSidecar(parsers));
-            var r = await verifier.VerifyAsync(path, ct: ct).ConfigureAwait(false);
+            var r = await verifier.VerifyAsync(path, ct: ct);
             ResultText = $"""
                 Match: {r.Match}
                 Expected SHA-256: {r.ExpectedSha256 ?? "—"}
@@ -715,14 +715,14 @@ public sealed partial class MountTool
     [RelayCommand]
     private async Task PickAndMountAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick image to mount").ConfigureAwait(false);
+        var path = await ToolDialog.PickFileAsync("Pick image to mount");
         if (string.IsNullOrEmpty(path)) return;
         ImagePath = path;
         try
         {
             var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
             var m = ImageMounterFactory.ForCurrentPlatform(parsers);
-            var handle = await m.MountReadOnlyAsync(path, ct).ConfigureAwait(false);
+            var handle = await m.MountReadOnlyAsync(path, ct);
             MountedAt = handle.MountPoint;
             StatusLine = $"Mounted at {handle.MountPoint}";
         }
@@ -745,14 +745,14 @@ public sealed partial class ConvertTool
     [RelayCommand]
     private async Task PickSourceAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.PickFileAsync("Source image").ConfigureAwait(false);
+        var p = await ToolDialog.PickFileAsync("Source image");
         if (!string.IsNullOrEmpty(p)) Source = p;
     }
 
     [RelayCommand]
     private async Task PickOutputAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.SaveFileAsync("Output", "out.dd", "dd").ConfigureAwait(false);
+        var p = await ToolDialog.SaveFileAsync("Output", "out.dd", "dd");
         if (!string.IsNullOrEmpty(p)) Output = p;
     }
 
@@ -796,7 +796,7 @@ public sealed partial class RamCaptureTool
     [RelayCommand]
     private async Task PickAndCaptureAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.SaveFileAsync("RAM dump output", "memory.raw", "raw").ConfigureAwait(false);
+        var path = await ToolDialog.SaveFileAsync("RAM dump output", "memory.raw", "raw");
         if (string.IsNullOrEmpty(path)) return;
         Output = path;
         StatusLine = "RAM capture: Cinder's signed kernel driver is source-only today. Drop winpmem.exe alongside Cinder for the Windows fallback. Linux: use LiME (see drivers/cinder-ram-linux/README.md).";
@@ -815,7 +815,7 @@ public sealed partial class CarverTool
     [RelayCommand]
     private async Task PickSourceAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.PickFileAsync("Source to carve").ConfigureAwait(false);
+        var p = await ToolDialog.PickFileAsync("Source to carve");
         if (!string.IsNullOrEmpty(p)) Source = p;
     }
 
@@ -825,7 +825,7 @@ public sealed partial class CarverTool
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
             as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (owner is null) return;
-        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Output folder" }).ConfigureAwait(false);
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Output folder" });
         var path = folders.FirstOrDefault()?.TryGetLocalPath();
         if (!string.IsNullOrEmpty(path)) OutputDir = path;
     }
@@ -883,13 +883,13 @@ public sealed partial class WorkflowsTool
     [RelayCommand]
     private async Task LoadAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.PickFileAsync("Open workflow", "Workflow JSON", "*.json").ConfigureAwait(false);
+        var p = await ToolDialog.PickFileAsync("Open workflow", "Workflow JSON", "*.json");
         if (string.IsNullOrEmpty(p)) return;
         Path = p;
         Nodes.Clear();
         try
         {
-            var json = await File.ReadAllTextAsync(p, ct).ConfigureAwait(false);
+            var json = await File.ReadAllTextAsync(p, ct);
             var wf = Cinder.Workflow.Workflow.FromJson(json);
             foreach (var n in wf.TopologicalOrder()) Nodes.Add(n);
             StatusLine = $"{Nodes.Count} step{(Nodes.Count == 1 ? "" : "s")}.";
@@ -918,7 +918,7 @@ public sealed partial class PluginsTool
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
             as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (owner is null) return;
-        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Plugins folder" }).ConfigureAwait(false);
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Plugins folder" });
         var path = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
         Folder = path;
@@ -979,7 +979,7 @@ internal static class ToolDialog
         {
             opts.FileTypeFilter = [new FilePickerFileType(typeName) { Patterns = [pattern] }];
         }
-        var picked = await owner.StorageProvider.OpenFilePickerAsync(opts).ConfigureAwait(false);
+        var picked = await owner.StorageProvider.OpenFilePickerAsync(opts);
         return picked.FirstOrDefault()?.TryGetLocalPath();
     }
 
@@ -993,7 +993,7 @@ internal static class ToolDialog
             Title = title,
             SuggestedFileName = suggestedName,
             DefaultExtension = defaultExtension,
-        }).ConfigureAwait(false);
+        });
         return picked?.TryGetLocalPath();
     }
 }

@@ -31,7 +31,7 @@ public sealed partial class SearchToolViewModel : ViewModelBase
         var folders = await owner.StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
         {
             Title = "Pick the case index folder",
-        }).ConfigureAwait(false);
+        });
         var path = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
         IndexPath = path;

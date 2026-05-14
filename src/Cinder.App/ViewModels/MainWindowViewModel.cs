@@ -207,7 +207,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var openCmd = Commands.Commands.FirstOrDefault(c => c.Id == "file.open");
         if (openCmd is not null)
         {
-            await openCmd.Invoke(ct).ConfigureAwait(false);
+            await openCmd.Invoke(ct);
         }
     }
 
@@ -240,7 +240,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var cmd = Commands.Commands.FirstOrDefault(c => c.Id == "case.create");
         if (cmd is not null)
         {
-            await cmd.Invoke(ct).ConfigureAwait(false);
+            await cmd.Invoke(ct);
         }
     }
 
@@ -250,7 +250,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var cmd = Commands.Commands.FirstOrDefault(c => c.Id == "case.open");
         if (cmd is not null)
         {
-            await cmd.Invoke(ct).ConfigureAwait(false);
+            await cmd.Invoke(ct);
         }
     }
 
@@ -272,7 +272,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             return;
         }
-        await OpenCaseFromPathAsync(row.Path).ConfigureAwait(false);
+        await OpenCaseFromPathAsync(row.Path);
     }
 
     /// <summary>
@@ -311,7 +311,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             var store = new Cinder.Core.Cases.CaseStore(casePath);
             var custody = new Cinder.Core.Custody.CustodyLog(store);
             var svc = new Cinder.Core.Cases.CaseService(store, custody);
-            var c = await svc.GetFirstAsync().ConfigureAwait(false);
+            var c = await svc.GetFirstAsync();
             if (c is null)
             {
                 Announce($"No case row in {System.IO.Path.GetFileName(casePath)}");

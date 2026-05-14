@@ -70,7 +70,7 @@ public sealed partial class AiCopilotToolViewModel : ViewModelBase
         try
         {
             var sb = new System.Text.StringBuilder();
-            await foreach (var chunk in provider.StreamCompletionAsync(prompt, ct).ConfigureAwait(false))
+            await foreach (var chunk in provider.StreamCompletionAsync(prompt, ct))
             {
                 sb.Append(chunk);
                 assistant.Content = sb.ToString();

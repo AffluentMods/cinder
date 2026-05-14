@@ -46,7 +46,7 @@ public sealed partial class CommandPaletteViewModel : ViewModelBase
             return;
         }
         IsOpen = false;
-        await sel.Invoke(ct).ConfigureAwait(false);
+        await sel.Invoke(ct);
     }
 
     [RelayCommand]

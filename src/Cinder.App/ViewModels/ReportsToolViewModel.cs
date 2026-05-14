@@ -124,7 +124,7 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
             Title = "Export report",
             DefaultExtension = extension.TrimStart('.'),
             SuggestedFileName = $"report{extension}",
-        }).ConfigureAwait(false);
+        });
         var path = picked?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path))
         {
@@ -134,7 +134,7 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
         {
             var rb = Build();
             var exporter = new ReportExporter();
-            var actual = await exporter.ExportAsync(rb, fmt, path).ConfigureAwait(false);
+            var actual = await exporter.ExportAsync(rb, fmt, path);
             LastExportPath = actual;
             StatusLine = $"Exported to {actual}";
         }

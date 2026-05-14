@@ -76,7 +76,7 @@ public sealed partial class HashDialogViewModel : ViewModelBase
                 Path,
                 [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256, HashAlgorithmKind.Blake3],
                 progress,
-                ct).ConfigureAwait(false);
+                ct);
 
             Md5 = result.Md5;
             Sha1 = result.Sha1;
@@ -95,7 +95,7 @@ public sealed partial class HashDialogViewModel : ViewModelBase
                     Blake3 = result.Blake3,
                 });
                 await _custody.AppendAsync(caseId, Environment.UserName, CustodyAction.EvidenceHashed, details, ct)
-                    .ConfigureAwait(false);
+                    ;
             }
         }
         catch (Exception ex)

@@ -281,7 +281,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             var sample = new byte[(int)Math.Min(Buffer.Length, 4L << 20)];
             var read = Buffer.Read(0, sample);
             using var ms = new MemoryStream(sample, 0, read, writable: false);
-            var result = await _hash.ComputeAsync(ms, [HashAlgorithmKind.Sha256]).ConfigureAwait(false);
+            var result = await _hash.ComputeAsync(ms, [HashAlgorithmKind.Sha256]);
             QuickHashSha256Full = result.Sha256;
             QuickHashSha256 = result.Sha256?[..16] + "…";
         }
@@ -307,7 +307,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
                 : null;
             if (clipboard is not null)
             {
-                await clipboard.SetTextAsync(QuickHashSha256Full).ConfigureAwait(false);
+                await clipboard.SetTextAsync(QuickHashSha256Full);
             }
         }
         catch
@@ -408,7 +408,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             if (i > 0) sb.Append(' ');
             sb.Append(bytes[i].ToString("X2", CultureInfo.InvariantCulture));
         }
-        await CopyToClipboardAsync(sb.ToString()).ConfigureAwait(false);
+        await CopyToClipboardAsync(sb.ToString());
     }
 
     private static async Task CopyToClipboardAsync(string text)
@@ -421,7 +421,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
                 : null;
             if (clipboard is not null)
             {
-                await clipboard.SetTextAsync(text).ConfigureAwait(false);
+                await clipboard.SetTextAsync(text);
             }
         }
         catch { /* best effort */ }
@@ -470,7 +470,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
                 }
             }
             return bag;
-        }, ct).ConfigureAwait(false);
+        }, ct);
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {

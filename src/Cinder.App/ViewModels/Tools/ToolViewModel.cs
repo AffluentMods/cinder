@@ -167,7 +167,7 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
         Rows.Clear();
         try
         {
-            await LoadAsync(path, ct).ConfigureAwait(false);
+            await LoadAsync(path, ct);
             StatusLine = $"{Rows.Count:N0} entries";
         }
         catch (Exception ex)
