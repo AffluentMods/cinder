@@ -1,0 +1,26 @@
+<Project>
+
+  <!--
+    QuestPDF's transitive .targets file unconditionally injects every Lato
+    font file + its OFL licence as <None CopyToOutputDirectory="PreserveNewest">.
+    That dumps ~20 loose .ttf files plus OFL.txt into bin/Release/, from there
+    into the publish output, and from there into the GitHub Release page (where
+    they show up as stray "release assets" alongside Cinder.exe).
+
+    Cinder.Reports renders PDFs in Helvetica + Courier (see
+    src/Cinder.Reports/QuestPdfDocument.cs:52), never Lato, so the bundled
+    fonts are dead weight at runtime AND ugly clutter on the Release page.
+
+    Directory.Build.targets is imported AFTER package .targets, so by the time
+    we run, QuestPDF's <None Include> items are already in the collection;
+    we remove them by Identity match. The Target hook is BeforeTargets="Build"
+    rather than declarative because declarative <None Remove> on a metadata
+    Identity match isn't reliable across MSBuild evaluation passes.
+  -->
+  <Target Name="StripQuestPdfLatoFromOutput" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <None Remove="@(None)" Condition="$([System.String]::Copy('%(None.Identity)').Contains('LatoFont'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

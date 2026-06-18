@@ -173,18 +173,44 @@ jobs:
         with:
           path: artifacts
 
-      - name: Compute checksums
+      - name: Stage release files
+        # Explicit allow-list — never trust the publish output to be clean.
+        # If a future NuGet package decides to ship fonts/licences/icons via
+        # <None CopyToOutputDirectory>, they'd otherwise show up as stray
+        # release assets next to the real binaries. So name what we ship,
+        # and ignore everything else.
         run: |
           mkdir -p release-files
-          # Flatten every artifact into release-files/, prefixed with origin.
-          find artifacts -type f \
-            -not -name '*.pdb' \
-            -not -name '*.xml' \
-            | while read f; do
-            cp "$f" "release-files/$(basename "$f")"
-          done
+
+          # Windows: prefer the signed .exe, fall back to unsigned. The signed
+          # build comes back from SignPath under cinder-windows-signed/ when
+          # SIGNPATH_ENABLED is true; otherwise we ship cinder-windows-unsigned/.
+          if [[ -f artifacts/cinder-windows-signed/Cinder.exe ]]; then
+            cp artifacts/cinder-windows-signed/Cinder.exe release-files/Cinder.exe
+            echo "Windows: shipping SIGNED Cinder.exe"
+          elif [[ -f artifacts/cinder-windows-unsigned/Cinder.exe ]]; then
+            cp artifacts/cinder-windows-unsigned/Cinder.exe release-files/Cinder.exe
+            echo "Windows: shipping UNSIGNED Cinder.exe (SignPath not yet wired)"
+          else
+            echo "::error::No Cinder.exe found in artifacts/"
+            ls -la artifacts/ || true
+            exit 1
+          fi
+
+          # Linux tarball — already a single file from the build job.
+          if [[ -f artifacts/cinder-linux/cinder-linux-x64.tar.gz ]]; then
+            cp artifacts/cinder-linux/cinder-linux-x64.tar.gz release-files/
+          else
+            echo "::error::No cinder-linux-x64.tar.gz found in artifacts/"
+            ls -la artifacts/cinder-linux/ || true
+            exit 1
+          fi
+
           cd release-files
           sha256sum * > SHA256SUMS.txt
+          echo "---- Release files ----"
+          ls -la
+          echo "---- SHA256SUMS.txt ----"
           cat SHA256SUMS.txt
 
       - name: Create Release
