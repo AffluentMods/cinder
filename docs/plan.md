@@ -30,18 +30,15 @@
 
 ---
 
-## How to use this plan with Claude Code
+## How to use this plan
 
-This plan is structured so you can hand Claude Code one phase at a time:
-
-```
-Phase 0  → "Read /docs/plan.md sections 1-7 and Phase 0. Scaffold the repo."
-Phase 1  → "Read /docs/plan.md Phase 1. Build the hex viewer."
-Phase 2  → "Read /docs/plan.md Phase 2. Build the disk imager."
-…
-```
-
-Each phase has explicit **deliverables**, **acceptance criteria**, and **dependencies** so Claude Code can ship a phase end-to-end without ambiguity. Sections 1–7 are foundational context every phase needs.
+Sections 1–7 are foundational context — mission, architecture, library
+choices, design system, design rationale. Read them before picking up any
+phase. Section 9 is the phased roadmap; each phase has explicit
+**deliverables**, **acceptance criteria**, and **dependencies** so a
+contributor can ship a phase end-to-end without ambiguity. The
+[top-level ROADMAP](../ROADMAP.md) is the live status tracker that mirrors
+section 9 with ✅ / 🟡 / ⬜ marks for what's actually landed.
 
 ---
 

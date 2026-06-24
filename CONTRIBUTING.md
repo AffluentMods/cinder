@@ -49,7 +49,7 @@ This project follows the [Contributor Covenant 2.1](CODE_OF_CONDUCT.md). Be exce
 
 ```powershell
 # 1. Install prerequisites via winget
-winget install Microsoft.DotNet.SDK.9
+winget install Microsoft.DotNet.SDK.10
 winget install Python.Python.3.12
 winget install Git.Git
 winget install GitHub.GitLFS
@@ -77,7 +77,7 @@ dotnet build
 # 1. Install .NET 10 SDK
 wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
 sudo dpkg -i packages-microsoft-prod.deb
-sudo apt update && sudo apt install -y dotnet-sdk-9.0
+sudo apt update && sudo apt install -y dotnet-sdk-10.0
 
 # 2. Install Python, Git, build tools
 sudo apt install -y python3.12 python3.12-venv python3-pip git git-lfs build-essential libfuse-dev
@@ -112,7 +112,7 @@ dotnet build
 #### Linux (Fedora)
 
 ```bash
-sudo dnf install -y dotnet-sdk-9.0 python3.12 git git-lfs gcc-c++ fuse3-devel
+sudo dnf install -y dotnet-sdk-10.0 python3.12 git git-lfs gcc-c++ fuse3-devel
 git clone https://github.com/AffluentMods/cinder.git
 cd cinder
 python3.12 -m venv parsers/.venv
