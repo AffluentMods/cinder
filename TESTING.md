@@ -347,7 +347,7 @@ Read top-to-bottom in this order. Confirm every claim is current.
 | `SECURITY.md` | Disclosure email + advisory link work; threat model still accurate |
 | `LIMITATIONS.md` | Each `<a id=…>` anchor resolves; workarounds described still work |
 | `CODE_OF_CONDUCT.md` | Contact email reachable |
-| `docs/plan.md` | No remaining "Claude Code" references; phase deliverables match ROADMAP |
+| `docs/plan.md` | Phase deliverables match ROADMAP; library choices match `Directory.Packages.props` |
 | `docs/cloud-setup.md` | OAuth client-ID instructions still match each provider's current console UI |
 
 External link check (optional):

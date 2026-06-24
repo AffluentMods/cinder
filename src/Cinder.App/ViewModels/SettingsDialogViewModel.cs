@@ -43,7 +43,7 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
     public IReadOnlyList<string> ThemeOptions { get; } = ["Dark", "Light", "System"];
     public IReadOnlyList<string> DensityOptions { get; } = ["Comfortable", "Compact"];
     public IReadOnlyList<string> AiProviderOptions { get; } =
-        ["disabled", "ollama", "lm-studio", "openai-compatible", "openai", "anthropic"];
+        ["disabled", "ollama", "lm-studio", "openai-compatible", "openai", "mistral"];
 
     public SettingsDialogViewModel(SettingsStore store)
     {

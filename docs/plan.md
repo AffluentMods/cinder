@@ -406,7 +406,7 @@ public record AiPrompt(
 | **LM Studio** | `localhost:1234` | GUI-driven local inference. |
 | **llama.cpp server** | user URL | Direct llama.cpp deployments. |
 | **OpenAI-compatible** | user URL + key | Catches vLLM, TGI, KoboldCpp, future Astryx — anything speaking the OpenAI `/v1/chat/completions` schema. |
-| **OpenAI / Anthropic / Gemini** | user API key | Cloud option. **Big red warning**: evidence text leaves the device. Off by default. |
+| **OpenAI / Gemini / Mistral** | user API key | Cloud option. **Big red warning**: evidence text leaves the device. Off by default. |
 | **Disabled** | — | Default. AI panel says "Configure in Settings." |
 
 ### Context construction
