@@ -1264,7 +1264,7 @@ public sealed partial class CarverTool
         try
         {
             var carver = new Cinder.Carving.FileCarver();
-            await using var fs = File.OpenRead(Source);
+            await using var fs = Cinder.Imaging.EvidenceOpener.Open(Source);
             await foreach (var hit in carver.CarveAsync(fs, OutputDir, ct: ct))
             {
                 Hits.Add(hit);

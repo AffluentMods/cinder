@@ -211,6 +211,19 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         var hits = _scanner.Scan(header.AsSpan(0, read));
         if (hits.Count == 0)
         {
+            // No fixed-pattern match — try the entropy heuristic. TrueCrypt / VeraCrypt
+            // containers ship no magic by design; flag them by shape (size + entropy).
+            var heur = EncryptedContainerHeuristic.Inspect(
+                header.AsSpan(0, read),
+                Buffer.Length,
+                hits);
+            if (heur.Looks)
+            {
+                DetectedFormat = $"Probable encrypted container (entropy {heur.Entropy:F2})";
+                DetectedFormatBadge = "⚠ High-entropy data — likely TrueCrypt / VeraCrypt container or already-encrypted blob";
+                DetectedRouting = "→ Cannot parse without passphrase";
+                return;
+            }
             DetectedFormat = "Unknown";
             DetectedFormatBadge = null;
             DetectedRouting = null;

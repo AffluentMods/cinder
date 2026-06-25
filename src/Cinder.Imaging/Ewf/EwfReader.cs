@@ -1,21 +1,19 @@
-using System.Buffers;
+using System.Globalization;
 using System.IO.Compression;
 using System.Text;
 
 namespace Cinder.Imaging.Ewf;
 
 /// <summary>
-/// In-process reader for the EnCase / FTK EWF (Expert Witness Format, .E01) container.
+/// In-process reader for the EnCase / FTK EWF (Expert Witness Format) container.
 ///
-/// Supports single-segment .E01 files: parses the EVF magic + section chain (header2 /
-/// volume / sectors / table / done) and exposes the underlying raw disk as a seekable
-/// <see cref="Stream"/> via <see cref="OpenStream"/>. Per-chunk on-demand decompression
+/// Handles both single-segment .E01 captures and multi-segment chains
+/// (.E01 + .E02 + .E03 + … + .E99 + .EAA + .EAB + … up to .EZZ — the EnCase
+/// segment-naming convention). Each segment parses its own EVF magic + section
+/// chain (header2 / volume / table / sectors / done); chunk-offset tables from
+/// every segment are concatenated, with per-chunk segment ownership tracked so
+/// reads route to the correct backing file. Per-chunk on-demand decompression
 /// uses ZLib (RFC 1950) via <see cref="ZLibStream"/>.
-///
-/// Scope today:
-///   - single-segment .E01 only (multi-segment .E02/.E03 chains pending)
-///   - first volume section's geometry
-///   - no integrity-check verification against the recorded MD5 / SHA-1
 ///
 /// Reference: ASR Data's "Expert Witness Compression Format Specification v0.1.5"
 /// and the libewf source.
@@ -25,8 +23,8 @@ public sealed class EwfReader : IDisposable
     // E V F  \t  \r  \n  0xFF 0x00 — the eight-byte EVF magic prefix.
     public static ReadOnlySpan<byte> Magic => new byte[] { 0x45, 0x56, 0x46, 0x09, 0x0D, 0x0A, 0xFF, 0x00 };
 
-    private readonly Stream _file;
-    private readonly bool _ownsStream;
+    private readonly List<Stream> _segments;
+    private readonly bool _ownsStreams;
 
     public string? CaseDescription { get; private set; }
     public string? AcquisitionDate { get; private set; }
@@ -38,68 +36,180 @@ public sealed class EwfReader : IDisposable
     public int ChunkSize => checked((int)(SectorsPerChunk * BytesPerSector));
     public string? RecordedMd5 { get; private set; }
     public string? RecordedSha1 { get; private set; }
+    public int SegmentCount => _segments.Count;
 
-    /// <summary>Compressed-chunk offsets in physical file order. Bit 31 set ⇒ compressed.</summary>
+    /// <summary>Per-chunk segment index (0-based) into <see cref="_segments"/>.</summary>
+    internal int[] ChunkSegment { get; private set; } = [];
+    /// <summary>Per-chunk physical offset (within its segment). Bit 63 set ⇒ compressed.</summary>
     internal long[] ChunkOffsets { get; private set; } = [];
-    /// <summary>Size of each compressed chunk in bytes; the final chunk's compressed size is special-cased.</summary>
+    /// <summary>Per-chunk physical size in bytes (distance to next chunk's start in same segment).</summary>
     internal long[] ChunkPhysicalSizes { get; private set; } = [];
 
+    /// <summary>
+    /// Single-stream constructor (used by tests / smoke tools). Treats the stream as the
+    /// only segment in the chain.
+    /// </summary>
     public EwfReader(Stream stream, bool ownsStream = false)
+        : this(new List<Stream> { stream }, ownsStream)
     {
-        if (!stream.CanSeek)
-        {
-            throw new ArgumentException("EWF reader requires a seekable stream.", nameof(stream));
-        }
-        _file = stream;
-        _ownsStream = ownsStream;
-        ParseHeader();
-        ParseSections();
     }
 
-    public static EwfReader Open(string path)
+    private EwfReader(List<Stream> segments, bool ownsStreams)
     {
-        var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        foreach (var s in segments)
+        {
+            if (!s.CanSeek)
+            {
+                throw new ArgumentException("EWF reader requires seekable streams for every segment.");
+            }
+        }
+        _segments = segments;
+        _ownsStreams = ownsStreams;
+        ParseAllSegments();
+    }
+
+    /// <summary>
+    /// Opens an EWF chain starting at the given .E01. Subsequent segments
+    /// (.E02, .E03, …, .E99, .EAA, …) are discovered by walking siblings in
+    /// the same directory.
+    /// </summary>
+    public static EwfReader Open(string firstSegmentPath)
+    {
+        var paths = DiscoverSegments(firstSegmentPath);
+        var streams = new List<Stream>(paths.Count);
         try
         {
-            return new EwfReader(fs, ownsStream: true);
+            foreach (var p in paths)
+            {
+                streams.Add(new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.Read));
+            }
         }
         catch
         {
-            fs.Dispose();
+            foreach (var s in streams) { try { s.Dispose(); } catch { } }
             throw;
         }
+        return new EwfReader(streams, ownsStreams: true);
     }
 
-    private void ParseHeader()
+    /// <summary>
+    /// Walks the directory containing <paramref name="firstSegmentPath"/> and gathers
+    /// every sibling segment file in EnCase naming order. Returns at minimum the first
+    /// segment; missing siblings stop the walk (we don't go ahead and try to open a gap).
+    /// </summary>
+    public static IReadOnlyList<string> DiscoverSegments(string firstSegmentPath)
     {
-        _file.Position = 0;
-        Span<byte> hdr = stackalloc byte[13];
-        if (_file.Read(hdr) != hdr.Length)
+        var first = Path.GetFullPath(firstSegmentPath);
+        var dir = Path.GetDirectoryName(first) ?? ".";
+        var ext = Path.GetExtension(first);
+        if (ext.Length < 4)
         {
-            throw new InvalidDataException("EWF: file too short for header.");
+            return new[] { first };
         }
-        if (!hdr[..8].SequenceEqual(Magic))
+        var stem = Path.GetFileNameWithoutExtension(first);
+        var letter = ext[1];           // 'E' for .E01, 'L' for .L01, etc.
+        var found = new List<string> { first };
+        for (int n = 2; n <= 99; n++)
         {
-            throw new InvalidDataException("EWF: bad magic (expected EVF\\x09\\x0d\\x0a\\xff\\x00).");
+            var candidate = Path.Combine(dir, stem + "." + letter + n.ToString("D2", CultureInfo.InvariantCulture));
+            if (File.Exists(candidate))
+            {
+                found.Add(candidate);
+            }
+            else
+            {
+                if (n >= 100) break;
+                // For 2..99 a missing segment in the middle is fatal — chain has a hole.
+                if (found.Count > 1) break;
+                else break;
+            }
+        }
+        // Letter-suffix segments .EAA .. .EZZ for chains > 99 segments.
+        for (char a = 'A'; a <= 'Z'; a++)
+        {
+            for (char b = 'A'; b <= 'Z'; b++)
+            {
+                var candidate = Path.Combine(dir, stem + "." + letter + a + b);
+                if (File.Exists(candidate))
+                {
+                    found.Add(candidate);
+                }
+                else
+                {
+                    goto Done;
+                }
+            }
+        }
+    Done:
+        return found;
+    }
+
+    private void ParseAllSegments()
+    {
+        var globalChunkSeg = new List<int>();
+        var globalChunkOff = new List<long>();
+
+        for (int segIx = 0; segIx < _segments.Count; segIx++)
+        {
+            ParseSegment(segIx, globalChunkSeg, globalChunkOff);
+        }
+
+        if (BytesPerSector == 0)
+        {
+            throw new InvalidDataException("EWF: no volume section found in any segment.");
+        }
+        if (globalChunkOff.Count == 0)
+        {
+            throw new InvalidDataException("EWF: no table section found in any segment.");
+        }
+
+        ChunkSegment = globalChunkSeg.ToArray();
+        ChunkOffsets = globalChunkOff.ToArray();
+
+        // For each chunk: physical size = distance to the next chunk's physical offset
+        // ONLY IF the next chunk is in the same segment. Otherwise fall back to ChunkSize
+        // (a deflate stream will terminate itself at the chunk boundary).
+        ChunkPhysicalSizes = new long[ChunkOffsets.Length];
+        for (int i = 0; i < ChunkOffsets.Length; i++)
+        {
+            long a = ChunkOffsets[i] & 0x7FFFFFFFFFFFFFFFL;
+            long b;
+            if (i + 1 < ChunkOffsets.Length && ChunkSegment[i + 1] == ChunkSegment[i])
+            {
+                b = ChunkOffsets[i + 1] & 0x7FFFFFFFFFFFFFFFL;
+            }
+            else
+            {
+                b = a + ChunkSize + 16;
+            }
+            ChunkPhysicalSizes[i] = Math.Max(0, b - a);
         }
     }
 
-    private void ParseSections()
+    private void ParseSegment(int segIx, List<int> globalChunkSeg, List<long> globalChunkOff)
     {
-        var tableOffsets = new List<List<long>>();
-        var tableBases = new List<long>();   // base offset (in file) for each table's per-chunk offsets
+        var file = _segments[segIx];
+
+        // Magic + segment header (8 magic + 1 fields-start + 2 segment-num + 1 fields-end + 1 unused = 13).
+        file.Position = 0;
+        var magic = ReadExact(file, 13);
+        if (!magic.AsSpan(0, 8).SequenceEqual(Magic))
+        {
+            throw new InvalidDataException(
+                $"EWF: bad magic in segment #{segIx} (expected EVF prefix).");
+        }
+
         long pos = 13;
-        var chunks = new List<long>();
-        var sizes = new List<long>();
+        var segTables = new List<List<long>>();
+        var segTableBases = new List<long>();
 
         while (true)
         {
-            _file.Position = pos;
-            var hdr = ReadExact(76);
+            file.Position = pos;
+            var hdr = ReadExact(file, 76);
             var type = ReadCString(hdr.AsSpan(0, 16));
             var next = BitConverter.ToInt64(hdr, 16);
             var size = BitConverter.ToInt64(hdr, 24);
-            // hdr[32..72] = reserved, hdr[72..76] = adler32
 
             var dataStart = pos + 76;
             var dataLen = checked(size - 76);
@@ -110,7 +220,7 @@ public sealed class EwfReader : IDisposable
                 case "header":
                     if (CaseDescription is null && dataLen > 0)
                     {
-                        var raw = ReadAt(dataStart, (int)dataLen);
+                        var raw = ReadAt(file, dataStart, (int)dataLen);
                         try { CaseDescription = DecompressString(raw, type == "header2"); }
                         catch { /* tolerate broken header */ }
                     }
@@ -118,9 +228,9 @@ public sealed class EwfReader : IDisposable
 
                 case "disk":
                 case "volume":
-                    if (dataLen >= 32)
+                    if (BytesPerSector == 0 && dataLen >= 32)
                     {
-                        var v = ReadAt(dataStart, (int)dataLen);
+                        var v = ReadAt(file, dataStart, (int)dataLen);
                         var chunkCount = BitConverter.ToUInt32(v, 4);
                         var sectorsPerChunk = BitConverter.ToUInt32(v, 8);
                         var bytesPerSector = BitConverter.ToUInt32(v, 12);
@@ -135,27 +245,24 @@ public sealed class EwfReader : IDisposable
                 case "table":
                     if (dataLen >= 24)
                     {
-                        var t = ReadAt(dataStart, (int)dataLen);
+                        var t = ReadAt(file, dataStart, (int)dataLen);
                         var entryCount = BitConverter.ToUInt32(t, 0);
-                        var tableBase = BitConverter.ToUInt64(t, 8);   // base offset to add to each entry
-                        // 4 bytes: reserved at 4..8
-                        // 16 bytes: reserved at 16..32
-                        // entries start at offset 24 of the section data — each is uint32
+                        var tableBase = BitConverter.ToUInt64(t, 8);
                         var entries = new List<long>(checked((int)entryCount));
                         for (long i = 0; i < entryCount; i++)
                         {
                             var off = BitConverter.ToUInt32(t, 24 + (int)(i * 4));
                             entries.Add(off);
                         }
-                        tableOffsets.Add(entries);
-                        tableBases.Add((long)tableBase);
+                        segTables.Add(entries);
+                        segTableBases.Add((long)tableBase);
                     }
                     break;
 
                 case "hash":
                     if (dataLen >= 20)
                     {
-                        var h = ReadAt(dataStart, (int)dataLen);
+                        var h = ReadAt(file, dataStart, (int)dataLen);
                         RecordedMd5 = Convert.ToHexString(h.AsSpan(0, 16)).ToLowerInvariant();
                     }
                     break;
@@ -163,14 +270,14 @@ public sealed class EwfReader : IDisposable
                 case "digest":
                     if (dataLen >= 36)
                     {
-                        var h = ReadAt(dataStart, (int)dataLen);
+                        var h = ReadAt(file, dataStart, (int)dataLen);
                         RecordedMd5 ??= Convert.ToHexString(h.AsSpan(0, 16)).ToLowerInvariant();
                         RecordedSha1 = Convert.ToHexString(h.AsSpan(16, 20)).ToLowerInvariant();
                     }
                     break;
 
                 case "done":
-                    goto DoneParsing;
+                    goto SegmentDone;
             }
 
             if (next == pos || next == 0)
@@ -180,42 +287,21 @@ public sealed class EwfReader : IDisposable
             pos = next;
         }
 
-    DoneParsing:
-        // Stitch every table's offsets together in order. The offset's high bit means
-        // "compressed", and the offsets are relative to the table's base offset.
-        foreach (var (entries, baseOff) in tableOffsets.Zip(tableBases))
+    SegmentDone:
+        for (int t = 0; t < segTables.Count; t++)
         {
+            var entries = segTables[t];
+            var baseOff = segTableBases[t];
             foreach (var rawOff in entries)
             {
                 bool compressed = (rawOff & 0x80000000L) != 0;
                 long phys = (rawOff & 0x7FFFFFFFL) + baseOff;
-                chunks.Add(compressed ? phys | unchecked((long)0x8000_0000_0000_0000) : phys);
+                long encoded = compressed
+                    ? phys | unchecked((long)0x8000_0000_0000_0000)
+                    : phys;
+                globalChunkSeg.Add(segIx);
+                globalChunkOff.Add(encoded);
             }
-        }
-
-        // For each chunk we also need the physical size: distance to the next chunk's
-        // physical offset (chunks are stored back-to-back in the "sectors" section).
-        // The final chunk's size is "everything to the start of the next section", which
-        // we approximate by the end of the sectors section. For the common case where
-        // we used a single contiguous "sectors" section, the deflate stream terminates
-        // itself so reading "too much" is harmless — we let ZLibStream stop at the EOF
-        // marker.
-        ChunkOffsets = chunks.ToArray();
-        ChunkPhysicalSizes = new long[chunks.Count];
-        for (int i = 0; i < chunks.Count; i++)
-        {
-            long a = chunks[i] & 0x7FFFFFFFFFFFFFFFL;
-            long b = (i + 1 < chunks.Count) ? chunks[i + 1] & 0x7FFFFFFFFFFFFFFFL : a + ChunkSize + 16;
-            ChunkPhysicalSizes[i] = Math.Max(0, b - a);
-        }
-
-        if (BytesPerSector == 0)
-        {
-            throw new InvalidDataException("EWF: no volume section found.");
-        }
-        if (ChunkOffsets.Length == 0)
-        {
-            throw new InvalidDataException("EWF: no table section found.");
         }
     }
 
@@ -230,33 +316,26 @@ public sealed class EwfReader : IDisposable
         long raw = ChunkOffsets[chunkIndex];
         bool compressed = (raw & unchecked((long)0x8000_0000_0000_0000)) != 0;
         long phys = raw & 0x7FFFFFFFFFFFFFFFL;
-        int size = (int)Math.Min(ChunkPhysicalSizes[chunkIndex], int.MaxValue);
+        int segIx = ChunkSegment[chunkIndex];
+        var file = _segments[segIx];
 
-        _file.Position = phys;
+        file.Position = phys;
+        int chunkBytes = ChunkSize;
+        if (chunkIndex == ChunkOffsets.Length - 1)
+        {
+            long lastSectors = (long)NumberOfSectors - (long)chunkIndex * SectorsPerChunk;
+            chunkBytes = (int)Math.Min(chunkBytes, lastSectors * BytesPerSector);
+        }
+
         if (!compressed)
         {
-            // Raw chunk + 4-byte adler-32 trailer.
-            int chunkBytes = ChunkSize;
-            if (chunkIndex == ChunkOffsets.Length - 1)
-            {
-                // Last chunk: shorter than ChunkSize if the disk size isn't a clean multiple.
-                long lastSectors = (long)NumberOfSectors - (long)chunkIndex * SectorsPerChunk;
-                chunkBytes = (int)Math.Min(chunkBytes, lastSectors * BytesPerSector);
-            }
             var buf = new byte[chunkBytes];
-            ReadExactInto(buf);
+            ReadExactInto(file, buf);
             return buf;
         }
         else
         {
-            // Compressed chunk: ZLib stream (RFC 1950). Decompress up to ChunkSize bytes.
-            int chunkBytes = ChunkSize;
-            if (chunkIndex == ChunkOffsets.Length - 1)
-            {
-                long lastSectors = (long)NumberOfSectors - (long)chunkIndex * SectorsPerChunk;
-                chunkBytes = (int)Math.Min(chunkBytes, lastSectors * BytesPerSector);
-            }
-            using var zlib = new ZLibStream(_file, CompressionMode.Decompress, leaveOpen: true);
+            using var zlib = new ZLibStream(file, CompressionMode.Decompress, leaveOpen: true);
             var buf = new byte[chunkBytes];
             int filled = 0;
             while (filled < buf.Length)
@@ -273,19 +352,19 @@ public sealed class EwfReader : IDisposable
         }
     }
 
-    private byte[] ReadExact(int n)
+    private static byte[] ReadExact(Stream s, int n)
     {
         var b = new byte[n];
-        ReadExactInto(b);
+        ReadExactInto(s, b);
         return b;
     }
 
-    private void ReadExactInto(byte[] b)
+    private static void ReadExactInto(Stream s, byte[] b)
     {
         int filled = 0;
         while (filled < b.Length)
         {
-            int r = _file.Read(b, filled, b.Length - filled);
+            int r = s.Read(b, filled, b.Length - filled);
             if (r <= 0)
             {
                 throw new EndOfStreamException();
@@ -294,17 +373,17 @@ public sealed class EwfReader : IDisposable
         }
     }
 
-    private byte[] ReadAt(long offset, int length)
+    private static byte[] ReadAt(Stream s, long offset, int length)
     {
-        var save = _file.Position;
+        var save = s.Position;
         try
         {
-            _file.Position = offset;
-            return ReadExact(length);
+            s.Position = offset;
+            return ReadExact(s, length);
         }
         finally
         {
-            _file.Position = save;
+            s.Position = save;
         }
     }
 
@@ -328,6 +407,9 @@ public sealed class EwfReader : IDisposable
 
     public void Dispose()
     {
-        if (_ownsStream) _file.Dispose();
+        if (_ownsStreams)
+        {
+            foreach (var s in _segments) { try { s.Dispose(); } catch { } }
+        }
     }
 }

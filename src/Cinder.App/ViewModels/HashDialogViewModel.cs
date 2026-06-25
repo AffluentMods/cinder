@@ -72,8 +72,11 @@ public sealed partial class HashDialogViewModel : ViewModelBase
                 ProgressPercent = size > 0 ? Math.Min(100, b * 100.0 / size) : 0;
             });
 
-            var result = await _hash.ComputeFileAsync(
-                Path,
+            // Route through EvidenceOpener so an .E01 chain hashes the underlying raw disk
+            // (matches the recorded acquisition SHA1 / MD5) instead of the EWF container bytes.
+            await using var fs = Cinder.Imaging.EvidenceOpener.Open(Path);
+            var result = await _hash.ComputeAsync(
+                fs,
                 [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256, HashAlgorithmKind.Blake3],
                 progress,
                 ct);

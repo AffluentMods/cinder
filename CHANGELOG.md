@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-25
+
+The "real evidence end-to-end" release. v0.2.0 worked against every common
+artifact format individually; v0.2.1 closes the loop so dropping a real
+EnCase .E01 onto Cinder yields a browsable filesystem + parseable
+artifacts + verifiable hashes — without leaving the app and without a
+Python sidecar.
+
+### Added — evidence pipeline
+
+- **In-process EWF (.E01) reader** — `Cinder.Imaging.Ewf.EwfReader` parses
+  the EVF magic + section chain (header2 / volume / table / sectors /
+  done) and exposes the underlying raw disk through a seekable
+  `EwfStream` with on-demand ZLib chunk decompression. Verified end-to-end
+  against a 295 MB EnCase image (Jimmy Wilson case study): 891 MB raw disk
+  read through 27,200 compressed chunks, computed SHA1 **byte-for-byte**
+  matches the recorded acquisition hash.
+- **Multi-segment .E02 / .E03 chain support** — sibling segments are
+  auto-discovered in EnCase naming order (.E01 → .E99 → .EAA → .EZZ),
+  parsed together, and stitched into one continuous virtual disk.
+- **`Cinder.Imaging.EvidenceOpener.Open(path)`** — single entry point
+  that auto-sniffs the EVF magic and returns either an EWF-backed Stream
+  or a plain FileStream. Wired into:
+  - **Filesystem tool** — drop an .E01, get the same NTFS / FAT / exFAT /
+    VHD partition browser as a raw .dd.
+  - **Carver tool** — header+footer signature carve runs straight off an
+    .E01 chain.
+  - **YARA tool** — Aho-Corasick scan walks the EWF-backed stream a
+    chunk at a time; 100 GB images stay within bounded memory.
+  - **Hash dialog** — drag an .E01 in and get MD5 / SHA-1 / SHA-256 /
+    BLAKE3 of the **raw disk**, not the EWF container bytes — the values
+    line up with the acquisition-recorded hash so chain of custody is
+    preserved.
+
+### Added — tools & viewers
+
+- **Image viewer (Gallery)** — click any thumbnail to open a full-size
+  preview alongside the grid. Side panel shows dimensions, file size,
+  modified-UTC, GPS lat/lon (when EXIF GPS present), and a scrollable
+  EXIF row list (Make / Model / Software / DateTimeOriginal /
+  ExposureTime / FNumber / ISO / FocalLength / LensModel) via
+  MetadataExtractor.
+- **Recycle Bin tool** (new, Phase 4) — decodes Windows `$I` metadata
+  files (Vista/7 v1 fixed 520-byte path; Win10+ v2 variable name_len).
+  Output grid: owning SID, original full path, original size, deletion
+  timestamp, whether the companion `$R` file is still on disk
+  (recoverable). Accepts a `$Recycle.Bin` root (walks every `S-1-5-…`
+  subdirectory) or a flat folder of `$I` files. Per-tool F1 help
+  explains the format and how to map SID → username via SAM\\Users\\Names.
+
+### Added — signature & analysis
+
+- **TrueCrypt / VeraCrypt detection heuristic**
+  (`Cinder.Core.Signatures.EncryptedContainerHeuristic`). These formats
+  ship no magic header (by design — plausible deniability). The heuristic
+  combines four shape conditions: no known signature match + sector-aligned
+  size + above 19 KB minimum + Shannon entropy ≥ 7.95 on the header sample.
+  None alone is diagnostic; the combination is. Wired into the Hex
+  viewer's "Detected format" badge so an unrecognised high-entropy
+  sector-aligned blob now surfaces as
+  `Probable encrypted container (entropy 7.99)` with an actionable hint.
+- **BCTextEncoder armored output** added as a normal `MagicSignature`
+  (`-----BEGIN ENCODED MESSAGE-----` marker).
+
+### Fixed
+
+- C# `\x` escape greediness — the EWF magic constant was originally
+  `"EVF\x09\x0d\x0a\xFF\x00"u8`; the compiler reads up to 4 hex digits per
+  escape so `\x09\x0d` parsed as `\x090d` (Devanagari U+090D). Replaced
+  with an explicit `byte[]` literal. Same trap applies to any other
+  string-literal magic constants in the codebase.
+- MetadataExtractor's `GeoLocation` is a struct returned as
+  `GeoLocation?`; the GPS readout in the Gallery EXIF panel was
+  dereferencing it as a class. Routed through `.Value.Latitude` /
+  `.Value.Longitude`.
+
+### Changed
+
+- README rewrite to professional standard — phase-by-phase status matrix
+  matching ROADMAP, Cinder-vs-Autopsy-vs-FTK-vs-EZ-Tools-vs-Volatility
+  comparison table, honest install section, "your first case in 5
+  minutes" quickstart, updated architecture diagram.
+- TESTING.md (new) — end-to-end pre-release runbook covering build/test
+  gates, smoke launch, per-tool functional walkthrough with pass criteria
+  for all 36 tools, public license-clean test-data sources, security +
+  supply-chain checks, release-pipeline dry run, screenshot capture
+  protocol.
+- Release workflow allow-list — `.github/workflows/release.yml` now ships
+  exactly `Cinder.exe`, `cinder-linux-x64.tar.gz`, `SHA256SUMS.txt`
+  instead of flattening the entire publish directory (v0.2.0 leaked 20
+  stray Lato font files; `Directory.Build.targets` strips them at the
+  source too).
+
+### Acknowledgments
+
+End-to-end verification of the EWF reader was performed against a real
+forensic image distributed for educational case-study use. The image
+itself is not redistributed.
+
+[0.2.1]: https://github.com/AffluentMods/cinder/releases/tag/v0.2.1
+
 ## [0.2.0] — 2026-05-14
 
 The "every tool actually works" release. v0.1.0 shipped with real Hex/Strings/
@@ -200,5 +301,5 @@ open-source signing program is in flight; future releases will be signed under
 that program. Verify SHA-256 hashes against `SHA256SUMS.txt` in the release
 assets.
 
-[Unreleased]: https://github.com/AffluentMods/cinder/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AffluentMods/cinder/compare/v0.2.1...HEAD
 [0.1.0]: https://github.com/AffluentMods/cinder/releases/tag/v0.1.0

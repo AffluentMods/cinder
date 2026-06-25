@@ -106,7 +106,8 @@ public sealed class YaraLiteRuleset
         string filePath,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+        // Auto-detect .E01 chains so YARA can scan an EWF image directly without prior conversion.
+        await using var fs = Cinder.Imaging.EvidenceOpener.Open(filePath);
 
         // Per-rule hit accumulator. We track which patterns within each rule fired so the
         // condition evaluator can answer "all of them", "2 of them", "$a and $b", etc.
