@@ -167,6 +167,17 @@ public sealed partial class ShimcacheTool : SidecarToolViewModel
     public override string EmptyStateHint => "Open the SYSTEM hive.";
 }
 
+public sealed partial class RecycleBinTool : SidecarToolViewModel
+{
+    public override string Id => "recyclebin";
+    public override string Title => "Recycle Bin";
+    public override string Icon => "🗑";
+    public override string Subtitle => "Decode $I metadata files: original path, original size, deletion time, owning SID.";
+    public override string Phase => "4";
+    public override string Kind => "recyclebin";
+    public override string EmptyStateHint => "Point at a $Recycle.Bin directory (or any folder containing $I* files).";
+}
+
 public sealed partial class LinuxArtifactsTool : SidecarToolViewModel
 {
     public override string Id => "linux";

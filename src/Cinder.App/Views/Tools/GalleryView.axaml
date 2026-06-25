@@ -4,6 +4,8 @@
              x:Class="Cinder.App.Views.Tools.GalleryView"
              x:DataType="tools:GalleryTool">
     <Grid RowDefinitions="Auto,*">
+
+        <!-- Toolbar -->
         <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,*,Auto">
@@ -18,8 +20,10 @@
                            FontSize="{DynamicResource CinderFontSizeXs}" />
             </Grid>
         </Border>
+
         <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
-            <!-- Empty state -->
+
+            <!-- Empty state (no folder picked yet) -->
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                         Spacing="14" MaxWidth="460"
                         IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNull}}">
@@ -39,38 +43,160 @@
                 <TextBlock TextAlignment="Center" TextWrapping="Wrap"
                            FontSize="{DynamicResource CinderFontSizeSm}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                           Text="Point at any folder of images. Cinder walks subfolders, extracts EXIF metadata, and renders a thumbnail grid you can sort by date, size, or filename." />
+                           Text="Point at any folder of images. Cinder walks subfolders, renders a thumbnail grid, and shows EXIF / GPS metadata for whichever picture you click." />
                 <Button Classes="accent" Content="Pick folder…"
                         Command="{Binding PickFolderCommand}"
                         HorizontalAlignment="Center" Padding="20,10" />
             </StackPanel>
 
-            <!-- Populated state -->
-            <ScrollViewer IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <ItemsControl ItemsSource="{Binding Items}" Margin="14">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel Orientation="Horizontal" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="tools:GalleryItem">
-                            <Border Background="{DynamicResource CinderBackground1Brush}"
-                                    CornerRadius="4" Padding="6" Margin="4" Width="180">
-                                <StackPanel Spacing="6">
-                                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" Height="120" />
-                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
-                                               FontSize="{DynamicResource CinderFontSizeXs}"
+            <!-- Populated state: thumb grid + preview panel split -->
+            <Grid ColumnDefinitions="*,4,Auto"
+                  IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNotNull}}">
+
+                <!-- Thumbnail grid -->
+                <ScrollViewer Grid.Column="0">
+                    <ItemsControl ItemsSource="{Binding Items}" Margin="14">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="tools:GalleryItem">
+                                <Button Background="Transparent" BorderThickness="0" Padding="0"
+                                        Command="{Binding $parent[ItemsControl].((tools:GalleryTool)DataContext).ClosePreviewCommand}"
+                                        ToolTip.Tip="{Binding Path}">
+                                    <Button.Styles>
+                                        <Style Selector="Button">
+                                            <Setter Property="Cursor" Value="Hand" />
+                                        </Style>
+                                    </Button.Styles>
+                                    <Border Background="{DynamicResource CinderBackground1Brush}"
+                                            CornerRadius="4" Padding="6" Margin="4" Width="180"
+                                            BorderBrush="{DynamicResource CinderBorderBrush}"
+                                            BorderThickness="1"
+                                            Tag="{Binding}"
+                                            PointerPressed="OnThumbnailPressed">
+                                        <StackPanel Spacing="6">
+                                            <Image Source="{Binding Thumbnail}" Stretch="Uniform" Height="120" />
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                                       Foreground="{DynamicResource CinderForegroundBrush}" />
+                                            <TextBlock Text="{Binding SizeBytes, StringFormat='{}{0:N0} bytes'}"
+                                                       FontSize="{DynamicResource CinderFontSizeXs}"
+                                                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}"
+                              IsVisible="{Binding SelectedItem, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                <!-- Preview panel: large image + EXIF -->
+                <Border Grid.Column="2" Width="520"
+                        Background="{DynamicResource CinderSurface1Brush}"
+                        IsVisible="{Binding SelectedItem, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <Grid RowDefinitions="Auto,*,Auto">
+
+                        <!-- Header strip -->
+                        <Border Grid.Row="0" Background="{DynamicResource CinderSurface2Brush}"
+                                Padding="14,10"
+                                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="{Binding SelectedItem.Name}"
+                                               FontWeight="600"
                                                Foreground="{DynamicResource CinderForegroundBrush}" />
-                                    <TextBlock Text="{Binding SizeBytes, StringFormat='{}{0:N0} bytes'}"
+                                    <TextBlock Text="{Binding PreviewPath}"
                                                FontSize="{DynamicResource CinderFontSizeXs}"
-                                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                               TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+                                <Button Grid.Column="1" Content="✕" Width="28" Height="28" Padding="0"
+                                        Background="Transparent" BorderThickness="0"
+                                        Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                        Command="{Binding ClosePreviewCommand}"
+                                        ToolTip.Tip="Close preview" />
+                            </Grid>
+                        </Border>
+
+                        <!-- Full-size image (uniform scaled into the panel) -->
+                        <Border Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}"
+                                Padding="10">
+                            <Grid>
+                                <Image Source="{Binding PreviewBitmap}" Stretch="Uniform"
+                                       IsVisible="{Binding PreviewBitmap, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                <TextBlock Text="Preview unavailable for this format"
+                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           IsVisible="{Binding PreviewBitmap, Converter={x:Static ObjectConverters.IsNull}}" />
+                            </Grid>
+                        </Border>
+
+                        <!-- Metadata strip + EXIF rows -->
+                        <Border Grid.Row="2" Background="{DynamicResource CinderSurface2Brush}"
+                                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0">
+                            <ScrollViewer MaxHeight="260">
+                                <StackPanel Margin="14,10" Spacing="6">
+                                    <Grid ColumnDefinitions="100,*">
+                                        <TextBlock Grid.Column="0" Text="DIMENSIONS" Classes="section" />
+                                        <SelectableTextBlock Grid.Column="1" Classes="mono"
+                                                             FontSize="{DynamicResource CinderFontSizeSm}"
+                                                             Text="{Binding PreviewDimensions, FallbackValue='—'}"
+                                                             Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="100,*">
+                                        <TextBlock Grid.Column="0" Text="SIZE" Classes="section" />
+                                        <SelectableTextBlock Grid.Column="1" Classes="mono"
+                                                             FontSize="{DynamicResource CinderFontSizeSm}"
+                                                             Text="{Binding PreviewSize}"
+                                                             Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="100,*">
+                                        <TextBlock Grid.Column="0" Text="MODIFIED" Classes="section" />
+                                        <SelectableTextBlock Grid.Column="1" Classes="mono"
+                                                             FontSize="{DynamicResource CinderFontSizeSm}"
+                                                             Text="{Binding PreviewModified}"
+                                                             Foreground="{DynamicResource CinderForegroundBrush}" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="100,*" IsVisible="{Binding PreviewGps, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                        <TextBlock Grid.Column="0" Text="GPS" Classes="section"
+                                                   Foreground="{DynamicResource CinderAccentBrush}" />
+                                        <SelectableTextBlock Grid.Column="1" Classes="mono"
+                                                             FontSize="{DynamicResource CinderFontSizeSm}"
+                                                             Text="{Binding PreviewGps}"
+                                                             Foreground="{DynamicResource CinderAccentBrush}" />
+                                    </Grid>
+                                    <Border Classes="section-rule" Margin="0,6,0,4"
+                                            IsVisible="{Binding ExifRows.Count}" />
+                                    <ItemsControl ItemsSource="{Binding ExifRows}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="tools:ExifRow">
+                                                <Grid ColumnDefinitions="180,*" Margin="0,2,0,2">
+                                                    <TextBlock Grid.Column="0" Text="{Binding Label}"
+                                                               FontSize="{DynamicResource CinderFontSizeXs}"
+                                                               FontWeight="500"
+                                                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                                    <SelectableTextBlock Grid.Column="1"
+                                                                         Text="{Binding Value}"
+                                                                         Classes="mono"
+                                                                         FontSize="{DynamicResource CinderFontSizeXs}"
+                                                                         Foreground="{DynamicResource CinderForegroundBrush}"
+                                                                         TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
         </Panel>
     </Grid>
 </UserControl>

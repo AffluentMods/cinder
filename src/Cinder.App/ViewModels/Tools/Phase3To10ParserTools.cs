@@ -17,6 +17,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Versioning;
+using Cinder.Imaging.Ewf;
 using DiscUtils;
 using DiscUtils.Ext;
 using DiscUtils.Fat;
@@ -52,6 +53,61 @@ public sealed partial class FilesystemTool
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
+            // .E01 — wrap the EWF reader as a Stream over the raw disk, then re-route as raw.
+            if (ext == ".e01")
+            {
+                stream.Dispose();
+                var ewf = EwfReader.Open(path);
+                var ewfStream = ewf.OpenStream();
+                rows.Add(new
+                {
+                    Inode = 0L,
+                    Path = "[EWF metadata]",
+                    Name = "E01",
+                    Size = ewf.MediaSize,
+                    IsDirectory = true,
+                    IsDeleted = false,
+                    Modified = ewf.AcquisitionDate ?? "",
+                    Owner = "",
+                    Note = $"EWF media_size={ewf.MediaSize:N0} bytes · sectors={ewf.NumberOfSectors:N0} · MD5={ewf.RecordedMd5 ?? "?"} · SHA1={ewf.RecordedSha1 ?? "?"}",
+                });
+
+                // From here we treat the EWF-backed stream as a raw disk image — try every parser.
+                if (TryNtfs(ewfStream, rows, ct, path)) return rows;
+                if (TryFat(ewfStream, rows, ct, path)) return rows;
+                if (TryExt(ewfStream, rows, ct, path)) return rows;
+
+                // Likely a whole-disk image — walk via VolumeManager.
+                ewfStream.Position = 0;
+                var vmEwf = new VolumeManager();
+                vmEwf.AddDisk(ewfStream);
+                foreach (var vol in vmEwf.GetLogicalVolumes())
+                {
+                    ct.ThrowIfCancellationRequested();
+                    rows.Add(new
+                    {
+                        Inode = 0L,
+                        Path = $"[partition] {vol.Identity}",
+                        Name = vol.Identity,
+                        Size = vol.Length,
+                        IsDirectory = true,
+                        IsDeleted = false,
+                        Modified = "",
+                        Owner = "",
+                        Note = $"Partition · type {vol.PhysicalVolume.VolumeType}",
+                    });
+                    try
+                    {
+                        using var vs = vol.Open();
+                        _ = TryNtfs(vs, rows, ct, path, partitionPrefix: vol.Identity)
+                            || TryFat(vs, rows, ct, path, partitionPrefix: vol.Identity)
+                            || TryExt(vs, rows, ct, path, partitionPrefix: vol.Identity);
+                    }
+                    catch { /* skip unreadable */ }
+                }
+                return rows;
+            }
+
             // Try the container formats first.
             VirtualDisk? disk = ext switch
             {
@@ -1115,6 +1171,141 @@ public sealed partial class MobileTool
         catch (Exception ex)
         {
             rows.Add(new { App = "error", Kind = "", Source = Path.GetFileName(path), When = "", What = $"adb backup read failed: {ex.Message}" });
+        }
+    }
+}
+
+// ============================================================ RECYCLE BIN =========
+// Decode Windows $I metadata files. Format:
+//   v1 (Vista / 7): hdr_ver(8) | orig_size(8) | del_time FILETIME(8) | unicode_path[260]
+//   v2 (Win10+):    hdr_ver(8) | orig_size(8) | del_time FILETIME(8) | name_len_chars(4) | unicode_path[*]
+// The companion $R file (or directory) carries the actual deleted bytes.
+// We accept either a $Recycle.Bin directory (walks every <SID> subdir) or any folder that
+// directly contains $I* files.
+
+public sealed partial class RecycleBinTool
+{
+    protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
+    {
+        var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
+        foreach (var r in rows) Rows.Add(r);
+    }
+
+    private static List<object> Parse(string path, CancellationToken ct)
+    {
+        var rows = new List<object>();
+        if (File.Exists(path) && Path.GetFileName(path).StartsWith("$I", StringComparison.Ordinal))
+        {
+            // Single $I file
+            AddEntry(rows, path, owner: "");
+            return rows;
+        }
+
+        if (!Directory.Exists(path))
+        {
+            rows.Add(new { Owner = "", OriginalPath = "(target is not a directory or $I file)", OriginalSize = 0L, Deleted = "", RFile = "" });
+            return rows;
+        }
+
+        // Walk: every subdir whose name matches an SID (S-1-5-21-…) gets treated as a per-user
+        // recycle bin. Anything else: look for $I files directly.
+        var sidDirs = new List<(string Sid, string Path)>();
+        foreach (var sub in Directory.EnumerateDirectories(path))
+        {
+            ct.ThrowIfCancellationRequested();
+            var name = Path.GetFileName(sub);
+            if (name.StartsWith("S-1-", StringComparison.Ordinal))
+            {
+                sidDirs.Add((name, sub));
+            }
+        }
+
+        if (sidDirs.Count == 0)
+        {
+            // Flat folder of $I files.
+            foreach (var f in Directory.EnumerateFiles(path, "$I*"))
+            {
+                ct.ThrowIfCancellationRequested();
+                AddEntry(rows, f, owner: "");
+            }
+        }
+        else
+        {
+            foreach (var (sid, dir) in sidDirs)
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var f in Directory.EnumerateFiles(dir, "$I*"))
+                {
+                    AddEntry(rows, f, owner: sid);
+                }
+            }
+        }
+
+        if (rows.Count == 0)
+        {
+            rows.Add(new { Owner = "", OriginalPath = "(no $I files found)", OriginalSize = 0L, Deleted = "", RFile = "" });
+        }
+        return rows;
+    }
+
+    private static void AddEntry(List<object> rows, string iFile, string owner)
+    {
+        try
+        {
+            var data = File.ReadAllBytes(iFile);
+            if (data.Length < 24)
+            {
+                rows.Add(new { Owner = owner, OriginalPath = $"({Path.GetFileName(iFile)}: truncated)", OriginalSize = 0L, Deleted = "", RFile = "" });
+                return;
+            }
+            var version = BitConverter.ToInt64(data, 0);
+            var origSize = BitConverter.ToInt64(data, 8);
+            var ft = BitConverter.ToInt64(data, 16);
+            string origPath;
+            if (version == 2)
+            {
+                if (data.Length < 28)
+                {
+                    origPath = "(v2 missing name length)";
+                }
+                else
+                {
+                    var nameChars = BitConverter.ToInt32(data, 24);
+                    var byteCount = checked(nameChars * 2);
+                    if (28 + byteCount > data.Length) byteCount = data.Length - 28;
+                    origPath = System.Text.Encoding.Unicode.GetString(data, 28, Math.Max(0, byteCount)).TrimEnd('\0');
+                }
+            }
+            else
+            {
+                // v1: fixed 520-byte UTF-16 path starting at offset 24.
+                var end = Math.Min(data.Length, 24 + 520);
+                origPath = System.Text.Encoding.Unicode.GetString(data, 24, end - 24).TrimEnd('\0');
+            }
+            var dt = ft > 0
+                ? DateTime.FromFileTimeUtc(ft).ToString("u", System.Globalization.CultureInfo.InvariantCulture)
+                : "";
+
+            // Pair with $R file (replace $I prefix with $R)
+            var rName = "$R" + Path.GetFileName(iFile)[2..];
+            var rPath = Path.Combine(Path.GetDirectoryName(iFile) ?? "", rName);
+            string rDisplay;
+            if (File.Exists(rPath)) rDisplay = $"file ({new FileInfo(rPath).Length:N0} bytes)";
+            else if (Directory.Exists(rPath)) rDisplay = "directory";
+            else rDisplay = "(missing — recoverable bytes not present)";
+
+            rows.Add(new
+            {
+                Owner = owner,
+                OriginalPath = origPath,
+                OriginalSize = origSize,
+                Deleted = dt,
+                RFile = rDisplay,
+            });
+        }
+        catch (Exception ex)
+        {
+            rows.Add(new { Owner = owner, OriginalPath = $"({Path.GetFileName(iFile)}: {ex.Message})", OriginalSize = 0L, Deleted = "", RFile = "" });
         }
     }
 }

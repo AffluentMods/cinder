@@ -55,6 +55,7 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
                     new SrumTool(),
                     new AmcacheTool(),
                     new ShimcacheTool(),
+                    new RecycleBinTool(),
                     new EmailTool(),
                     new LinuxArtifactsTool(),
                     new MemoryTool(),

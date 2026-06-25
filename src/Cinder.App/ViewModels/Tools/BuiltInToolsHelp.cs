@@ -453,6 +453,37 @@ of evidence.
 """;
 }
 
+public sealed partial class RecycleBinTool
+{
+    public override string HelpMarkdown => """
+## What this is
+The Windows Recycle Bin pairs every deleted file with a small metadata file. On
+Vista+ these are named `$I…` (the metadata) and `$R…` (the actual file contents).
+The `$I` file records the **original full path**, the **original size**, and the
+**deletion time** — even after the user empties the bin, the `$I` files are often
+the last surviving record of *what was on disk and when it was removed*.
+
+## When you'd use it
+For any case where deleted files matter: data exfiltration, evidence tampering,
+spoliation, or simply "what did this person have before they panicked." The Recycle
+Bin sits inside `$Recycle.Bin\<user-SID>\` on every Windows volume — one folder per
+user that ever deleted something on that drive.
+
+## How to use it in Cinder
+1. Click "Open evidence" and point at a `$Recycle.Bin` directory (or any folder
+   that contains `$I*` files).
+2. Cinder walks every `S-1-5-…` SID sub-folder and decodes each metadata file.
+3. The grid shows: owning SID, original path, original size, deletion UTC, and
+   whether the companion `$R` file is still on disk (recoverable).
+
+## Tip
+The owning SID maps to a username via the **SAM hive** under
+`SAM\Domains\Account\Users\Names\` — open SAM in the Registry tool, and the value
+type field of each name entry IS the RID. Append it to the machine SID
+(`S-1-5-21-…`) and you have the full mapping from "who deleted this" to "who".
+""";
+}
+
 public sealed partial class EmailTool
 {
     public override string HelpMarkdown => """
