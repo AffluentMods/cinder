@@ -19,6 +19,12 @@
                         Content="Seed demo events"
                         Command="{Binding AddDemoEventsCommand}"
                         Margin="6,0,0,0" />
+                <Button DockPanel.Dock="Right"
+                        Classes="accent"
+                        Content="Ingest folder…"
+                        Command="{Binding IngestFolderCommand}"
+                        ToolTip.Tip="Walk a triage folder; cross-merge EVTX + Registry + Prefetch + LNK + browser + email + recycle-bin events"
+                        Margin="6,0,0,0" />
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <StackPanel Spacing="3">
                         <TextBlock Text="From" FontSize="{DynamicResource CinderFontSizeXs}"

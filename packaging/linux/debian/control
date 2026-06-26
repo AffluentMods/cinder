@@ -1,0 +1,17 @@
+Package: cinder
+Version: 0.2.1
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: libc6 (>= 2.31), libssl3 | libssl1.1, libicu70 | libicu71 | libicu72 | libicu74
+Recommends: libfuse3-3, lime-forensics-dkms
+Maintainer: Affluent Labs <hello@cinder.dev>
+Homepage: https://github.com/AffluentMods/cinder
+Description: Open-source digital-forensics toolkit
+ Cinder consolidates eight separate forensic tools (Autopsy, FTK Imager,
+ Eric Zimmerman's suite, Volatility, Hindsight, ExifTool, Plaso, WinHex)
+ into one modern cross-platform application built on .NET 10 and Avalonia 11.
+ .
+ Reads E01 / VHD / VHDX / raw images in-process, parses every common
+ Windows + Linux artifact, ships court-ready PDF + DOCX reports, and
+ includes a bring-your-own-model AI copilot.

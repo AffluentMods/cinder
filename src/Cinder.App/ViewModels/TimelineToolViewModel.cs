@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using Avalonia.Platform.Storage;
+using Cinder.App.Services;
 using Cinder.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -53,6 +55,42 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
         var hist = Timeline.Histogram(From, To, 64, filter);
         foreach (var h in hist) Histogram.Add(h);
         StatusLine = $"{Events.Count:N0} events shown · {Timeline.Count:N0} indexed.";
+    }
+
+    [RelayCommand]
+    private async Task IngestFolderAsync(CancellationToken ct)
+    {
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (owner is null) return;
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Pick a triage folder to ingest",
+        });
+        var path = folders.FirstOrDefault()?.TryGetLocalPath();
+        if (string.IsNullOrEmpty(path)) return;
+        StatusLine = "Ingesting…";
+        var progress = new Progress<string>(s => StatusLine = $"Ingesting · {s}");
+        try
+        {
+            var stats = await TimelineIngester.IngestAsync(Timeline, path, progress, ct);
+            // From / To windows track widest range so all events show
+            if (Timeline.Count > 0)
+            {
+                var window = Timeline.Range(DateTimeOffset.MinValue, DateTimeOffset.MaxValue).ToList();
+                if (window.Count > 0)
+                {
+                    From = window[0].Timestamp.AddDays(-1);
+                    To = window[^1].Timestamp.AddDays(1);
+                }
+            }
+            Refresh();
+            StatusLine = $"Ingested: {stats}. {Timeline.Count:N0} events on the timeline.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Ingest failed: {ex.Message}";
+        }
     }
 
     [RelayCommand]

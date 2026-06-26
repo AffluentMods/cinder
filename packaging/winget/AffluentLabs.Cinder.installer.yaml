@@ -1,0 +1,17 @@
+PackageIdentifier: AffluentLabs.Cinder
+PackageVersion: 0.2.1
+InstallerType: portable
+Scope: user
+Commands:
+  - cinder
+ReleaseDate: 2026-06-25
+ManifestType: installer
+ManifestVersion: 1.6.0
+
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/AffluentMods/cinder/releases/download/v0.2.1/Cinder.exe
+    InstallerSha256: REPLACE_WITH_RELEASE_SHA256
+    InstallerType: portable
+    Commands:
+      - cinder

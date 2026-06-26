@@ -199,7 +199,54 @@ public sealed partial class MemoryTool : SidecarToolViewModel
     public override string Kind => "memory";
     public override string EmptyStateHint => "Open a memory image (.dmp, .raw, .lime).";
     public override IReadOnlyList<string> RequiredPythonPackages => ["volatility3"];
-    protected override Task LoadAsync(string evidencePath, CancellationToken ct) => Task.CompletedTask;
+
+    protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
+    {
+        if (!await Cinder.App.Services.Vol3Runner.IsAvailableAsync(ct))
+        {
+            Rows.Add(new
+            {
+                Plugin = "(none)",
+                Pid = 0,
+                Detail = "Volatility 3 is not on PATH. Install via:  python -m pip install volatility3  — or use the Python Bootstrap from Settings.",
+            });
+            return;
+        }
+        var pstree = await Cinder.App.Services.Vol3Runner.RunAsync(
+            evidencePath,
+            "windows.pstree.PsTree",
+            ct);
+
+        if (pstree.Error is not null)
+        {
+            Rows.Add(new { Plugin = "pstree", Pid = 0, Detail = pstree.Error });
+            return;
+        }
+
+        foreach (var r in pstree.Rows)
+        {
+            // PsTree exposes PID, PPID, ImageFileName, Offset(V), Threads, Handles,
+            // SessionId, Wow64, CreateTime, ExitTime
+            Rows.Add(new
+            {
+                Plugin = "pstree",
+                Pid = TryInt(r, "PID"),
+                PPid = TryInt(r, "PPID"),
+                Name = TryStr(r, "ImageFileName"),
+                Threads = TryInt(r, "Threads"),
+                Handles = TryInt(r, "Handles"),
+                Created = TryStr(r, "CreateTime"),
+                Exited = TryStr(r, "ExitTime"),
+            });
+        }
+    }
+
+    private static long TryInt(IDictionary<string, object?> d, string k)
+        => d.TryGetValue(k, out var v) && v is long l ? l
+           : d.TryGetValue(k, out var v2) && v2 is int i ? i
+           : 0;
+    private static string TryStr(IDictionary<string, object?> d, string k)
+        => d.TryGetValue(k, out var v) ? v?.ToString() ?? "" : "";
 }
 
 public sealed partial class NetworkTool : SidecarToolViewModel

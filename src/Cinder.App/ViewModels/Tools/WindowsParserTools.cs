@@ -830,15 +830,7 @@ public sealed partial class EmailTool
                 break;
             case ".pst":
             case ".ost":
-                rows.Add(new
-                {
-                    Source = Path.GetFileName(path),
-                    From = "",
-                    To = "",
-                    Subject = "PST/OST extraction requires the Python libpff sidecar — not yet available in v0.1.",
-                    Sent = "",
-                    Size = new FileInfo(path).Length,
-                });
+                ParsePstOst(path, rows, ct);
                 break;
             default:
                 rows.Add(new
@@ -981,4 +973,132 @@ public sealed partial class EmailTool
         Sent = headers.TryGetValue("Date", out var d) ? d : "",
         Size = 0L,
     };
+
+    /// <summary>
+    /// PST / OST via the Python <c>libpff-python</c> binding (sister library to pyewf).
+    /// Shells out to <c>python -c &lt;inline-script&gt;</c> with the .pst path as argv[1];
+    /// the script walks every folder and emits one JSON object per item line. If pypff
+    /// isn't installed we surface an actionable install hint as the only "row" so the
+    /// user has a clear next step.
+    /// </summary>
+    private static void ParsePstOst(string path, List<object> rows, CancellationToken ct)
+    {
+        const string Script = """
+import json, sys
+try:
+    import pypff
+except ImportError:
+    print(json.dumps({"_install_hint": "Run:  python -m pip install libpff-python  — then re-open this PST/OST."}), flush=True)
+    sys.exit(0)
+
+def walk(folder, prefix=""):
+    try:
+        sub = folder.sub_folders
+    except Exception:
+        sub = []
+    for child in sub:
+        name = child.name or "(unnamed)"
+        yield from walk(child, prefix + "/" + name)
+    try:
+        for m in folder.sub_messages:
+            try:
+                rec = {
+                    "folder": prefix or "/",
+                    "subject": (m.subject or "")[:200],
+                    "sender_name": (m.sender_name or "")[:120],
+                    "sender_email": "",  # libpff doesn't expose this directly on all versions
+                    "delivery_time": str(m.delivery_time or ""),
+                    "client_submit_time": str(m.client_submit_time or ""),
+                    "attachments": m.number_of_attachments,
+                }
+            except Exception as ex:
+                rec = {"folder": prefix, "subject": f"<error: {ex}>", "delivery_time": "", "attachments": 0}
+            print(json.dumps(rec), flush=True)
+    except Exception:
+        pass
+
+pff = pypff.file()
+pff.open(sys.argv[1])
+root = pff.get_root_folder()
+for f in walk(root, ""):
+    pass
+pff.close()
+""";
+
+        try
+        {
+            var python = ResolvePython();
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = python,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(Script);
+            psi.ArgumentList.Add(path);
+
+            using var p = System.Diagnostics.Process.Start(psi)
+                ?? throw new InvalidOperationException("Could not spawn Python — install Python 3.12+ and pypff (libpff-python).");
+
+            while (!p.StandardOutput.EndOfStream)
+            {
+                ct.ThrowIfCancellationRequested();
+                var line = p.StandardOutput.ReadLine();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("_install_hint", out var hint))
+                    {
+                        rows.Add(new
+                        {
+                            Source = Path.GetFileName(path),
+                            From = "",
+                            To = "",
+                            Subject = hint.GetString() ?? "Install libpff-python.",
+                            Sent = "",
+                            Size = new FileInfo(path).Length,
+                        });
+                        return;
+                    }
+                    rows.Add(new
+                    {
+                        Source = root.GetProperty("folder").GetString() ?? "",
+                        From = root.TryGetProperty("sender_name", out var sn) ? sn.GetString() ?? "" : "",
+                        To = "",
+                        Subject = root.TryGetProperty("subject", out var sj) ? sj.GetString() ?? "" : "",
+                        Sent = root.TryGetProperty("delivery_time", out var dt) ? dt.GetString() ?? "" : "",
+                        Size = root.TryGetProperty("attachments", out var a) && a.TryGetInt32(out var n) ? (long)n : 0L,
+                    });
+                }
+                catch { /* skip malformed line */ }
+            }
+            p.WaitForExit();
+        }
+        catch (Exception ex)
+        {
+            rows.Add(new
+            {
+                Source = Path.GetFileName(path),
+                From = "",
+                To = "",
+                Subject = $"PST/OST parse failed: {ex.Message}",
+                Sent = "",
+                Size = 0L,
+            });
+        }
+    }
+
+    private static string ResolvePython()
+    {
+        var local = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Cinder", "venv", "Scripts", "python.exe");
+        if (File.Exists(local)) return local;
+        return OperatingSystem.IsWindows() ? "python.exe" : "python3";
+    }
 }

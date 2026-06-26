@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+
+# Refresh the icon cache so the Activities launcher picks up the new entry.
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications 2>/dev/null || true
+fi
+
+# Grant raw-disk capabilities so the user doesn't need sudo for every launch.
+# Cinder degrades gracefully without these — write-blocker engagement just stays disabled.
+if command -v setcap >/dev/null 2>&1 && [ -x /usr/bin/cinder ]; then
+    setcap cap_sys_rawio,cap_sys_admin+ep /usr/bin/cinder 2>/dev/null || true
+fi
+
+exit 0
