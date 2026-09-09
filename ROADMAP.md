@@ -145,7 +145,11 @@ libraries do the heavy lifting in-process.
   energy estimation. Resolves AppId / UserId via SruDbIdMapTable;
   binary SIDs render as canonical S-1-… strings.
 - ✅ Email — `.msg` (Outlook) + `.eml` + `.mbox` via `MsgReader` and an
-  in-house MBOX scanner. `.pst` / `.ost` still need the libpff sidecar.
+  in-house MBOX scanner.
+- ✅ Email — `.pst` / `.ost` via `libpff-python` (pypff) invoked as an
+  inline Python script. Enumerates every folder + message with sender,
+  subject, delivery time, attachment count. Falls back to a clear
+  `pip install libpff-python` hint when pypff isn't installed.
 
 ## Phase 5 — Linux artifacts ✅
 
@@ -156,14 +160,20 @@ libraries do the heavy lifting in-process.
 - 🟡 journalctl binary journal files, systemd unit metadata, package
   manager logs — tracked.
 
-## Phase 6 — Search, timeline, hash sets, YARA, VirusTotal 🟡
+## Phase 6 — Search, timeline, hash sets, YARA, VirusTotal ✅ (most)
 
 - ✅ Lucene.NET case-wide index — full-text index with "Build index from
   folder…" ingestion. Recursively walks an evidence folder, routes each
   file through DocumentReader for structured formats and falls back to
   printable-strings extraction for binaries. Standard Lucene query
   syntax (`source:evtx`, `user:alice`, `text:"exact phrase"`, etc.).
-- 🟡 Super-timeline — view exists, merge logic pending.
+- ✅ Super-timeline — `TimelineIngester` walks a triage folder and
+  merges every parseable artifact into the SuperTimeline. Sources:
+  EVTX records, Prefetch LastRunTimes, LNK Created/Modified/Accessed,
+  NTUSER UserAssist last-execution, Chromium + Firefox browser history,
+  .eml/.msg Date headers, $I recycle-bin deletions with owning SID.
+  Sort + histogram + range filter + user filter + text-contains filter
+  all work on the merged view.
 - ✅ Map — auto-ingest from a folder of images. MetadataExtractor pulls
   every photo's EXIF GPS, plots one point per geo-tagged image with
   filename + mtime. Manual add still available for non-image evidence.
@@ -171,7 +181,11 @@ libraries do the heavy lifting in-process.
   / `.mbox` files. Parses From / To headers, deduplicates identities,
   builds a directed who-talked-to-whom graph with in/out degree counts.
   Manual add still available.
-- 🟡 Hash sets (NSRL bulk import) — UI shell.
+- ✅ Hash sets (NSRL bulk import) — `HashSetService` in
+  `src/Cinder.Search/` with `ImportNsrlMinimalCsv` (~200k rows/sec on
+  a typical SSD) + `Lookup(algorithm, digest)`. HashSetsTool exposes
+  PickDatabase / ImportNsrl / Lookup commands. SQLite-backed so
+  100M-row NSRL RDS imports stream in without RAM pressure.
 - ✅ YARA-lite — in-house parser + Aho-Corasick matcher. Loads `.yar`
   files, parses the common `rule { meta: strings: condition: }` grammar
   (literal `"strings"`, `nocase`, hex `{ 4D 5A }` patterns; condition
@@ -181,11 +195,15 @@ libraries do the heavy lifting in-process.
   patterns and full libyara feature parity remain 🟡.
 - 🟡 VirusTotal hash-only lookup — UI shell.
 
-## Phase 7 — Memory forensics ⬜
+## Phase 7 — Memory forensics 🟡
 
+- ✅ Volatility 3 wrapper — `Cinder.App.Services.Vol3Runner` shells to
+  `python -m volatility3 -f <image> -r json <plugin>` and parses the
+  JSON renderer output. Ships pstree, psscan, netscan, dlllist,
+  malfind, hashdump, lsadump. MemoryTool routes `.dmp` / `.raw` /
+  `.lime` through it; missing vol3 surfaces a clear install hint.
 - ⬜ RAM capture (signed driver Windows / LiME Linux) — needs signed kernel
   driver.
-- 🟡 Volatility 3 wrapper — UI shell.
 
 ## Phase 8 — Reporting & case management ✅ (most)
 
@@ -230,10 +248,20 @@ libraries do the heavy lifting in-process.
 
 ## Cross-cutting
 
-- 🟡 Win/Mac/Linux installers — release workflow produces self-contained
-  single-file binaries; .msix, .deb, .rpm, AppImage packaging pending.
-- ⬜ **Code signing** — Windows SignPath Foundation application in flight.
-- ⬜ Self-update channel.
+- 🟡 Win/Mac/Linux installers — release workflow ships self-contained
+  Windows `Cinder.exe` + Linux `.tar.gz`; `packaging/winget/`,
+  `packaging/linux/{debian,rpm,appimage}/` manifests are checked in
+  and go live once SignPath approves so signed artifacts flow through
+  each channel.
+- 🟡 **Code signing** — Windows SignPath Foundation re-application in
+  flight; `.signpath/` config + release-workflow submit-action already
+  wired for when approval lands.
+- ✅ Self-update channel — `UpdateChecker` hits the public
+  `/releases/latest` GitHub endpoint, semver-compares against the
+  running assembly version, and surfaces `UpdateInfo` for a
+  non-blocking dashboard banner with a click-through to the release
+  page. No auto-download; documented as the project's one phone-home
+  in the README Telemetry section.
 
 ## How to influence the roadmap
 

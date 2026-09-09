@@ -1,0 +1,23 @@
+# CODEOWNERS — GitHub uses this to auto-request review on every PR.
+# Format: <path-pattern> <owner …>
+
+# Global default — every file falls back to the maintainer.
+*                                       @affluentzombie
+
+# Security-sensitive surfaces get an explicit callout so the auto-review
+# request is visible in the PR check strip.
+/SECURITY.md                            @affluentzombie
+/.github/workflows/                     @affluentzombie
+/.signpath/                             @affluentzombie
+/src/Cinder.Core/Signatures/            @affluentzombie
+/src/Cinder.Plugins/                    @affluentzombie
+/src/Cinder.Imaging/Ewf/                @affluentzombie
+
+# Docs edits still route to the maintainer today, but split them out so a
+# future doc-maintainer role can be added without touching the pattern.
+/README.md                              @affluentzombie
+/CHANGELOG.md                           @affluentzombie
+/ROADMAP.md                             @affluentzombie
+/LIMITATIONS.md                         @affluentzombie
+/TESTING.md                             @affluentzombie
+/docs/                                  @affluentzombie

@@ -1,0 +1,50 @@
+project:
+  name: cinder
+  display_name: Cinder — open-source digital-forensics toolkit
+  organization: AffluentMods
+  repository_url: https://github.com/AffluentMods/cinder
+  homepage_url: https://github.com/AffluentMods/cinder
+  license:
+    identifier: Apache-2.0
+    url: https://github.com/AffluentMods/cinder/blob/main/LICENSE
+
+description: |
+  Cinder is a cross-platform digital-forensics workstation built in
+  C#/.NET 10 on Avalonia 11. It reads EnCase E01 / VHD / VHDX / raw disk
+  images in-process, parses every common Windows + Linux artifact,
+  cross-merges them into a Plaso-style super-timeline, runs Volatility 3
+  for memory forensics, and ships court-ready PDF + DOCX reports —
+  without a Python venv bootstrap for the common cases.
+
+  Cinder is used by digital-forensics examiners, incident responders,
+  security students, and homelab operators. All parsers are auditable,
+  all algorithms are reviewable, and chain-of-custody is hash-chained
+  end-to-end.
+
+signing_policies:
+  - name: release-signing
+    description: |
+      Applied only on push of a tag matching v*.*.*. Signs the released
+      Cinder.exe with the SignPath Foundation's OSS certificate under
+      the Cinder subject. Approvers: repository maintainer(s).
+    approval_required: true
+    max_artifact_size_mb: 300
+
+  - name: test-signing
+    description: |
+      Applied on pushes to the dev branch. Signs with a SignPath test
+      certificate only — not for public distribution.
+    approval_required: false
+    max_artifact_size_mb: 300
+
+trust:
+  build_provider: github-actions
+  workflow_file: .github/workflows/release.yml
+  allowed_refs:
+    - refs/tags/v*
+  required_check_runs:
+    - CI
+
+maintainers:
+  - github: affluentzombie
+    role: primary

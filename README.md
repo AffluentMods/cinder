@@ -147,20 +147,55 @@ tar xzf cinder-linux-x64.tar.gz
 sha256sum -c SHA256SUMS.txt
 ```
 
-### Coming
+### Signature status
+
+Windows releases are **currently unsigned**. Cinder has an active
+application with the [SignPath Foundation](https://signpath.org)'s free
+code-signing program for open-source projects; the release workflow at
+[`.github/workflows/release.yml`](.github/workflows/release.yml) is already
+wired to submit signing requests via `signpath/github-action-submit-signing-request`
+the moment approval lands — see [`.signpath/`](.signpath/) for the artifact
+configuration and signing policies.
+
+**Until the certificate is issued you will see one of two things on Windows:**
+
+1. **SmartScreen** — a blue "Windows protected your PC" panel on first
+   launch of `Cinder.exe`. Click **More info** → **Run anyway**.
+2. **A yellow badge in your browser's download bar** — the browser (Edge /
+   Chrome / Firefox) doesn't yet recognise the SHA-256 of the exe.
+   Choose **Keep** (Chrome / Edge) or the equivalent in Firefox.
+
+Neither of these means the file is malicious. They mean the file is
+new to Microsoft's reputation service and unsigned — the same state as
+every open-source Windows binary before it accumulates enough downloads
+or gets code-signed.
+
+**How to verify a release manually** (Windows PowerShell):
+
+```powershell
+# 1. Download Cinder.exe + SHA256SUMS.txt from the release page
+$expected = (Get-Content .\SHA256SUMS.txt | Select-String Cinder.exe).ToString().Split()[0].ToLower()
+$actual   = (Get-FileHash .\Cinder.exe -Algorithm SHA256).Hash.ToLower()
+if ($expected -eq $actual) { "OK" } else { "MISMATCH — do not run" }
+```
+
+Or on Linux / WSL:
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+The `SHA256SUMS.txt` in every release is generated inside GitHub Actions
+from the exact bytes that will be published as the release asset — so a
+match against your download proves the binary hasn't been tampered with
+in transit. Reproducible-build provenance follows once SignPath is live.
+
+### Coming (package-manager installers)
 
 Package-manager installs are tracked but not yet shipping:
 `winget install AffluentLabs.Cinder` · `yay -S cinder` (AUR) ·
 `.deb` for Debian/Ubuntu · `.rpm` for Fedora/RHEL · AppImage for any
-distro.
-
-### Code signing
-
-Windows builds will be code-signed under the [SignPath
-Foundation](https://signpath.org)'s free signing program for open-source
-projects once the application is approved (in flight). Until then, Windows
-SmartScreen may warn on download — verify the SHA-256 against the release
-page and click "More info → Run anyway" to confirm.
+distro. The manifests live in [`packaging/`](packaging/) — they'll go
+live on the next release cycle once SignPath signs the Windows exe.
 
 ## Quickstart: your first case in five minutes
 

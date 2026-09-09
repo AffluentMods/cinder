@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  SignPath artifact configuration for Cinder.
+
+  The uploaded artifact is the ZIP of ${{ github.workspace }}/publish/win-x64/
+  produced by `dotnet publish -r win-x64 --self-contained -p:PublishSingleFile=true`.
+  It contains exactly one file we sign: the self-extracting Cinder.exe.
+
+  Directory-level rules apply if the future release pipeline switches to a
+  multi-file publish (loose native DLLs, plug-ins, etc.).
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="Cinder.exe">
+      <authenticode-sign />
+    </pe-file>
+
+    <!--
+      Any future plug-in DLL Cinder ships as part of the release archive.
+      The name pattern matches on the plug-in namespace; Central Package
+      Management guarantees plug-in DLLs follow "Cinder.Plugins.*" naming.
+    -->
+    <directory path="plugins" allow-nested="true">
+      <pe-file-set>
+        <include-by-name>Cinder.Plugins.*.dll</include-by-name>
+        <authenticode-sign />
+      </pe-file-set>
+    </directory>
+  </zip-file>
+</artifact-configuration>

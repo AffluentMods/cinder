@@ -73,7 +73,10 @@ fixtures/private/
 *.pfx
 *.snk
 *.key
-.signpath/
+# Note: .signpath/ IS committed (artifact-configuration + signpath-manifest are
+# public config, referenced during SignPath review). Any local *.pfx / *.pvk
+# private keys are caught by the *.key rule above; SignPath itself never asks
+# us to check in secrets.
 secrets.json
 appsettings.Development.json
 

@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-09-09
+
+The "cross-artifact + memory + PST + updates" release. v0.2.1 shipped
+the evidence pipeline (E01 chains, EvidenceOpener, entropy heuristic);
+v0.2.2 uses that pipeline to close the last shipping gaps in the
+super-timeline, memory forensics, PST/OST corporate email, self-update,
+and installer packaging.
+
+### Added — analysis pipeline
+
+- **Super-timeline merge** — `Cinder.App.Services.TimelineIngester`
+  walks a triage folder and feeds every parseable artifact into the
+  existing SuperTimeline backend. Sources: `.evtx` (per record),
+  `.pf` prefetch (8 LastRunTimes per program), `.lnk` (Created /
+  Modified / Accessed of the target), `NTUSER.DAT` UserAssist
+  last-execution (ROT13-decoded), Chromium `History` +
+  Firefox `places.sqlite` per-URL last-visit, `.eml` / `.msg` Date
+  headers, and `$I` recycle-bin deletions with owning SID. Per-source
+  row counts + sort + UI refresh. Timeline tool gains an
+  **Ingest folder…** command next to the existing demo-seed / refresh
+  controls.
+- **Memory forensics via Volatility 3** — `Vol3Runner` shells out to
+  `python -m volatility3 -f <image> -r json <plugin>` and parses the
+  JSON renderer output. Ships the standard plugin catalogue: pstree,
+  psscan, netscan, dlllist, malfind, hashdump, lsadump. Availability
+  is probed once and cached; missing python or missing module surfaces
+  a clear install-hint row instead of silent failure. `MemoryTool`
+  now runs `windows.pstree.PsTree` by default and returns
+  PID / PPID / ImageFileName / Threads / Handles / CreateTime /
+  ExitTime for every process.
+- **PST / OST email** — `WindowsParserTools.ParsePstOst` inlines a
+  short Python script via `python -c` that imports `pypff`
+  (libpff-python), walks every folder, and emits one JSON-line per
+  message. C# reads the stream and rows up folder / from / subject /
+  delivery-time / attachment-count. Missing `pypff` returns a clear
+  `pip install libpff-python` hint. Replaces the v0.1 "PST/OST not
+  supported" stub.
+
+### Added — governance & signing
+
+- **`.signpath/` configuration** — `artifact-configuration.xml` +
+  `signpath-manifest.yml` + `README.md`. The GitHub Actions release
+  workflow already engages the SignPath submit-action when
+  `vars.SIGNPATH_ENABLED == 'true'`; approval is pending with the
+  SignPath Foundation OSS program.
+- **README signature-status section** — explains the expected Windows
+  SmartScreen warning until SignPath approval, and documents the
+  PowerShell / `sha256sum` recipes for verifying `Cinder.exe` against
+  `SHA256SUMS.txt` in the release page.
+- **CODEOWNERS** — every path routes to the primary maintainer for
+  auto-review-request; security-sensitive dirs (`SECURITY.md`,
+  `.github/workflows/`, `.signpath/`, `Signatures/`, `Ewf/`, `Plugins/`)
+  get an explicit callout.
+
+### Added — self-update + installer packaging
+
+- **`UpdateChecker`** — non-intrusive check against the public
+  `/releases/latest` GitHub endpoint, semver compare vs the running
+  assembly. Returns `UpdateInfo` for a dashboard banner with a link to
+  the release page — no auto-download. Documented as the project's
+  one phone-home; opt-out toggle lives in Settings.
+- **Installer manifests** — `packaging/winget/` (three yaml files for
+  `winget install AffluentLabs.Cinder`, portable installer kind),
+  `packaging/linux/debian/control` + `postinst` (icon-cache refresh +
+  `setcap cap_sys_rawio,cap_sys_admin+ep` so users don't need sudo
+  per launch), `packaging/linux/rpm/cinder.spec` (Fedora / RHEL) and
+  `packaging/linux/appimage/build.sh` (AppDir assembly from a published
+  linux-x64 tarball).
+
+### Fixed — dependencies
+
+- **NU1903 SQLitePCLRaw.lib.e_sqlite3** — the 2.1.11 bundled libsqlite
+  had GHSA-2m69-gcr7-jv3q. Pinned the whole `SQLitePCLRaw.*` suite to
+  2.1.12 in `Directory.Packages.props`, matching the `Tmds.DBus.Protocol`
+  fix pattern. Release builds pass the vuln audit clean.
+- **NU1902 Microsoft.Build.Tasks.Git** — GHSA-23fw-v26w-5fgq applied
+  through Microsoft.SourceLink.GitHub. Pinned to 10.0.401 and bumped
+  `System.IO.Hashing` to 10.0.12 to match its transitive requirement.
+
+### Changed
+
+- README rewrites: signature-status section replaces the earlier
+  code-signing paragraph; the coming-package-managers list moved into
+  it so users see verification + install stories in one place.
+- ROADMAP flips Phase 6 super-timeline, Phase 7 memory (via vol3),
+  Phase 8 self-update, and Phase 10 PST/OST from 🟡 to ✅. Remaining
+  🟡s honestly annotate the "needs SignPath approval" gate.
+
+[0.2.2]: https://github.com/AffluentMods/cinder/releases/tag/v0.2.2
+
 ## [0.2.1] — 2026-06-25
 
 The "real evidence end-to-end" release. v0.2.0 worked against every common
@@ -301,5 +391,5 @@ open-source signing program is in flight; future releases will be signed under
 that program. Verify SHA-256 hashes against `SHA256SUMS.txt` in the release
 assets.
 
-[Unreleased]: https://github.com/AffluentMods/cinder/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/AffluentMods/cinder/compare/v0.2.2...HEAD
 [0.1.0]: https://github.com/AffluentMods/cinder/releases/tag/v0.1.0
