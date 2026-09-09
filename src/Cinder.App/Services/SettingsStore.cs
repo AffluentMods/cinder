@@ -16,6 +16,19 @@ public sealed record CinderSettings
     public Dictionary<string, string> AiProvider { get; init; } = new();   // id, model, endpoint, …
     public Dictionary<string, string> CloudClientIds { get; init; } = new(); // provider → OAuth client id
     public List<string> EnabledPlugins { get; init; } = new();
+
+    /// <summary>SQLite hash-set database (NSRL import). Shared by the Hash sets tool and the Filesystem walk.</summary>
+    public string? HashSetDatabase { get; init; }
+
+    /// <summary>
+    /// Hash every file during filesystem enumeration and look it up in <see cref="HashSetDatabase"/>,
+    /// adding SHA-1 and a Known / Notable / Unknown verdict per row. Off by default — it reads
+    /// every file on the volume.
+    /// </summary>
+    public bool HashFilesOnEnumerate { get; init; }
+
+    /// <summary>Files larger than this are skipped by the enumeration hasher.</summary>
+    public int HashSizeLimitMb { get; init; } = 64;
 }
 
 public sealed class SettingsStore

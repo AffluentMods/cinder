@@ -131,7 +131,103 @@ public enum HelpBlockKind { Heading, Paragraph, Bullet }
 /// </summary>
 public abstract partial class SidecarToolViewModel : ToolViewModel
 {
+    /// <summary>Every row the parser produced (subject to its budget).</summary>
     public ObservableCollection<object> Rows { get; } = new();
+
+    /// <summary>What the grid shows: <see cref="Rows"/> after <see cref="RowFilter"/>.</summary>
+    public ObservableCollection<object> VisibleRows { get; } = new();
+
+    /// <summary>
+    /// Case-insensitive substring applied across every column of every row. Typing
+    /// <c>Unknown</c> in the Filesystem tool after a hashed walk is the known-good filter.
+    /// </summary>
+    [ObservableProperty]
+    private string? _rowFilter;
+
+    /// <summary>The row the examiner has selected in the grid — what "Bookmark" acts on.</summary>
+    [ObservableProperty]
+    private object? _selectedRow;
+
+    /// <summary>Free-text note attached to the next bookmark.</summary>
+    [ObservableProperty]
+    private string? _bookmarkNote;
+
+    partial void OnRowFilterChanged(string? value) => Reproject();
+
+    /// <summary>Rebuilds <see cref="VisibleRows"/> from <see cref="Rows"/> under the current filter.</summary>
+    protected void Reproject()
+    {
+        VisibleRows.Clear();
+        var needle = (RowFilter ?? "").Trim();
+        if (needle.Length == 0)
+        {
+            foreach (var r in Rows) VisibleRows.Add(r);
+            return;
+        }
+        foreach (var r in Rows)
+        {
+            foreach (var v in Cinder.Core.Export.TabularExporter.ToDictionary(r).Values)
+            {
+                if (v is not null && v.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                {
+                    VisibleRows.Add(r);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Flags the selected row as a finding in the active case. Stored with the tool, the
+    /// evidence path, the note and the row's values, and echoed into the custody log; the
+    /// Reports tool turns bookmarks into exhibits.
+    /// </summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task BookmarkSelectedAsync(CancellationToken ct)
+    {
+        var row = SelectedRow;
+        var session = Services.ActiveCaseContext.Current;
+        if (row is null)
+        {
+            StatusLine = "Select a row to bookmark.";
+            return;
+        }
+        if (session?.Path is null)
+        {
+            StatusLine = "Open a case first — bookmarks live in the case file.";
+            return;
+        }
+
+        try
+        {
+            var values = Cinder.Core.Export.TabularExporter.ToDictionary(row);
+            var headline = values.Values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v)) ?? "(row)";
+            var title = $"{Title}: {Truncate(headline, 80)}";
+            var json = System.Text.Json.JsonSerializer.Serialize(values);
+
+            var store = new Cinder.Core.Cases.BookmarkStore(new Cinder.Core.Cases.CaseStore(session.Path));
+            var bm = await store.AddAsync(session.Id, Environment.UserName, Id, EvidencePath, title, BookmarkNote, json, ct);
+
+            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.Annotation, new
+            {
+                Kind = "bookmark",
+                BookmarkId = bm.Id,
+                Tool = Id,
+                Evidence = EvidencePath,
+                Title = title,
+                Note = BookmarkNote,
+            }, ct);
+
+            StatusLine = $"Bookmarked #{bm.Id}: {title}";
+            BookmarkNote = null;
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Bookmark failed: {ex.Message}";
+        }
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     [ObservableProperty]
     private string? _evidencePath;
@@ -178,7 +274,7 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
     [CommunityToolkit.Mvvm.Input.RelayCommand]
     private async Task ExportAsync(string format, CancellationToken ct)
     {
-        if (Rows.Count == 0)
+        if (VisibleRows.Count == 0)
         {
             return;
         }
@@ -189,7 +285,8 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
             return;
         }
 
-        var snapshot = Rows.ToList();
+        // What the grid shows — the row filter is part of what the examiner chose to export.
+        var snapshot = VisibleRows.ToList();
         try
         {
             var written = await Task.Run(() =>
@@ -254,9 +351,11 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
         IsTruncated = false;
         AvailableRowCount = null;
         Rows.Clear();
+        VisibleRows.Clear();
         try
         {
             await LoadAsync(path, ct);
+            Reproject();
             StatusLine = IsTruncated
                 ? $"⚠ {Rows.Count:N0} entries shown — TRUNCATED at the display limit" +
                   (AvailableRowCount is { } total ? $" of {total:N0} present" : "") +

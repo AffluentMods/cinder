@@ -74,6 +74,7 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
                     new SearchTool(),
                     new HashSetsTool(),
                     new YaraTool(),
+                    new IocMatchTool(),
                     new VirusTotalTool(),
                     new AiCopilotTool(),
                 ],

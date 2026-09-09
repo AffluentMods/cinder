@@ -20,6 +20,17 @@
                         Command="{Binding ExportCommand}" CommandParameter="json"
                         IsVisible="{Binding Rows.Count}"
                         ToolTip.Tip="Write the grid as a JSON array" />
+                <TextBox Width="200" Watermark="Filter rows…"
+                         Text="{Binding RowFilter, UpdateSourceTrigger=PropertyChanged}"
+                         IsVisible="{Binding Rows.Count}"
+                         ToolTip.Tip="Substring across every column. Export writes what the filter shows." />
+                <TextBox Width="220" Watermark="Bookmark note (optional)"
+                         Text="{Binding BookmarkNote}"
+                         IsVisible="{Binding Rows.Count}" />
+                <Button Content="Bookmark selected"
+                        Command="{Binding BookmarkSelectedCommand}"
+                        IsVisible="{Binding Rows.Count}"
+                        ToolTip.Tip="Flag the selected row as a finding in the open case. Reports ▸ bookmarks become exhibits." />
                 <TextBlock VerticalAlignment="Center" Margin="14,0"
                            Text="{Binding EvidencePath, FallbackValue='No evidence loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
@@ -105,7 +116,8 @@
                            Foreground="{DynamicResource CinderBackground0Brush}" />
             </Border>
 
-            <DataGrid Grid.Row="1" ItemsSource="{Binding Rows}" AutoGenerateColumns="True" IsReadOnly="True"
+            <DataGrid Grid.Row="1" ItemsSource="{Binding VisibleRows}" SelectedItem="{Binding SelectedRow}"
+                      AutoGenerateColumns="True" IsReadOnly="True"
                       Background="{DynamicResource CinderBackground0Brush}" />
             <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
                 <Grid ColumnDefinitions="*,Auto">

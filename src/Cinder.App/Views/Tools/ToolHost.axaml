@@ -103,6 +103,8 @@
             <tv:PluginsView    IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='plugins'}" />
             <tv:SettingsView   IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='settings'}" />
 
+            <tv:IocMatchView   IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='ioc'}" />
+
             <tv:SidecarRunnerView IsVisible="{Binding ., Converter={x:Static tools:ToolKindHelpers.HasSidecar}}" />
         </Panel>
     </DataTemplate>

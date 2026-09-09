@@ -40,6 +40,12 @@
                         Command="{Binding ExportCommand}" CommandParameter="jsonl"
                         ToolTip.Tip="Timesketch JSONL — streams on import, best for large timelines"
                         Margin="6,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Bookmark event"
+                        Command="{Binding BookmarkSelectedCommand}"
+                        ToolTip.Tip="Flag the selected event as a finding in the open case; Reports turns bookmarks into exhibits"
+                        Margin="6,0,0,0" />
+                <TextBox DockPanel.Dock="Right" Width="180" Watermark="Bookmark note"
+                         Text="{Binding BookmarkNote}" Margin="6,0,0,0" />
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <StackPanel Spacing="3">
                         <TextBlock Text="From" FontSize="{DynamicResource CinderFontSizeXs}"
@@ -106,7 +112,7 @@
             </Border>
 
             <!-- Event list -->
-            <DataGrid Grid.Row="2" ItemsSource="{Binding Events}"
+            <DataGrid Grid.Row="2" ItemsSource="{Binding Events}" SelectedItem="{Binding SelectedEvent}"
                       Background="{DynamicResource CinderBackground0Brush}"
                       Foreground="{DynamicResource CinderForegroundBrush}"
                       GridLinesVisibility="Horizontal"

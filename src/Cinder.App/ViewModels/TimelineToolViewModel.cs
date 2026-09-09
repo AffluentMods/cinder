@@ -44,6 +44,59 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
     [ObservableProperty]
     private string _statusLine = "0 events.";
 
+    [ObservableProperty]
+    private TimelineEvent? _selectedEvent;
+
+    [ObservableProperty]
+    private string? _bookmarkNote;
+
+    /// <summary>Flags the selected event as a finding in the open case; Reports turns it into an exhibit.</summary>
+    [RelayCommand]
+    private async Task BookmarkSelectedAsync(CancellationToken ct)
+    {
+        var e = SelectedEvent;
+        var session = ActiveCaseContext.Current;
+        if (e is null)
+        {
+            StatusLine = "Select an event to bookmark.";
+            return;
+        }
+        if (session?.Path is null)
+        {
+            StatusLine = "Open a case first — bookmarks live in the case file.";
+            return;
+        }
+        try
+        {
+            var values = new Dictionary<string, string?>
+            {
+                ["Timestamp"] = e.Timestamp.ToString("O"),
+                ["Source"] = e.Source,
+                ["User"] = e.User,
+                ["ATT&CK"] = e.TagsDisplay,
+                ["Summary"] = e.Summary,
+            };
+            var title = $"Timeline: {e.Timestamp:u} {e.Source} — {(e.Summary.Length > 60 ? e.Summary[..60] + "…" : e.Summary)}";
+            var store = new Cinder.Core.Cases.BookmarkStore(new Cinder.Core.Cases.CaseStore(session.Path));
+            var bm = await store.AddAsync(session.Id, Environment.UserName, "timeline", null, title, BookmarkNote,
+                System.Text.Json.JsonSerializer.Serialize(values), ct);
+            await ActiveCaseContext.LogAsync(CustodyAction.Annotation, new
+            {
+                Kind = "bookmark",
+                BookmarkId = bm.Id,
+                Tool = "timeline",
+                Title = title,
+                Note = BookmarkNote,
+            }, ct);
+            StatusLine = $"Bookmarked #{bm.Id}: {title}";
+            BookmarkNote = null;
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Bookmark failed: {ex.Message}";
+        }
+    }
+
     /// <summary>Ids the tagger can emit, for the filter's suggestion list.</summary>
     public IReadOnlyList<string> KnownMitreIds { get; } =
         MitreTagger.KnownIds.OrderBy(id => id, StringComparer.Ordinal).Select(MitreTagger.Describe).ToArray();

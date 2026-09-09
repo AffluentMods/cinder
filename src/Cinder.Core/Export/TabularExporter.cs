@@ -148,6 +148,30 @@ public static class TabularExporter
             .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
             .ToArray());
 
+    /// <summary>
+    /// One row as an ordered name → display-string map. This is what a bookmark stores, so the
+    /// finding survives the source grid's columns changing in a later version.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string?> ToDictionary(object row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var d = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var c in ColumnsOf(row.GetType()))
+        {
+            var v = c.GetValue(row);
+            d[c.Name] = v switch
+            {
+                null => null,
+                string s => s,
+                DateTimeOffset dto => dto.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                DateTime dt => dt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+                _ => v.ToString(),
+            };
+        }
+        return d;
+    }
+
     /// <summary>Convenience: serialise rows to a CSV string.</summary>
     public static string ToCsv(IEnumerable<object> rows)
     {

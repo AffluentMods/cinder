@@ -60,6 +60,22 @@
                 </StackPanel>
 
                 <StackPanel Spacing="8">
+                    <TextBlock Text="Hash sets" FontWeight="600" />
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               Text="The SQLite database the Hash sets tool imports NSRL into. With hashing on, the Filesystem tool reads every file on a volume, records its SHA-1, and marks it Known / Notable / Unknown — filter on Unknown to drop operating-system noise. Slow on large volumes; off by default." />
+                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Database" VerticalAlignment="Center" />
+                        <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding HashSetDatabase}" Watermark="path to hashsets.db (pick it in the Hash sets tool)" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,8,0,0" Text="Size limit (MB)" VerticalAlignment="Center" />
+                        <NumericUpDown Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Value="{Binding HashSizeLimitMb}" Minimum="1" Maximum="4096" Increment="16" FormatString="0" Width="160" HorizontalAlignment="Left" />
+                        <CheckBox Grid.Row="2" Grid.ColumnSpan="2" Margin="0,8,0,0" IsChecked="{Binding HashFilesOnEnumerate}"
+                                  Content="Hash files during filesystem enumeration and look them up" />
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Spacing="8">
                     <TextBlock Text="Cloud connectors" FontWeight="600" />
                     <TextBlock TextWrapping="Wrap"
                                FontSize="{DynamicResource CinderFontSizeXs}"

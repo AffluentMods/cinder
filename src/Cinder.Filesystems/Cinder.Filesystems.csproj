@@ -1,5 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <!-- DiscUtils — pure managed filesystem parsing. The walker in this project is what the
+         Filesystem tool runs; keeping it here rather than in Cinder.App is what lets it be
+         tested against a synthetic NTFS volume. -->
+    <PackageReference Include="DiscUtils.Core" />
+    <PackageReference Include="DiscUtils.Streams" />
+    <PackageReference Include="DiscUtils.Ntfs" />
+    <PackageReference Include="DiscUtils.Fat" />
+    <PackageReference Include="DiscUtils.Iso9660" />
+    <PackageReference Include="DiscUtils.Ext" />
+    <PackageReference Include="DiscUtils.Vhd" />
+    <PackageReference Include="DiscUtils.Vhdx" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
     <ProjectReference Include="..\Cinder.Sidecar\Cinder.Sidecar.csproj" />
   </ItemGroup>

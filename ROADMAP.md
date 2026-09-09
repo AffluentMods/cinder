@@ -194,7 +194,14 @@ libraries do the heavy lifting in-process.
   `src/Cinder.Search/` with `ImportNsrlMinimalCsv` (~200k rows/sec on
   a typical SSD) + `Lookup(algorithm, digest)`. HashSetsTool exposes
   PickDatabase / ImportNsrl / Lookup commands. SQLite-backed so
-  100M-row NSRL RDS imports stream in without RAM pressure.
+  100M-row NSRL RDS imports stream in without RAM pressure. Wired into
+  the Filesystem walk (Settings ▸ Hash sets): per-file SHA-1 + Known /
+  Notable / Unknown verdict, so the row filter is the known-good filter.
+- ✅ IOC match — indicator list × folder: file hashes, paths, contents
+  (ASCII + UTF-16LE via YARA-lite), timeline events. Bounded, exportable.
+- ✅ Bookmarks — flag any grid row or timeline event with a note; stored
+  in the case file (schema v2) and echoed to custody; Reports turns them
+  into a numbered Exhibits section.
 - ✅ YARA-lite — in-house parser + Aho-Corasick matcher. Loads `.yar`
   files, parses the common `rule { meta: strings: condition: }` grammar
   (literal `"strings"`, `nocase`, hex `{ 4D 5A }` patterns; condition

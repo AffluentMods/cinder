@@ -45,6 +45,31 @@ gap analysis showed every established tool has and Cinder lacked.
   every image verification (recorded and computed digests, verdict), mounts,
   data exports and report exports. `ActiveCaseContext.LogAsync` from anywhere;
   no-op without a case, never throws.
+- **Filesystem walker moved into `Cinder.Filesystems` and tested against a real
+  volume.** `DiscUtilsWalker` now owns detection (ISO / NTFS / FAT / ext / whole
+  disk by partition), live enumeration with all timestamps, NTFS deleted-entry
+  recovery, and optional hashing. The Filesystem tool is a thin mapper over it.
+  Tests format an NTFS volume in memory with DiscUtils, write files, delete one,
+  and assert the walk — the first parser in Cinder with a deterministic fixture.
+- **Known-good filtering.** Settings ▸ Hash sets: point at the NSRL database from
+  the Hash sets tool and turn on "Hash files during filesystem enumeration". Every
+  file gets a SHA-1 and a Verdict column (Known / Notable / Unknown); type
+  `Unknown` in the new row filter and operating-system noise drops out. Size cap
+  and total-bytes budget, skipped files say why. The Hash sets tool remembers
+  its database across launches.
+- **Row filter on every grid.** Substring across all columns; export writes what
+  the filter shows.
+- **Bookmarks → exhibits.** "Bookmark selected" on any grid and on the timeline
+  stores the row (as JSON, so it survives column changes), the tool, the evidence
+  path and a note in the case file (`bookmarks` table, schema v2, migrated on
+  first use) and writes a custody annotation. Reports ▸ "Load bookmarks" turns
+  them into a numbered Exhibits section with an index, in PDF / DOCX / HTML / MD.
+- **IOC match tool.** Pick an indicator list (one per line; hashes, IPs, domains,
+  URLs, emails, free text — classified by shape, CSV rows tolerated) and a
+  folder. Matches four ways at once: file hashes (MD5/SHA-1/SHA-256), file paths,
+  file contents through the YARA-lite Aho-Corasick scanner in both ASCII and
+  UTF-16LE, and every timeline event the ingester can pull from the folder.
+  Bounded (256 MB hash / 512 MB content / 200k files / 50k hits) and says so.
 
 ### Fixed — critical
 

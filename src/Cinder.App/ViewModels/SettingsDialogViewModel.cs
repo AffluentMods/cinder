@@ -35,6 +35,11 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
     [ObservableProperty] private string? _aiModel;
     [ObservableProperty] private string? _aiApiKey;
 
+    // Hash sets (NSRL) — shared by the Hash sets tool and the Filesystem walk.
+    [ObservableProperty] private string? _hashSetDatabase;
+    [ObservableProperty] private bool _hashFilesOnEnumerate;
+    [ObservableProperty] private int _hashSizeLimitMb = 64;
+
     // Cloud client_ids
     [ObservableProperty] private string? _googleDriveClientId;
     [ObservableProperty] private string? _oneDriveClientId;
@@ -63,6 +68,9 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
         GoogleDriveClientId = s.CloudClientIds.GetValueOrDefault("google-drive");
         OneDriveClientId = s.CloudClientIds.GetValueOrDefault("onedrive");
         DropboxAppKey = s.CloudClientIds.GetValueOrDefault("dropbox");
+        HashSetDatabase = s.HashSetDatabase;
+        HashFilesOnEnumerate = s.HashFilesOnEnumerate;
+        HashSizeLimitMb = s.HashSizeLimitMb;
     }
 
     [RelayCommand]
@@ -92,6 +100,9 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
             ParsersDirectory = ParsersDirectory,
             AiProvider = ai,
             CloudClientIds = cloud,
+            HashSetDatabase = string.IsNullOrWhiteSpace(HashSetDatabase) ? null : HashSetDatabase,
+            HashFilesOnEnumerate = HashFilesOnEnumerate,
+            HashSizeLimitMb = Math.Clamp(HashSizeLimitMb, 1, 4096),
         });
     }
 }

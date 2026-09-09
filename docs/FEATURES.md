@@ -86,7 +86,7 @@ unkeyed and stored beside the data; SECURITY.md explains.
 | **Strings** | works | ASCII + UTF-16LE extraction with min-length; live filter with **modes**: substring, regex, or a **feature preset** (email, URL, IPv4/6, domain, Luhn-checked card numbers, phone, BTC/ETH, MD5/SHA-1/SHA-256, Windows/UNC paths, MAC, JWT, AWS key, private key, Base64); gibberish suppression; container-format banner; double-click → hex offset; CSV/JSON export | `ToolImplementations.cs` (StringsTool), `Core/Analysis/FeatureExtractor` |
 | **Gallery** | works | Image viewer with EXIF panel (MetadataExtractor); GPS → Map | `GalleryTool.cs` |
 | **Documents** | works | Text extraction for DOCX/DOCM, XLSX/XLSM, PPTX, ODT/ODS/ODP, EPUB, RTF, PDF (PdfPig), HTML/XML, 20+ text/code formats; 50 MB in / 2 MB out caps; XXE closed | `Services/DocumentReader` |
-| **Filesystem** | works | NTFS / FAT / ext2-4 / ISO9660 / VHD / VHDX via DiscUtils; whole-disk images walked per partition; E01 transparently via `EwfReader`; **deleted-file recovery** from the NTFS $MFT (not-in-use records → name, size, timestamps, `IsDeleted = true`); metadata row shows recorded E01 hashes labelled UNVERIFIED | `Phase3To10ParserTools.cs` |
+| **Filesystem** | works | `DiscUtilsWalker` (in `Cinder.Filesystems`, tested against an in-memory NTFS volume): NTFS / FAT / ext2-4 / ISO9660, whole-disk images per partition, VHD/VHDX, E01 via `EwfReader`; all timestamps; **deleted-file recovery** from the NTFS $MFT (`IsDeleted = true`); **optional hashing + hash-set verdict** per file (Settings ▸ Hash sets) so `Unknown` in the row filter is the known-good filter; metadata row shows recorded E01 hashes labelled UNVERIFIED | `Cinder.Filesystems/DiscUtilsWalker.cs`, `Phase3To10ParserTools.cs` |
 | **Registry** | works | Eric Zimmerman `Registry` lib walk of any hive (NTUSER/SYSTEM/SOFTWARE/SAM/Amcache) with transaction-log replay; row and depth budgets with truncation banner | `WindowsParserTools.cs` |
 | **Event Log** | works | `evtx` lib; every record with time, channel, provider, id, level, user, computer, mapped description | " |
 | **Prefetch** | works | `Prefetch` lib; all 8 run times, run count, loaded files/dirs; folder or single file | " |
@@ -107,8 +107,10 @@ unkeyed and stored beside the data; SECURITY.md explains.
 | **Mobile backup** | works | iOS `Manifest.db` enumeration; Android `.ab` header + TAR walk; encrypted backups surfaced, not decrypted | " |
 
 Every grid tool inherits `SidecarToolViewModel`: pick evidence → `LoadAsync` → `Rows`;
-`AddRows(rows, budget)` flags truncation (status line + banner); **Export CSV / JSON** on
-every grid (formula-injection safe); every run is written to the custody log.
+`AddRows(rows, budget)` flags truncation (status line + banner); **row filter** across all
+columns (`VisibleRows`); **Export CSV / JSON** (formula-injection safe, exports what the
+filter shows); **Bookmark selected** with a note → case `bookmarks` table + custody
+annotation; every run is written to the custody log.
 
 ## 4. Tools — Analyze
 
@@ -118,8 +120,9 @@ every grid (formula-injection safe); every run is written to the custody log.
 | **Map** | works | EXIF GPS auto-ingest from a folder of images; manual points |
 | **Comm graph** | works | `.eml/.msg/.mbox` From/To → directed who-talked-to-whom, deduped identities, degrees |
 | **Full-text search** | works | Lucene.NET index built from a folder (DocumentReader for structured formats, strings fallback for binaries); standard query syntax |
-| **Hash sets** | works | NSRL minimal-CSV import into SQLite (~200k rows/s), lookup by algorithm; not yet wired into the filesystem listing |
+| **Hash sets** | works | NSRL minimal-CSV import into SQLite (~200k rows/s), lookup by algorithm; database path remembered in Settings and consumed by the Filesystem walk for per-file verdicts |
 | **YARA** | works (subset) | `YaraLite`: rule parser + Aho-Corasick for literal/hex/nocase strings and `any/all of them`; regex strings and modules unsupported |
+| **IOC match** | works | Indicator list (`IocList`: hashes / IPv4 / IPv6 / domain / URL / email / text, CSV-tolerant) × folder. `IocScanner` matches file hashes, paths, contents (YARA-lite, ASCII + UTF-16LE) and timeline events. Bounded and reports its limits |
 | **VirusTotal** | shell | Hash-only lookup client; UI shell |
 | **AI Copilot** | works (BYOM) | Ollama / LM Studio / OpenAI-compatible; structured prompts from parsed artifacts (never raw bytes); disabled by default; help text warns about cloud egress; API key encrypted at rest |
 
@@ -146,7 +149,7 @@ portable exe run as Administrator).
 | Tool | Status | What it does |
 |---|---|---|
 | **Cases** | works | Create / open / recents; multi-case tabs; examiner branches (`CaseBranching`) |
-| **Reports** | works | Templates: Expert Witness, Incident Response, Internal Audit, Plain. Sections editor, Markdown preview, export to Markdown / HTML / PDF (QuestPDF: cover, sections, exhibit cards, index, header/footer) / DOCX (OpenXml, core properties) / JSON playbook. Exports are logged to custody |
+| **Reports** | works | Templates: Expert Witness, Incident Response, Internal Audit, Plain. Sections editor, Markdown preview, **bookmarks → numbered Exhibits section** (note + every row column + who/when + index), export to Markdown / HTML / PDF (QuestPDF: cover, sections, exhibit cards, index, header/footer) / DOCX (OpenXml, core properties) / JSON playbook. Exports are logged to custody |
 | **Chain of custody** | works | View + verify. Now records: case created/opened, every parser run (tool, evidence, row count, truncation), verifications (digests + verdict), mounts, data exports, report exports, manual hashes |
 | **Workflows** | works | JSON DAG, topological run; handlers `open-image`, `hash`, `registry`, `fs-enumerate`, `carve`, `report`, `index`; `ai-summary` degrades without a provider |
 | **Plugins** | partial | C# DLL loading gated by `.cinder-trusted` sentinel + `.cinder-plugins.sha256` manifest; Python scripting host; no isolation yet |
@@ -182,7 +185,9 @@ loader, `ExecutableResolver`, `EncryptedBundle`, `TabularExporter`, `TimelineExp
 round-trip, verification pass/fail/unverifiable, damage, every hostile-input case),
 `Cinder.Carving.Tests` (window boundaries, duplicates, non-seekable sources, slack regions),
 `Cinder.Hex.Tests` (termination, boundary spanning, mmap, short reads), `Cinder.Native.Tests`.
-About 165 tests; `dotnet test` exits 0.
+180 tests; `dotnet test` exits 0. `DiscUtilsWalkerTests` formats a real NTFS volume in
+memory; `BookmarkStoreTests` includes a v1 → v2 schema migration; `IocListTests` covers
+classification.
 
 CI (`.github/workflows/ci.yml`): build + test on Windows and Linux with job timeouts,
 `dotnet format` gate, dependency-audit gate, Python lint. Release (`release.yml`) refuses to
@@ -191,19 +196,23 @@ publish unless the suite passes on both platforms; Windows binary is currently u
 
 ## 9. Known gaps (the honest list)
 
-1. **Parser parity is unverified.** No Windows-artifact parser is diffed against a reference
-   tool; needs the CFReDS/tsk corpora. README marks Phase 4 "shipped, unverified".
-2. **Parsing lives in view-models.** `WindowsParserTools.cs`, `Phase3To10ParserTools.cs`,
-   `ToolImplementations.cs` hold the real parsers; the `Cinder.Artifacts.*` projects are
-   thin. Moving parsers down is the refactor that would make them testable.
+1. **Parser parity is unverified for the Windows-artifact parsers.** None is diffed against a
+   reference tool; needs the CFReDS/tsk corpora. README marks Phase 4 "shipped, unverified".
+   The filesystem walker is the exception — it has a real in-memory NTFS fixture.
+2. **Most parsing still lives in view-models.** `WindowsParserTools.cs`,
+   `Phase3To10ParserTools.cs`, `ToolImplementations.cs` hold the real parsers; the
+   `Cinder.Artifacts.*` projects are thin. The filesystem walker has been moved down to
+   `Cinder.Filesystems`; the same move for registry/EVTX/etc. is what would make them testable.
 3. **Custody chain has no external anchor** (documented; options listed in SECURITY.md).
 4. **Deleted-file recovery is names only**; contents via the carver. No $UsnJrnl/$LogFile.
-5. **Hash sets are not wired into the filesystem listing** (no known-good filtering yet).
-6. **No IOC list matching** across the case (hash sets and search exist separately).
-7. **No case-wide artifact tagging/bookmark → exhibit** flow beyond hex bookmarks and
-   report sections.
-8. Imaging, RAM capture, convert, VirusTotal, cloud pull are shells or externally dependent.
-9. Windows binary unsigned; no SBOM in release; Actions pinned by tag not SHA.
+5. **Bookmarks have no browser of their own** — they surface through Reports; a case-wide
+   list/delete view is missing.
+6. **IOC matching is folder-scoped**, not against the Lucene index or an open case's parsed
+   grids; hash indicators require exact digests.
+7. Imaging, RAM capture, convert, VirusTotal, cloud pull are shells or externally dependent.
+8. Windows binary unsigned; no SBOM in release; Actions pinned by tag not SHA.
+9. Linux paths (0600 settings, loop mounts, the CA1416-suppressed NTFS walk) compile but have
+   only been exercised on Windows.
 
 ## 10. Conventions when adding to Cinder
 

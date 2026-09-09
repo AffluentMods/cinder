@@ -166,7 +166,15 @@ suspicious .lnk in the Hex Viewer, a .pst in the Email tool, etc.
    file by clearing one bit; the name, size and all four timestamps stay in the record
    until it is reused, so this is where "what was here last week" comes from.
 4. "Export CSV" / "Export JSON" write the listing; large volumes are capped and the
-   banner says so when they are.
+   banner says so when they are. The filter box narrows by any column.
+5. Known-good filtering: turn on "Hash files during filesystem enumeration" in
+   Settings and point it at the hash-set database from the Hash sets tool (NSRL
+   import). Every file then gets a SHA-1 and a Verdict — Known (in the set),
+   Notable, or Unknown. Type `Unknown` in the filter box and the operating-system
+   noise disappears; what remains is what nobody has catalogued. Files over the
+   size limit are noted as skipped rather than silently left blank.
+6. Select any row and click "Bookmark selected" to flag it as a finding; the
+   Reports tool turns bookmarks into exhibits.
 
 ## Tip
 A deleted entry gives you the name and the timestamps, not the bytes. The data runs
@@ -730,9 +738,47 @@ Cutting an investigation's noise down by 90%. A typical Windows install has 500k
 benign files — knowing they're benign lets you focus on the few thousand that aren't.
 
 ## How to use it in Cinder
-1. Import a hash set (NSRL .iso / .zip, custom CSV, or one-hash-per-line text).
-2. After parsing the filesystem, this tool tells you which files match a hash
-   set and which don't.
+1. "Pick database…" — choose (or create) the SQLite file the hashes live in. Cinder
+   remembers it in Settings.
+2. "Import NSRL…" — feed it the NSRL RDS modern-minimal CSV. Around 200k rows a
+   second; the full set streams in without loading into RAM.
+3. Look up a single digest here, or — the point of the exercise — turn on "Hash
+   files during filesystem enumeration" in Settings. The Filesystem tool then
+   gives every file a SHA-1 and a Verdict, and typing `Unknown` in its filter box
+   is the known-good filter: everything NSRL has catalogued drops out.
+""";
+}
+
+public sealed partial class IocMatchTool
+{
+    public override string HelpMarkdown => """
+## What this is
+Takes a list of indicators of compromise — hashes, IP addresses, domains, URLs,
+email addresses, filenames, mutex names, any string — and runs all of them against
+a folder of evidence at once, four ways: file hashes, file paths, file contents
+(both ASCII and UTF-16LE, so a registry value hits as well as a log line), and
+every timestamped event the timeline ingester can pull out of the folder.
+
+## When you'd use it
+The first hour of an incident, when threat intel has handed you a list and the
+question is "is any of this on the box". Also the last hour, to confirm a cleaned
+host no longer has it.
+
+## How to use it in Cinder
+1. "Pick IOC list…" — a text file, one indicator per line. `#` comments, blank
+   lines and `type,value` CSV rows are tolerated. Cinder classifies each line by
+   shape (MD5 / SHA-1 / SHA-256 / IPv4 / IPv6 / domain / URL / email / text) and
+   says how many of each it found.
+2. "Pick folder to scan…" — a triage collection, a mounted image, a KAPE output
+   folder, an export.
+3. "Run scan". Each hit is a row: the indicator, its type, where it matched (hash,
+   path, content, timeline), the location, the offset or time, and context.
+4. Export CSV / JSON, filter, or bookmark a row as a finding.
+
+## Limits
+Files over 256 MB are not hashed and over 512 MB are not content-scanned; the
+scan stops at 200,000 files and 50,000 hits and says so. Hash indicators need
+the exact digest — this is not fuzzy matching.
 """;
 }
 
@@ -1017,12 +1063,16 @@ incident-response reports, audit reports, and free-form.
 At the end of every case. The report is the deliverable.
 
 ## How to use it in Cinder
-1. Pick a template.
-2. Cinder pre-fills examiner name, case name, evidence inventory, and the chain of
-   custody.
-3. Add your narrative sections, screenshots, and exhibits. Cinder auto-numbers
-   exhibits in the order you reference them.
-4. Export to your chosen format.
+1. Pick a template. It sets the section headings; add or remove sections freely.
+2. Write the narrative in each section — Markdown, previewed on the right.
+3. "Load bookmarks" pulls every finding you flagged with "Bookmark selected" in any
+   tool (a registry value, a timeline event, an IOC hit…). With "as exhibits"
+   ticked they become an Exhibits section: one numbered exhibit per bookmark, with
+   your note, every column of the row, who bookmarked it and when, and an exhibit
+   index at the end. Bookmarks are stored in the case file and each one is also a
+   custody entry.
+4. Export to Markdown, HTML, PDF or DOCX (all in-process), or JSON playbook. Every
+   export is recorded in the chain of custody.
 """;
 }
 

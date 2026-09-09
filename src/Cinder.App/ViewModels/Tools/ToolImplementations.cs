@@ -626,6 +626,23 @@ public sealed partial class HashSetsTool
 
     public IReadOnlyList<string> Algorithms { get; } = ["md5", "sha1", "sha256", "blake3"];
 
+    public HashSetsTool()
+    {
+        // Reopen the database the examiner picked last time, so lookups and the Filesystem
+        // walk's verdicts work without re-picking after every launch.
+        try
+        {
+            var saved = new SettingsStore().Load().HashSetDatabase;
+            if (!string.IsNullOrEmpty(saved) && File.Exists(saved))
+            {
+                _service = new HashSetService(saved);
+                DatabasePath = saved;
+                StatusLine = $"DB ready: {saved}";
+            }
+        }
+        catch { /* first launch or unreadable settings — pick manually */ }
+    }
+
     [RelayCommand]
     private async Task PickDatabaseAsync(CancellationToken ct)
     {
@@ -637,6 +654,10 @@ public sealed partial class HashSetsTool
             _service = new HashSetService(path);
             DatabasePath = path;
             StatusLine = $"DB ready: {path}";
+
+            // Remember it: the Filesystem tool reads this to hand out Known / Unknown verdicts.
+            var store = new SettingsStore();
+            store.Save(store.Load() with { HashSetDatabase = path });
             _ = ct;
         }
         catch (Exception ex)

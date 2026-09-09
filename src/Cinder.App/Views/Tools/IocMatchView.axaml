@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.IocMatchView"
+             x:DataType="tools:IocMatchTool">
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+        <!-- Two pickers: the indicator list, and the folder to run it against. -->
+        <Border Grid.Row="0" Background="{DynamicResource CinderSurface2Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Classes="accent" Content="Pick IOC list…" Command="{Binding PickIocListCommand}" />
+                    <TextBlock VerticalAlignment="Center" Classes="mono"
+                               Text="{Binding EvidencePath, FallbackValue='No indicator list'}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               FontSize="{DynamicResource CinderFontSizeXs}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Content="Pick folder to scan…" Command="{Binding PickFolderCommand}" />
+                    <TextBlock VerticalAlignment="Center" Classes="mono"
+                               Text="{Binding TargetFolder, FallbackValue='No folder'}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               FontSize="{DynamicResource CinderFontSizeXs}" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Classes="accent" Content="Run scan"
+                            Command="{Binding LoadEvidenceCommand}"
+                            CommandParameter="{Binding EvidencePath}"
+                            IsEnabled="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    <Button Content="Export CSV" Command="{Binding ExportCommand}" CommandParameter="csv" IsVisible="{Binding Rows.Count}" />
+                    <Button Content="Export JSON" Command="{Binding ExportCommand}" CommandParameter="json" IsVisible="{Binding Rows.Count}" />
+                    <TextBox Width="220" Watermark="Filter rows…" Text="{Binding RowFilter, UpdateSourceTrigger=PropertyChanged}"
+                             IsVisible="{Binding Rows.Count}" />
+                    <TextBlock VerticalAlignment="Center"
+                               Text="{Binding IndicatorSummary}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               FontSize="{DynamicResource CinderFontSizeXs}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Padding="14,8" Background="{DynamicResource CinderBackground0Brush}"
+                IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <SelectableTextBlock Text="{Binding ErrorMessage}" Classes="mono"
+                                 Foreground="{DynamicResource CinderDangerBrush}" TextWrapping="Wrap"
+                                 FontSize="{DynamicResource CinderFontSizeXs}" />
+        </Border>
+
+        <Border Grid.Row="2" IsVisible="{Binding IsTruncated}"
+                Background="{DynamicResource CinderDangerBrush}" Padding="14,7">
+            <TextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontWeight="SemiBold"
+                       FontSize="{DynamicResource CinderFontSizeSm}"
+                       Foreground="{DynamicResource CinderBackground0Brush}" />
+        </Border>
+
+        <DataGrid Grid.Row="3" ItemsSource="{Binding VisibleRows}" SelectedItem="{Binding SelectedRow}"
+                  AutoGenerateColumns="True" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}" />
+
+        <Border Grid.Row="4" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding StatusLine, FallbackValue='Pick an IOC list and a folder.'}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <ProgressBar Grid.Column="1" Width="120" IsIndeterminate="True" IsVisible="{Binding IsLoading}" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
