@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using Cinder.Native;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.Imaging;
 
@@ -41,7 +42,7 @@ public sealed partial class VssEnumerator : IShadowCopyEnumerator
         // Arguments fixed at compile time — no user input feeds vssadmin.
         try
         {
-            var psi = new ProcessStartInfo("vssadmin.exe")
+            var psi = new ProcessStartInfo(ExecutableResolver.ResolveRequired("vssadmin.exe"))
             {
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
@@ -139,7 +140,7 @@ public sealed class LinuxSnapshotEnumerator : IShadowCopyEnumerator
 
     private static string RunCapture(string file, IReadOnlyList<string> args)
     {
-        var psi = new ProcessStartInfo(file)
+        var psi = new ProcessStartInfo(ExecutableResolver.ResolveRequired(file))
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

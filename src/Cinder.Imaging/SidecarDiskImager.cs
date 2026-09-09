@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Cinder.Sidecar;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.Imaging;
 
@@ -27,7 +28,9 @@ public sealed class SidecarDiskImager : IDiskImager
 
     public static ProcessStartInfo DefaultSidecar(string parsersDir) => new()
     {
-        FileName = OperatingSystem.IsWindows() ? "python.exe" : "python3",
+        FileName = ExecutableResolver.ResolveRequired(
+            OperatingSystem.IsWindows() ? "python.exe" : "python3",
+            "Install Python 3.12+ and make sure it is on PATH."),
         ArgumentList = { "-m", "imager.imager_worker" },
         WorkingDirectory = parsersDir,
     };

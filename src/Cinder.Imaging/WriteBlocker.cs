@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using Cinder.Native;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.Imaging;
 
@@ -107,7 +108,7 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
 
     private static IEnumerable<string> ListBlockDevices()
     {
-        var psi = new ProcessStartInfo("lsblk")
+        var psi = new ProcessStartInfo(ExecutableResolver.ResolveRequired("lsblk"))
         {
             RedirectStandardOutput = true,
             UseShellExecute = false,
@@ -124,7 +125,7 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
 
     private static void Run(string file, IReadOnlyList<string> args)
     {
-        var psi = new ProcessStartInfo(file) { UseShellExecute = false, CreateNoWindow = true };
+        var psi = new ProcessStartInfo(ExecutableResolver.ResolveRequired(file)) { UseShellExecute = false, CreateNoWindow = true };
         foreach (var a in args)
         {
             psi.ArgumentList.Add(a);

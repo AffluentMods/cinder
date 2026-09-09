@@ -19,6 +19,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using Microsoft.Data.Sqlite;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.App.ViewModels.Tools;
 
@@ -1101,6 +1102,10 @@ pff.close()
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Cinder", "venv", "Scripts", "python.exe");
         if (File.Exists(local)) return local;
-        return OperatingSystem.IsWindows() ? "python.exe" : "python3";
+
+        // Absolute path, not a bare name — see ExecutableResolver for why that matters here.
+        return ExecutableResolver.ResolveRequired(
+            OperatingSystem.IsWindows() ? "python.exe" : "python3",
+            "Install Python 3.12+ and make sure it is on PATH.");
     }
 }

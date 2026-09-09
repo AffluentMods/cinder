@@ -5,4 +5,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- EncryptedBundle.EncryptZipAsync is internal so tests can seal a hostile archive. -->
+    <InternalsVisibleTo Include="Cinder.Core.Tests" />
+  </ItemGroup>
 </Project>

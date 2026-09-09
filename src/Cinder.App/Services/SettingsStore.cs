@@ -65,6 +65,32 @@ public sealed class SettingsStore
         };
         EncryptSecrets(safe.AiProvider);
         File.WriteAllText(_path, JsonSerializer.Serialize(safe, Json));
+        RestrictToOwner(_path);
+    }
+
+    /// <summary>
+    /// Restricts settings.json to the owning user on Unix.
+    ///
+    /// <para>The file holds the AI provider API key. On Windows it already sits under
+    /// <c>%LOCALAPPDATA%</c>, which is user-scoped by ACL. On Linux and macOS the default umask
+    /// leaves it world-readable, and the non-Windows encryption fallback derives its key from
+    /// the machine and user name — so any local account that can read the file can also
+    /// reproduce the key. Tightening the mode is what stops those two weaknesses compounding.</para>
+    /// </summary>
+    private static void RestrictToOwner(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch
+        {
+            // Best-effort: an exotic filesystem that rejects chmod must not stop settings saving.
+        }
     }
 
     public string Path => _path;

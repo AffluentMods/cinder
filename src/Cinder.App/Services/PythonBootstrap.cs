@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.App.Services;
 
@@ -32,23 +33,10 @@ public sealed class PythonBootstrap
             : new[] { "python3", "python" };
         foreach (var name in candidates)
         {
-            var path = WhichOnPath(name);
+            // ExecutableResolver deliberately excludes Cinder's own directory from the
+            // search, so a planted python.exe next to the portable executable is not picked up.
+            var path = ExecutableResolver.Resolve(name);
             if (path is not null) return path;
-        }
-        return null;
-    }
-
-    private static string? WhichOnPath(string fileName)
-    {
-        var pathVar = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var dir in pathVar.Split(Path.PathSeparator))
-        {
-            try
-            {
-                var full = Path.Combine(dir, fileName);
-                if (File.Exists(full)) return full;
-            }
-            catch { }
         }
         return null;
     }

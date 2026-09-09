@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           dotnet list package --vulnerable --include-transitive 2>&1 | tee audit.txt
-          if grep -qE '^\s+>' audit.txt; then
+          if grep -q 'github.com/advisories' audit.txt; then
             echo "::error::Vulnerable NuGet packages detected — refusing to publish."
             exit 1
           fi

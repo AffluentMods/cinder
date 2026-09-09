@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.Reports;
 
@@ -128,9 +129,10 @@ public sealed class ReportExporter
         // (e.g. <iframe src="file:///etc/shadow">) and bake them into the resulting PDF.
         foreach (var tool in new[] { "wkhtmltopdf", "wkhtmltopdf.exe" })
         {
-            if (IsOnPath(tool))
+            var wk = ResolveOnPath(tool);
+            if (wk is not null)
             {
-                return new PdfConverter(tool, (html, pdf) => new[] { html, pdf });
+                return new PdfConverter(wk, (html, pdf) => new[] { html, pdf });
             }
         }
         foreach (var tool in new[] { "chrome", "chrome.exe", "msedge", "msedge.exe", "google-chrome", "chromium" })
@@ -153,25 +155,12 @@ public sealed class ReportExporter
         return null;
     }
 
+    // Consolidated onto the shared resolver so there is one definition of "where may a helper
+    // binary come from". This path was already correct; the sidecar spawns were not, and one
+    // implementation is easier to keep that way than two.
     private static bool IsOnPath(string fileName) => ResolveOnPath(fileName) is not null;
 
-    private static string? ResolveOnPath(string fileName)
-    {
-        var pathVar = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var dir in pathVar.Split(Path.PathSeparator))
-        {
-            try
-            {
-                var full = Path.Combine(dir, fileName);
-                if (File.Exists(full))
-                {
-                    return full;
-                }
-            }
-            catch { }
-        }
-        return null;
-    }
+    private static string? ResolveOnPath(string fileName) => ExecutableResolver.Resolve(fileName);
 
     private sealed record PdfConverter(string FileName, Func<string, string, IReadOnlyList<string>> BuildArgs);
 }

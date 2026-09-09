@@ -88,7 +88,9 @@ jobs:
       - name: Fail on vulnerable packages
         run: |
           dotnet list package --vulnerable --include-transitive 2>&1 | tee audit.txt
-          if grep -qE '^\s+>' audit.txt; then
+          # Key on the advisory URL: it appears once per vulnerable package and nowhere else,
+          # unlike the '>' prefix, which also marks every transitive package in other listings.
+          if grep -q 'github.com/advisories' audit.txt; then
             echo "::error::Vulnerable NuGet packages detected — see the audit output above."
             exit 1
           fi

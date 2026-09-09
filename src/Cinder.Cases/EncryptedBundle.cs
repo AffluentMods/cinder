@@ -52,13 +52,30 @@ public static class EncryptedBundle
         Directory.CreateDirectory(stagingDir);
         var zipPath = Path.Combine(stagingDir, "bundle.zip");
 
+        try
+        {
+            ZipFile.CreateFromDirectory(sourceDir, zipPath, CompressionLevel.SmallestSize, includeBaseDirectory: false);
+            await EncryptZipAsync(zipPath, outputBundlePath, passphrase, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            try { Directory.Delete(stagingDir, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Encrypts an already-built ZIP into the bundle framing. Split out of
+    /// <see cref="PackAsync"/> so tests can seal a deliberately malformed archive — entry names
+    /// that escape the destination, contents that inflate without bound — which
+    /// <see cref="PackAsync"/> would never produce from a real directory.
+    /// </summary>
+    internal static async Task EncryptZipAsync(string zipPath, string outputBundlePath, string passphrase, CancellationToken ct = default)
+    {
         byte[]? key = null;
         byte[]? plaintext = null;
         byte[]? ciphertext = null;
         try
         {
-            ZipFile.CreateFromDirectory(sourceDir, zipPath, CompressionLevel.SmallestSize, includeBaseDirectory: false);
-
             // Derive key, encrypt, write framed.
             var salt = RandomNumberGenerator.GetBytes(SaltLen);
             var nonce = RandomNumberGenerator.GetBytes(NonceLen);
@@ -88,7 +105,6 @@ public static class EncryptedBundle
             if (key is not null) CryptographicOperations.ZeroMemory(key);
             if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext);
             if (ciphertext is not null) CryptographicOperations.ZeroMemory(ciphertext);
-            try { Directory.Delete(stagingDir, recursive: true); } catch { }
         }
     }
 
@@ -172,15 +188,19 @@ public static class EncryptedBundle
                     continue;
                 }
 
-                extractedTotal += entry.Length;
-                if (extractedTotal > MaxExtractedBytes)
+                // SECURITY: the cap has to be enforced on bytes actually written, not on
+                // entry.Length. That field is the uncompressed size the archive *declares*, and
+                // an attacker writes it — a bomb can claim a few hundred bytes per entry and
+                // still inflate without limit. Checking the declared value first is a cheap
+                // early reject; the real enforcement is the counting copy below.
+                if (extractedTotal + entry.Length > MaxExtractedBytes)
                 {
                     throw new InvalidDataException(
-                        $"Bundle would extract over the {MaxExtractedBytes:N0}-byte cap — possible zip bomb.");
+                        $"Bundle declares over the {MaxExtractedBytes:N0}-byte extraction cap — possible zip bomb.");
                 }
 
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                entry.ExtractToFile(destination, overwrite: true);
+                extractedTotal += ExtractEntryBounded(entry, destination, MaxExtractedBytes - extractedTotal);
             }
         }
         finally
@@ -190,5 +210,44 @@ public static class EncryptedBundle
             CryptographicOperations.ZeroMemory(ciphertext);
             try { Directory.Delete(stagingDir, recursive: true); } catch { }
         }
+    }
+
+    /// <summary>
+    /// Copies one archive entry to <paramref name="destination"/>, aborting if it produces more
+    /// than <paramref name="remainingBudget"/> bytes, and returns how many were written.
+    ///
+    /// <para>A partially written file is deleted on abort so a failed extraction doesn't leave
+    /// a truncated artifact behind that could be mistaken for evidence.</para>
+    /// </summary>
+    private static long ExtractEntryBounded(ZipArchiveEntry entry, string destination, long remainingBudget)
+    {
+        var written = 0L;
+        try
+        {
+            using var source = entry.Open();
+            using var target = File.Create(destination);
+            var buffer = new byte[81920];
+            while (true)
+            {
+                var read = source.Read(buffer, 0, buffer.Length);
+                if (read == 0)
+                {
+                    break;
+                }
+                written += read;
+                if (written > remainingBudget)
+                {
+                    throw new InvalidDataException(
+                        $"Bundle entry '{entry.FullName}' exceeds the extraction cap — possible zip bomb.");
+                }
+                target.Write(buffer, 0, read);
+            }
+        }
+        catch
+        {
+            try { File.Delete(destination); } catch { }
+            throw;
+        }
+        return written;
     }
 }
