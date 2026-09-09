@@ -117,9 +117,9 @@ public abstract partial class ToolViewModel : ViewModelBase
 /// <summary>One renderable block in a tool's help body.</summary>
 public sealed record HelpBlock(HelpBlockKind Kind, string Text, string Marker = "")
 {
-    public bool IsHeading   => Kind == HelpBlockKind.Heading;
+    public bool IsHeading => Kind == HelpBlockKind.Heading;
     public bool IsParagraph => Kind == HelpBlockKind.Paragraph;
-    public bool IsBullet    => Kind == HelpBlockKind.Bullet;
+    public bool IsBullet => Kind == HelpBlockKind.Bullet;
 }
 
 public enum HelpBlockKind { Heading, Paragraph, Bullet }
@@ -131,7 +131,103 @@ public enum HelpBlockKind { Heading, Paragraph, Bullet }
 /// </summary>
 public abstract partial class SidecarToolViewModel : ToolViewModel
 {
+    /// <summary>Every row the parser produced (subject to its budget).</summary>
     public ObservableCollection<object> Rows { get; } = new();
+
+    /// <summary>What the grid shows: <see cref="Rows"/> after <see cref="RowFilter"/>.</summary>
+    public ObservableCollection<object> VisibleRows { get; } = new();
+
+    /// <summary>
+    /// Case-insensitive substring applied across every column of every row. Typing
+    /// <c>Unknown</c> in the Filesystem tool after a hashed walk is the known-good filter.
+    /// </summary>
+    [ObservableProperty]
+    private string? _rowFilter;
+
+    /// <summary>The row the examiner has selected in the grid — what "Bookmark" acts on.</summary>
+    [ObservableProperty]
+    private object? _selectedRow;
+
+    /// <summary>Free-text note attached to the next bookmark.</summary>
+    [ObservableProperty]
+    private string? _bookmarkNote;
+
+    partial void OnRowFilterChanged(string? value) => Reproject();
+
+    /// <summary>Rebuilds <see cref="VisibleRows"/> from <see cref="Rows"/> under the current filter.</summary>
+    protected void Reproject()
+    {
+        VisibleRows.Clear();
+        var needle = (RowFilter ?? "").Trim();
+        if (needle.Length == 0)
+        {
+            foreach (var r in Rows) VisibleRows.Add(r);
+            return;
+        }
+        foreach (var r in Rows)
+        {
+            foreach (var v in Cinder.Core.Export.TabularExporter.ToDictionary(r).Values)
+            {
+                if (v is not null && v.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                {
+                    VisibleRows.Add(r);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Flags the selected row as a finding in the active case. Stored with the tool, the
+    /// evidence path, the note and the row's values, and echoed into the custody log; the
+    /// Reports tool turns bookmarks into exhibits.
+    /// </summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task BookmarkSelectedAsync(CancellationToken ct)
+    {
+        var row = SelectedRow;
+        var session = Services.ActiveCaseContext.Current;
+        if (row is null)
+        {
+            StatusLine = "Select a row to bookmark.";
+            return;
+        }
+        if (session?.Path is null)
+        {
+            StatusLine = "Open a case first — bookmarks live in the case file.";
+            return;
+        }
+
+        try
+        {
+            var values = Cinder.Core.Export.TabularExporter.ToDictionary(row);
+            var headline = values.Values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v)) ?? "(row)";
+            var title = $"{Title}: {Truncate(headline, 80)}";
+            var json = System.Text.Json.JsonSerializer.Serialize(values);
+
+            var store = new Cinder.Core.Cases.BookmarkStore(new Cinder.Core.Cases.CaseStore(session.Path));
+            var bm = await store.AddAsync(session.Id, Environment.UserName, Id, EvidencePath, title, BookmarkNote, json, ct);
+
+            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.Annotation, new
+            {
+                Kind = "bookmark",
+                BookmarkId = bm.Id,
+                Tool = Id,
+                Evidence = EvidencePath,
+                Title = title,
+                Note = BookmarkNote,
+            }, ct);
+
+            StatusLine = $"Bookmarked #{bm.Id}: {title}";
+            BookmarkNote = null;
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Bookmark failed: {ex.Message}";
+        }
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     [ObservableProperty]
     private string? _evidencePath;
@@ -145,14 +241,102 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
     [ObservableProperty]
     private string? _errorMessage;
 
+    /// <summary>
+    /// Set by a parser that stopped early against a row budget. Several parsers cap how much
+    /// they materialize so a 500 MB SOFTWARE hive can't lock the UI; when that cap bites, the
+    /// grid is showing a prefix of the evidence rather than all of it. Saying so is not
+    /// optional — an examiner who reads a truncated view as complete draws a wrong conclusion
+    /// from it, and nothing on screen would otherwise contradict them.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isTruncated;
+
+    /// <summary>Total rows the parser would have produced, when it knows. Null if unknown.</summary>
+    [ObservableProperty]
+    private long? _availableRowCount;
+
     /// <summary>Human-readable hint shown in the empty state.</summary>
     public override string? EmptyStateHint => "Load evidence to populate this tool.";
 
     /// <summary>
     /// Subclasses run their sidecar and populate <see cref="Rows"/> here. Failures should be
-    /// caught and surfaced via <see cref="ErrorMessage"/> rather than thrown.
+    /// caught and surfaced via <see cref="ErrorMessage"/> rather than thrown. A subclass that
+    /// stops against a row budget must set <see cref="IsTruncated"/>, or add its rows through
+    /// <see cref="AddRows"/>, which sets it.
     /// </summary>
     protected abstract Task LoadAsync(string evidencePath, CancellationToken ct);
+
+    /// <summary>
+    /// Writes the current grid to CSV or JSON. Exports exactly the columns the grid shows;
+    /// string cells are guarded against spreadsheet formula injection, since a filename in
+    /// evidence beginning with <c>=</c> is a realistic thing to find.
+    /// </summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        if (VisibleRows.Count == 0)
+        {
+            return;
+        }
+        var ext = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase) ? "json" : "csv";
+        var path = await ToolDialog.SaveFileAsync($"Export {Title} as {ext.ToUpperInvariant()}", $"{Id}-export.{ext}", ext);
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        // What the grid shows — the row filter is part of what the examiner chose to export.
+        var snapshot = VisibleRows.ToList();
+        try
+        {
+            var written = await Task.Run(() =>
+            {
+                if (ext == "json")
+                {
+                    using var fs = File.Create(path);
+                    return Cinder.Core.Export.TabularExporter.WriteJson(snapshot, fs);
+                }
+                using var w = new StreamWriter(path, append: false, System.Text.Encoding.UTF8);
+                return Cinder.Core.Export.TabularExporter.WriteCsv(snapshot, w);
+            }, ct);
+
+            StatusLine = $"Exported {written:N0} rows → {path}" + (IsTruncated ? " (grid was truncated — export reflects only what was shown)" : "");
+            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.DataExported, new
+            {
+                Tool = Id,
+                Format = ext,
+                Path = path,
+                Rows = written,
+                Evidence = EvidencePath,
+                Truncated = IsTruncated,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Export failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Appends parsed rows and flags truncation when the parser produced exactly its budget.
+    ///
+    /// <para>Parsers cap how much they materialize so a huge artifact can't lock the UI. Landing
+    /// exactly on the cap means the parser stopped there rather than running out of input, so
+    /// the grid holds a prefix of the evidence. (An artifact with exactly <paramref name="budget"/>
+    /// rows is flagged too — over-warning is the safe direction here, since the alternative is
+    /// an examiner treating a partial view as the complete artifact.)</para>
+    /// </summary>
+    protected void AddRows(IEnumerable<object> rows, int budget)
+    {
+        foreach (var r in rows)
+        {
+            Rows.Add(r);
+        }
+        if (Rows.Count >= budget)
+        {
+            IsTruncated = true;
+        }
+    }
 
     [CommunityToolkit.Mvvm.Input.RelayCommand]
     private async Task LoadEvidenceAsync(string? path, CancellationToken ct)
@@ -164,11 +348,29 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
         EvidencePath = path;
         ErrorMessage = null;
         IsLoading = true;
+        IsTruncated = false;
+        AvailableRowCount = null;
         Rows.Clear();
+        VisibleRows.Clear();
         try
         {
             await LoadAsync(path, ct);
-            StatusLine = $"{Rows.Count:N0} entries";
+            Reproject();
+            StatusLine = IsTruncated
+                ? $"⚠ {Rows.Count:N0} entries shown — TRUNCATED at the display limit" +
+                  (AvailableRowCount is { } total ? $" of {total:N0} present" : "") +
+                  ". This is not the whole artifact; narrow the input or export to see the rest."
+                : $"{Rows.Count:N0} entries";
+
+            // Every parser run against evidence is an evidential act — it goes in the custody
+            // log with what was parsed and how much of it the examiner actually saw.
+            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.ParserRan, new
+            {
+                Tool = Id,
+                Evidence = path,
+                Rows = Rows.Count,
+                Truncated = IsTruncated,
+            }, ct);
         }
         catch (Exception ex)
         {

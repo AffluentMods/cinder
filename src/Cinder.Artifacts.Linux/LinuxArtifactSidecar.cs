@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Cinder.Sidecar;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.Artifacts.Linux;
 
@@ -21,7 +22,9 @@ public sealed class LinuxArtifactSidecar
 
     public static ProcessStartInfo DefaultSidecar(string parsersDir) => new()
     {
-        FileName = OperatingSystem.IsWindows() ? "python.exe" : "python3",
+        FileName = ExecutableResolver.ResolveRequired(
+            OperatingSystem.IsWindows() ? "python.exe" : "python3",
+            "Install Python 3.12+ and make sure it is on PATH."),
         ArgumentList = { "-m", "linux.linux_worker" },
         WorkingDirectory = parsersDir,
     };

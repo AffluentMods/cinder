@@ -1,0 +1,54 @@
+# Dependabot keeps the three dependency surfaces current: NuGet (the app), pip (the Python
+# sidecars), and the GitHub Actions used by CI and release.
+#
+# Cinder parses adversary-authored files with third-party libraries, so a stale parser
+# dependency is a direct code-execution surface rather than a hygiene issue. The NuGet
+# ecosystem is checked weekly and grouped so routine bumps arrive as one reviewable PR
+# instead of twenty.
+version: 2
+
+updates:
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # Avalonia moves as a suite — splitting it across PRs produces builds that don't restore.
+      avalonia:
+        patterns:
+          - "Avalonia*"
+      # Likewise the SQLitePCLRaw family, which is pinned as a set in Directory.Packages.props.
+      sqlite:
+        patterns:
+          - "SQLitePCLRaw*"
+          - "Microsoft.Data.Sqlite*"
+      microsoft-extensions:
+        patterns:
+          - "Microsoft.Extensions.*"
+      test-tooling:
+        patterns:
+          - "xunit*"
+          - "FluentAssertions"
+          - "NSubstitute"
+          - "Microsoft.NET.Test.Sdk"
+          - "coverlet.*"
+    labels:
+      - dependencies
+
+  - package-ecosystem: pip
+    directory: "/parsers"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci

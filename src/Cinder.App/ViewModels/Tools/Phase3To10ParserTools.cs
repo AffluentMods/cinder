@@ -18,6 +18,10 @@ using System.Text;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.Versioning;
 using Cinder.Imaging.Ewf;
+using Cinder.Search;
+using Cinder.Imaging;
+using Cinder.Filesystems;
+using Cinder.App.Services;
 using DiscUtils;
 using DiscUtils.Ext;
 using DiscUtils.Fat;
@@ -37,270 +41,159 @@ public sealed partial class FilesystemTool
 {
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
-        var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        var settings = new SettingsStore().Load();
+        var (rows, truncated) = await Task.Run(() => Parse(evidencePath, settings, ct), ct);
+        AddRows(rows, budget: int.MaxValue);
+        IsTruncated = truncated;
     }
 
-    private static List<object> Parse(string path, CancellationToken ct)
+    /// <summary>
+    /// Opens the image (raw, E01 chain, or VHD/VHDX container) and hands it to
+    /// <see cref="DiscUtilsWalker"/>, which owns detection, enumeration, deleted-entry recovery
+    /// and optional hashing. This method only maps <see cref="FileEntry"/> to grid rows.
+    /// </summary>
+    private static (List<object> Rows, bool Truncated) Parse(string path, CinderSettings settings, CancellationToken ct)
     {
         var rows = new List<object>();
-        // DiscUtils' raw-disk path for VHD/VHDX, otherwise treat as a flat image.
         var ext = Path.GetExtension(path).ToLowerInvariant();
-        // Open with FileShare.Read so a running OS that owns the image still lets us read.
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        // Hash-set lookup is opt-in: it reads every file on the volume.
+        HashSetService? hashSets = null;
+        WalkOptions options;
+        if (settings.HashFilesOnEnumerate)
+        {
+            if (!string.IsNullOrEmpty(settings.HashSetDatabase) && File.Exists(settings.HashSetDatabase))
+            {
+                hashSets = new HashSetService(settings.HashSetDatabase);
+            }
+            var hs = hashSets;
+            options = new WalkOptions(
+                HashFiles: true,
+                HashSizeLimitBytes: Math.Max(1, settings.HashSizeLimitMb) * 1024L * 1024L,
+                Lookup: hs is null ? null : (sha1, md5) =>
+                {
+                    var m = hs.Lookup("sha1", sha1) ?? hs.Lookup("md5", md5);
+                    return m is null ? null : new HashVerdict(m.Verdict.ToString(), m.SetName, m.Label);
+                });
+        }
+        else
+        {
+            options = new WalkOptions();
+        }
+
         try
         {
-            // .E01 — wrap the EWF reader as a Stream over the raw disk, then re-route as raw.
-            if (ext == ".e01")
+            WalkResult result;
+            if (ext == ".e01" || EvidenceOpener.IsEwf(path))
             {
-                stream.Dispose();
-                var ewf = EwfReader.Open(path);
-                var ewfStream = ewf.OpenStream();
-                rows.Add(new
-                {
-                    Inode = 0L,
-                    Path = "[EWF metadata]",
-                    Name = "E01",
-                    Size = ewf.MediaSize,
-                    IsDirectory = true,
-                    IsDeleted = false,
-                    Modified = ewf.AcquisitionDate ?? "",
-                    Owner = "",
-                    Note = $"EWF media_size={ewf.MediaSize:N0} bytes · sectors={ewf.NumberOfSectors:N0} · MD5={ewf.RecordedMd5 ?? "?"} · SHA1={ewf.RecordedSha1 ?? "?"}",
-                });
+                // `using`: EwfReader holds one open FileStream per segment in the chain.
+                using var ewf = EwfReader.Open(path);
+                using var ewfStream = ewf.OpenStream();
 
-                // From here we treat the EWF-backed stream as a raw disk image — try every parser.
-                if (TryNtfs(ewfStream, rows, ct, path)) return rows;
-                if (TryFat(ewfStream, rows, ct, path)) return rows;
-                if (TryExt(ewfStream, rows, ct, path)) return rows;
-
-                // Likely a whole-disk image — walk via VolumeManager.
-                ewfStream.Position = 0;
-                var vmEwf = new VolumeManager();
-                vmEwf.AddDisk(ewfStream);
-                foreach (var vol in vmEwf.GetLogicalVolumes())
-                {
-                    ct.ThrowIfCancellationRequested();
-                    rows.Add(new
-                    {
-                        Inode = 0L,
-                        Path = $"[partition] {vol.Identity}",
-                        Name = vol.Identity,
-                        Size = vol.Length,
-                        IsDirectory = true,
-                        IsDeleted = false,
-                        Modified = "",
-                        Owner = "",
-                        Note = $"Partition · type {vol.PhysicalVolume.VolumeType}",
-                    });
-                    try
-                    {
-                        using var vs = vol.Open();
-                        _ = TryNtfs(vs, rows, ct, path, partitionPrefix: vol.Identity)
-                            || TryFat(vs, rows, ct, path, partitionPrefix: vol.Identity)
-                            || TryExt(vs, rows, ct, path, partitionPrefix: vol.Identity);
-                    }
-                    catch { /* skip unreadable */ }
-                }
-                return rows;
+                // The hashes below are what the container records about itself — an assertion
+                // by whatever wrote the image, not a verification of it. Labelled so nobody
+                // reads the row as a checked result; Imaging ▸ Verify re-hashes and compares.
+                rows.Add(MetadataRow("[EWF metadata]", "E01", ewf.MediaSize, ewf.AcquisitionDate ?? "",
+                    $"EWF media_size={ewf.MediaSize:N0} bytes · sectors={ewf.NumberOfSectors:N0} · " +
+                    $"segments={ewf.SegmentCount} · recorded (UNVERIFIED) MD5={ewf.RecordedMd5 ?? "none"} · " +
+                    $"SHA1={ewf.RecordedSha1 ?? "none"} — run Imaging ▸ Verify image to check them"));
+                result = DiscUtilsWalker.Walk(ewfStream, options, ct);
+            }
+            else if (ext is ".vhd" or ".vhdx")
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using VirtualDisk disk = ext == ".vhd"
+                    ? new DiscUtils.Vhd.Disk(stream, Ownership.None)
+                    : new DiscUtils.Vhdx.Disk(stream, Ownership.None);
+                result = DiscUtilsWalker.WalkDisk(disk, options, ct);
+            }
+            else
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                result = DiscUtilsWalker.Walk(stream, options, ct);
             }
 
-            // Try the container formats first.
-            VirtualDisk? disk = ext switch
+            foreach (var e in result.Entries)
             {
-                ".vhd" => new DiscUtils.Vhd.Disk(stream, Ownership.Dispose),
-                ".vhdx" => new DiscUtils.Vhdx.Disk(stream, Ownership.Dispose),
-                _ => null,
-            };
-            if (disk is not null)
-            {
-                EnumerateVirtualDisk(disk, rows, ct, path);
-                return rows;
+                rows.Add(ToRow(e, options.HashFiles));
             }
 
-            // Raw image. Try every parser DiscUtils knows about.
-            // 1) ISO 9660 (Joliet) — works for CDs/DVDs and many install images.
-            if (TryIso(stream, rows, ct, path)) return rows;
-
-            // 2) NTFS — works on a partition image (not a full disk with MBR/GPT).
-            if (TryNtfs(stream, rows, ct, path)) return rows;
-
-            // 3) FAT family.
-            if (TryFat(stream, rows, ct, path)) return rows;
-
-            // 4) ext2/3/4 (Linux).
-            if (TryExt(stream, rows, ct, path)) return rows;
-
-            // 5) Last resort — try VolumeManager (handles whole-disk images with partitions).
-            stream.Position = 0;
-            var vm = new VolumeManager();
-            vm.AddDisk(stream);
-            var volumes = vm.GetLogicalVolumes();
-            foreach (var vol in volumes)
+            if (result.DeletedRecoveryError is { } err)
             {
-                ct.ThrowIfCancellationRequested();
-                rows.Add(new
-                {
-                    Inode = 0L,
-                    Path = $"[partition] {vol.Identity}",
-                    Name = vol.Identity,
-                    Size = vol.Length,
-                    IsDirectory = true,
-                    IsDeleted = false,
-                    Modified = "",
-                    Owner = "",
-                    Note = $"Partition · type {vol.PhysicalVolume.VolumeType}",
-                });
-                try
-                {
-                    using var volStream = vol.Open();
-                    if (TryNtfs(volStream, rows, ct, path, partitionPrefix: vol.Identity) ||
-                        TryFat(volStream, rows, ct, path, partitionPrefix: vol.Identity) ||
-                        TryExt(volStream, rows, ct, path, partitionPrefix: vol.Identity))
-                    {
-                        // ok — rows appended
-                    }
-                }
-                catch { /* skip unreadable volumes */ }
+                rows.Add(MetadataRow("[deleted]", "(unavailable)", 0, "", $"Deleted-entry recovery failed: {err}"));
             }
-            if (rows.Count == 0)
+            if (result.DeletedTruncated)
             {
-                rows.Add(new
-                {
-                    Inode = 0L,
-                    Path = "(no known filesystem detected)",
-                    Name = "",
-                    Size = stream.Length,
-                    IsDirectory = false,
-                    IsDeleted = false,
-                    Modified = "",
-                    Owner = "",
-                    Note = "DiscUtils could not identify NTFS/FAT/ISO9660/ext on this image.",
-                });
+                rows.Add(MetadataRow("[deleted]", "…", 0, "", "Deleted-entry listing TRUNCATED — the volume has more not-in-use MFT records."));
             }
+            if (options.HashFiles)
+            {
+                rows.Add(MetadataRow("[hashing]", "summary", result.HashedBytes, "",
+                    $"Hashed {result.HashedFiles:N0} files ({result.HashedBytes:N0} bytes), skipped {result.HashSkipped:N0}" +
+                    (hashSets is null ? " · no hash-set database configured, so verdicts are absent" : $" · verdicts from {Path.GetFileName(settings.HashSetDatabase)}")));
+            }
+            if (rows.Count == 0 || (rows.Count == 1 && result.Entries.Count == 0))
+            {
+                rows.Add(MetadataRow("(no known filesystem detected)", "", new FileInfo(path).Length, "",
+                    "DiscUtils could not identify NTFS/FAT/ISO9660/ext on this image."));
+            }
+
+            return (rows, result.Truncated || result.DeletedTruncated);
         }
         finally
         {
-            // VHD/VHDX paths take ownership; raw paths don't, so close here.
-            try { stream.Dispose(); } catch { }
+            hashSets?.Dispose();
         }
-        return rows;
     }
 
-    private static bool TryIso(Stream s, List<object> rows, CancellationToken ct, string source, string partitionPrefix = "")
+    private static object ToRow(FileEntry e, bool hashed)
     {
-        try
+        var x = e.Extras;
+        string Get(string k) => x is not null && x.TryGetValue(k, out var v) ? v : "";
+
+        var note = e.IsDeleted ? Get("note") : Get("attributes");
+        if (hashed)
         {
-            s.Position = 0;
-            if (!CDReader.Detect(s)) return false;
-            using var fs = new CDReader(s, joliet: true);
-            EnumerateFs(fs, rows, ct, partitionPrefix);
-            return true;
+            var skipped = Get("hash_skipped");
+            if (skipped.Length > 0) note = $"hash skipped: {skipped} · {note}";
+            var set = Get("hash_set");
+            if (set.Length > 0) note = $"{Get("verdict")} in {set}{(Get("hash_label").Length > 0 ? " (" + Get("hash_label") + ")" : "")} · {note}";
         }
-        catch { return false; }
+
+        // One row shape for every row. The DataGrid derives its columns from the first item,
+        // and the EWF metadata row comes first — a second shape would hide Verdict / Sha1.
+        var verdict = e.IsDirectory || e.IsDeleted || !hashed
+            ? ""
+            : Get("verdict").Length > 0 ? Get("verdict") : (Get("sha1").Length > 0 ? "Unknown" : "");
+
+        return Row(e.Inode, e.Path, e.Name, e.Size, e.IsDirectory, e.IsDeleted, verdict, Get("sha1"),
+                   Fmt(e.ModifiedUtc), Fmt(e.CreatedUtc), Fmt(e.AccessedUtc), e.Owner ?? "", note);
     }
 
-    [UnconditionalSuppressMessage("Compatibility", "CA1416", Justification = "NTFS guard: try/catch fallback handles non-Windows paths.")]
-    private static bool TryNtfs(Stream s, List<object> rows, CancellationToken ct, string source, string partitionPrefix = "")
-    {
-        try
-        {
-            s.Position = 0;
-            if (!NtfsFileSystem.Detect(s)) return false;
-            using var fs = new NtfsFileSystem(s);
-            EnumerateFs(fs, rows, ct, partitionPrefix);
-            return true;
-        }
-        catch { return false; }
-    }
+    private static object MetadataRow(string path, string name, long size, string modified, string note)
+        => Row(0L, path, name, size, true, false, "", "", modified, "", "", "", note);
 
-    private static bool TryFat(Stream s, List<object> rows, CancellationToken ct, string source, string partitionPrefix = "")
-    {
-        try
-        {
-            s.Position = 0;
-            if (!FatFileSystem.Detect(s)) return false;
-            using var fs = new FatFileSystem(s);
-            EnumerateFs(fs, rows, ct, partitionPrefix);
-            return true;
-        }
-        catch { return false; }
-    }
+    private static object Row(long inode, string path, string name, long size, bool isDir, bool isDeleted,
+                              string verdict, string sha1, string modified, string created, string accessed,
+                              string owner, string note) => new
+                              {
+                                  Inode = inode,
+                                  Path = path,
+                                  Name = name,
+                                  Size = size,
+                                  IsDirectory = isDir,
+                                  IsDeleted = isDeleted,
+                                  Verdict = verdict,
+                                  Sha1 = sha1,
+                                  Modified = modified,
+                                  Created = created,
+                                  Accessed = accessed,
+                                  Owner = owner,
+                                  Note = note,
+                              };
 
-    private static bool TryExt(Stream s, List<object> rows, CancellationToken ct, string source, string partitionPrefix = "")
-    {
-        // ExtFileSystem doesn't expose a Detect helper — just let the ctor throw if
-        // the bytes don't look like ext.
-        try
-        {
-            s.Position = 0;
-            using var fs = new ExtFileSystem(s);
-            EnumerateFs(fs, rows, ct, partitionPrefix);
-            return true;
-        }
-        catch { return false; }
-    }
-
-    private static void EnumerateVirtualDisk(VirtualDisk disk, List<object> rows, CancellationToken ct, string source)
-    {
-        foreach (var part in disk.Partitions.Partitions)
-        {
-            ct.ThrowIfCancellationRequested();
-            using var partStream = part.Open();
-            var prefix = $"[part {part.FirstSector:N0}]";
-            if (TryNtfs(partStream, rows, ct, source, prefix)) continue;
-            if (TryFat(partStream, rows, ct, source, prefix)) continue;
-            if (TryExt(partStream, rows, ct, source, prefix)) continue;
-        }
-    }
-
-    private static void EnumerateFs(DiscFileSystem fs, List<object> rows, CancellationToken ct, string prefix)
-    {
-        const int MaxEntries = 25_000;
-        var queue = new Queue<DiscDirectoryInfo>();
-        queue.Enqueue(fs.Root);
-        while (queue.Count > 0 && rows.Count < MaxEntries)
-        {
-            ct.ThrowIfCancellationRequested();
-            var dir = queue.Dequeue();
-            DiscFileSystemInfo[] entries;
-            try
-            {
-                entries = dir.GetFileSystemInfos();
-            }
-            catch { continue; }
-            foreach (var e in entries)
-            {
-                if (rows.Count >= MaxEntries) break;
-                var isDir = (e.Attributes & FileAttributes.Directory) != 0;
-                rows.Add(new
-                {
-                    Inode = 0L,
-                    Path = string.IsNullOrEmpty(prefix) ? e.FullName : $"{prefix}{e.FullName}",
-                    Name = e.Name,
-                    Size = isDir ? 0L : ((DiscFileInfo)e).Length,
-                    IsDirectory = isDir,
-                    IsDeleted = false,
-                    Modified = SafeUtc(e.LastWriteTimeUtc),
-                    Owner = "",
-                    Note = e.Attributes.ToString(),
-                });
-                if (isDir && rows.Count < MaxEntries)
-                {
-                    queue.Enqueue((DiscDirectoryInfo)e);
-                }
-            }
-        }
-    }
-
-    private static string SafeUtc(DateTime d)
-    {
-        try { return d.ToUniversalTime().ToString("u", CultureInfo.InvariantCulture); }
-        catch { return ""; }
-    }
+    private static string Fmt(DateTimeOffset? t) =>
+        t is { } v ? v.ToString("u", CultureInfo.InvariantCulture) : "";
 }
 
 // ============================================================ SHELLBAGS ============
@@ -310,10 +203,7 @@ public sealed partial class ShellbagsTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 25_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -467,7 +357,7 @@ public sealed partial class SrumTool
     private const string NetworkDataTable = "{973F5D5C-1D90-4944-BE8E-24B94231A174}";
     private const string AppResourceTable = "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA89}";
     private const string NetworkConnTable = "{DD6636C4-8929-4683-974E-22C046A43763}";
-    private const string EnergyEstTable   = "{FEE4E14F-02A9-4550-B5CE-5FA2DA202E37}";
+    private const string EnergyEstTable = "{FEE4E14F-02A9-4550-B5CE-5FA2DA202E37}";
 
     private static List<object> Parse(string path, CancellationToken ct)
     {
@@ -763,10 +653,7 @@ public sealed partial class NetworkTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 50_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -781,13 +668,12 @@ public sealed partial class NetworkTool
             if (rows.Count >= 50_000) break;
 
             var status = reader.GetNextPacket(out var capture);
-            if (status == GetPacketStatus.NoRemainingPackets)
-            {
-                break;
-            }
             if (status != GetPacketStatus.PacketRead)
             {
-                continue;
+                // Anything that isn't a successful read ends the walk. `continue` here would
+                // spin forever on a truncated or corrupt capture, because an error status
+                // repeats indefinitely rather than advancing to NoRemainingPackets.
+                break;
             }
             packetIndex++;
 
@@ -814,7 +700,7 @@ public sealed partial class NetworkTool
                     DstPort = tcp?.DestinationPort ?? udp?.DestinationPort ?? 0,
                     Bytes = raw.Data.Length,
                     Note = tcp is not null
-                        ? $"flags={(tcp.Synchronize?"S":"")}{(tcp.Acknowledgment?"A":"")}{(tcp.Finished?"F":"")}{(tcp.Reset?"R":"")}{(tcp.Push?"P":"")}"
+                        ? $"flags={(tcp.Synchronize ? "S" : "")}{(tcp.Acknowledgment ? "A" : "")}{(tcp.Finished ? "F" : "")}{(tcp.Reset ? "R" : "")}{(tcp.Push ? "P" : "")}"
                         : "",
                 });
             }
@@ -835,10 +721,7 @@ public sealed partial class LinuxArtifactsTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 50_000);
     }
 
     private static List<object> Parse(string root, CancellationToken ct)
@@ -981,10 +864,7 @@ public sealed partial class MobileTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 50_000);
     }
 
     private static List<object> Parse(string root, CancellationToken ct)

@@ -112,8 +112,8 @@ public sealed class SearchTests : IDisposable
     {
         var idx = new GeoIndex();
         idx.Add(new GeoPoint(37.7, -122.4, null, "sf", "exif", null));   // San Francisco
-        idx.Add(new GeoPoint(40.7, -74.0,  null, "nyc", "exif", null));  // New York
-        idx.Add(new GeoPoint(48.8,   2.3,  null, "paris", "exif", null));
+        idx.Add(new GeoPoint(40.7, -74.0, null, "nyc", "exif", null));  // New York
+        idx.Add(new GeoPoint(48.8, 2.3, null, "paris", "exif", null));
 
         var westCoast = idx.InBounds(36, -124, 39, -121).ToList();
         westCoast.Should().HaveCount(1);

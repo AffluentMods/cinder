@@ -13,7 +13,7 @@ namespace Cinder.Core.Cases;
 public sealed class CaseStore
 {
     /// <summary>Latest schema version known to this build. Bumped when a new migration ships.</summary>
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     private const string MigrationResourcePrefix = "Cinder.Core.Sql.Migrations.";
 

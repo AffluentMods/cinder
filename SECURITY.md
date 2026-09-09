@@ -101,6 +101,49 @@ The first public release was preceded by a security audit. The fixes that landed
 - **Dependency audit.** `dotnet list package --vulnerable --include-transitive` reports zero
   vulnerabilities across all 24 projects.
 
+## What the pre-release audit hardened (September 2026)
+
+A second audit ahead of the public release. The findings that produced code changes:
+
+- **Helper binaries were resolved by bare name.** ~20 call sites passed `python.exe`,
+  `powershell.exe`, `vssadmin.exe`, `lsblk`, `blockdev`, `zfs` and friends straight to
+  `Process.Start`. Windows resolves a bare name against *the directory the running executable
+  was loaded from* before the system directory and before PATH. Cinder ships as a portable
+  single-file executable that examiners keep alongside their case files, and it processes
+  adversary-authored data — so a `python.exe` dropped next to `Cinder.exe` was executed in
+  preference to the real interpreter, at whatever privilege Cinder held. The documentation asks
+  for Administrator.
+
+  Verified by experiment, not by reading: a probe executable with `cmd.exe` renamed to
+  `python.exe` beside it ran the planted binary. (The *current* directory turned out not to be
+  searched — safe process search mode is active — so only the application-directory half of the
+  documented search order was actually exploitable.) All call sites now go through
+  `Cinder.Core.Diagnostics.ExecutableResolver`, which searches the Windows system directory and
+  PATH and never the application or working directory. Re-verified with the same probe.
+
+- **The case-bundle extraction cap counted attacker-declared bytes.** `EncryptedBundle` summed
+  `ZipArchiveEntry.Length` — the uncompressed size the archive *claims* — against its 32 GB
+  ceiling, then extracted without bound. A crafted bundle could declare a few hundred bytes per
+  entry and inflate arbitrarily. Extraction is now a counting copy that aborts on the real byte
+  total and deletes the partial file. (Bundles are AES-GCM authenticated, so this needed a
+  bundle from someone you accepted one from — which is the normal way bundles move.)
+
+- **settings.json was world-readable on Linux/macOS.** It holds the AI provider API key, and
+  the non-Windows encryption fallback derives its key from the machine and user name — so any
+  local account that could read the file could also reproduce the key. Two documented-but-weak
+  controls cancelling each other out. The file is now created 0600 on Unix; Windows
+  `%LOCALAPPDATA%` was already ACL-scoped.
+
+Checked and found already correct: XXE closed on all five `XmlReader` sites; no
+`BinaryFormatter` anywhere; the zip-slip guard; `ArgumentList` used throughout with no shell
+string interpolation; PowerShell arguments passed via `$args[]`; the absent
+`--enable-local-file-access` on the PDF path; the plugin trust sentinel plus SHA-256 manifest;
+PKCE S256; no secrets in the working tree or in git history; zero vulnerable NuGet packages.
+
+Still open from this audit, tracked below: the OAuth loopback flow carries no `state`
+parameter, and the Dropbox connector discards its PKCE verifier. Both sit in scaffolding whose
+token exchange is not yet wired, and both are fixed before the cloud connectors ship.
+
 ## Known limitations (tracked, fix planned)
 
 These items came out of the audit and are tracked but not yet fixed. We documented them in
@@ -121,5 +164,48 @@ the open rather than leaving them implicit.
   enforced; isolation via `AssemblyLoadContext` / sidecar process is on the Phase 9 roadmap.
 - **Self-update.** Not implemented. Users are responsible for downloading new releases and
   verifying SHA-256 against `SHA256SUMS.txt` in the GitHub Release.
+- **OAuth loopback flow has no `state` parameter.** `OAuthPkceHelper.AwaitRedirectCodeAsync`
+  accepts any callback carrying a `code` and ignores an `error` response, so nothing binds the
+  callback to the request that started it. PKCE limits the damage — a foreign authorization
+  code fails the exchange — but RFC 8252 asks for both, and the listener also binds whatever
+  prefix its caller passes rather than forcing loopback. Separately,
+  `DropboxConnector.BeginAuthAsync` discards the verifier it generates, so that flow cannot
+  complete. The connectors' token exchange is unfinished, so none of this is reachable today;
+  it is fixed as part of finishing Phase 10.1.
+
+## What the chain-of-custody log does and does not prove
+
+This deserves to be stated plainly, because the phrase "hash-chained custody log" invites a
+stronger reading than the implementation supports.
+
+`Cinder.Core.Custody.CustodyLog` chains each entry to its predecessor with
+`SHA-256(prev_hash ‖ sequence ‖ timestamp ‖ examiner ‖ action ‖ details)` and
+`VerifyAsync` recomputes the whole chain. That reliably detects **accidental** corruption and
+**naive** tampering: editing one row's text, deleting a row, reordering rows, or splicing a row
+in all break the chain and are reported.
+
+It does **not** resist a deliberate rewrite. The hash is unkeyed and every entry — including
+every stored hash — lives in the same SQLite file as the data it protects. Anyone who can write
+that file can recompute the entire chain from the genesis entry forward and produce a log that
+verifies cleanly. There is no secret an attacker lacks and no external anchor to check against.
+
+So the correct claim is **tamper-evident against modification of an existing log**, not
+tamper-proof, and not "court-defensible" on its own. Its evidentiary value comes from the same
+place it does for any examiner's notes: the surrounding process — who held the file, on what
+media, under what access controls.
+
+Closing the gap needs an anchor Cinder does not yet have. Tracked options, in the order we'd
+take them:
+
+1. **Sign the chain tip** with a per-examiner key held outside the case file, so a rewrite
+   requires the key rather than just write access.
+2. **Publish the tip** — periodically export `(case_id, sequence, entry_hash, timestamp)` to
+   an append-only location the examiner does not control (a signed email to themselves, a
+   timestamping authority, an internal WORM store).
+3. **RFC 3161 trusted timestamps** on the tip, which binds the chain to a point in time that
+   the holder of the case file cannot backdate.
+
+Until at least (1) lands, do not present a Cinder custody log as independent proof that a case
+file was not altered. Present it as what it is: a structured, self-checking activity record.
 
 If you find anything that isn't listed here, report it through GitHub Security Advisories.

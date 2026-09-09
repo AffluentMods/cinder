@@ -49,9 +49,9 @@ managers) are still on the roadmap.
 | **0 — Foundation** | ✅ shipped | Avalonia shell, design system, command palette, SQLite case store, hash-chained custody log, Serilog, branding, CI |
 | **1 — Hex viewer & hashing** | ✅ shipped | Memory-mapped hex viewer (opens 100 GB images instantly), inspector, MD5/SHA-1/SHA-256/BLAKE3, 60+ signature scanner |
 | **1.5 — Shell & UX** | ✅ shipped | Home dashboard, per-tool help (F1), multi-case tabs, persistent recents, friendly empty states |
-| **2 — Imaging & verification** | 🟡 partial | Image mount works (VHD/VHDX/ISO); E01 acquisition + signed write-blocker driver pending |
+| **2 — Imaging & verification** | 🟡 partial | In-process E01 read + hash verification against the recorded acquisition digest; mount works (VHD/VHDX/ISO); E01 acquisition + signed write-blocker driver pending |
 | **3 — Filesystem & carving** | ✅ shipped | NTFS / FAT / ext2-4 / ISO9660 / VHD(X) via DiscUtils; header+footer carver with 30+ signatures |
-| **4 — Windows artifacts** | ✅ shipped | Registry, EVTX, Prefetch, LNK, Jumplists, Shellbags, USB/Wi-Fi history, Amcache, ShimCache, SRUM, browser history, email |
+| **4 — Windows artifacts** | 🟡 shipped, unverified | Registry, EVTX, Prefetch, LNK, Jumplists, Shellbags, USB/Wi-Fi history, Amcache, ShimCache, SRUM, browser history, email — all parse, none yet diffed against a reference tool ([why](LIMITATIONS.md#parser-validation)) |
 | **5 — Linux artifacts** | ✅ shipped | shell history, auth.log, syslog, cron, passwd/shadow, SSH known_hosts |
 | **6 — Search, timeline, YARA** | 🟡 partial | Lucene case-wide search ✅, YARA-lite ✅, Map ✅, Communication graph ✅; super-timeline merge pending |
 | **7 — Memory forensics** | ⬜ planned | Volatility 3 wrapper UI shell exists; RAM capture needs signed driver |
@@ -64,28 +64,31 @@ Known limits with workarounds: **[LIMITATIONS.md](LIMITATIONS.md)**.
 
 ## Screenshots
 
-> Screenshots from the v0.2.0 build. Generated against synthetic test
-> data — no real case material is shown.
+_Not yet captured._ The four shots below are the intended set; the capture
+protocol (window size, theme, synthetic evidence to load, redaction rules) is in
+[docs/screenshots.md](docs/screenshots.md). Drop the files into
+`assets/screenshots/` with the names given there and uncomment the block below.
 
 <!--
-  Once you've launched the v0.2.0 build, drop screenshots into
-  assets/screenshots/ with the filenames below and they'll appear here.
-  See docs/screenshots.md for the suggested capture protocol.
--->
+  Uncomment once assets/screenshots/{home,hex,evtx,report}.png exist. Leaving
+  these as live <img> tags before the files land renders four broken images on
+  the project's front page, which is a worse first impression than saying the
+  shots aren't taken yet.
 
 <div align="center">
 
 | Home dashboard | Hex viewer |
 |---|---|
-| <img src="assets/screenshots/home.png" alt="Home dashboard with recent cases and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex viewer with 100 GB image and inspector" /> |
+| <img src="assets/screenshots/home.png" alt="Home dashboard with recent cases and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex viewer with a large image open and the inspector visible" /> |
 | Recent cases, recent evidence, quick-start guide. | Memory-mapped, opens 100 GB images instantly. Inspector decodes 14 types at the caret. |
 
-| Event Log timeline | Court-ready PDF report |
+| Event Log timeline | PDF report |
 |---|---|
 | <img src="assets/screenshots/evtx.png" alt="Event Log viewer with filter and channel column" /> | <img src="assets/screenshots/report.png" alt="Generated PDF report with exhibit cards and index" /> |
 | Streams every record with timestamp, channel, EventId, user, computer. | Cover, per-section narrative, embedded exhibit cards, exhibit index. |
 
 </div>
+-->
 
 ## Cinder vs the alternatives
 
@@ -93,10 +96,10 @@ Known limits with workarounds: **[LIMITATIONS.md](LIMITATIONS.md)**.
 |---|---|---|---|---|---|
 | Modern native cross-platform UI | ✅ Avalonia 11 | 🟡 Java Swing | 🟡 Win32 only | ❌ separate CLIs | ❌ CLI |
 | Open source | ✅ Apache-2.0 | ✅ Apache-2.0 | ❌ freeware, closed | ✅ MIT | ✅ GPL-2 |
-| Hex viewer (100 GB+ images) | ✅ memory-mapped | 🟡 basic | 🟡 basic | ❌ | ❌ |
-| Disk imaging (E01 / raw) | 🟡 mount only today | ✅ | ✅ | ❌ | ❌ |
+| Hex viewer (100 GB+ images) | ✅ memory-mapped + streaming find | 🟡 basic | 🟡 basic | ❌ | ❌ |
+| Disk imaging (E01 / raw) | 🟡 read + verify only today | ✅ | ✅ | ❌ | ❌ |
 | Filesystem parsers (NTFS/FAT/ext) | ✅ DiscUtils, in-process | ✅ via pytsk | ❌ | ❌ | ❌ |
-| Windows artifact suite | ✅ EZ libs, in-process | ✅ ingest modules | ❌ | ✅ separate CLIs | ❌ |
+| Windows artifact suite | 🟡 EZ libs in-process, unverified vs reference | ✅ ingest modules | ❌ | ✅ separate CLIs | ❌ |
 | Email (.msg / .eml / .mbox) | ✅ | ✅ via plugin | ❌ | ❌ | ❌ |
 | PCAP / PCAPNG | ✅ SharpPcap | 🟡 via plugin | ❌ | ❌ | ❌ |
 | YARA scanning | ✅ YARA-lite | ✅ | ❌ | ❌ | ✅ |
@@ -104,10 +107,10 @@ Known limits with workarounds: **[LIMITATIONS.md](LIMITATIONS.md)**.
 | Map (EXIF GPS auto-ingest) | ✅ | 🟡 | ❌ | ❌ | ❌ |
 | Communication graph (email → DAG) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Memory forensics | ⬜ planned | 🟡 plugin | ❌ | ❌ | ✅ canonical |
-| Court-ready PDF + DOCX reports | ✅ in-process | ✅ HTML/PDF | ❌ | ❌ | ❌ |
+| PDF + DOCX reports | ✅ in-process | ✅ HTML/PDF | ❌ | ❌ | ❌ |
 | Local AI copilot (BYOM) | ✅ Ollama / LM Studio / OpenAI | ❌ | ❌ | ❌ | ❌ |
 | Workflow DAG runner | ✅ JSON DAG + handlers | 🟡 ingest modules | ❌ | ❌ | 🟡 plugins |
-| Single unified case format | ✅ SQLite + hash-chained custody | ✅ | ❌ | ❌ | ❌ |
+| Single unified case format | ✅ SQLite + tamper-evident custody log | ✅ | ❌ | ❌ | ❌ |
 | Telemetry | ✅ never | ✅ never | ✅ never | ✅ never | ✅ never |
 | Price | Free, forever | Free, forever | Free download, closed | Free | Free |
 
@@ -213,7 +216,7 @@ live on the next release cycle once SignPath signs the Windows exe.
    artifact.
 5. **Export a report** (Reports tool) as PDF or DOCX with cover metadata,
    per-section narrative, embedded exhibit cards, and a full exhibit
-   index — court-ready, no external converters.
+   index — no external converters.
 
 Press **F1** on any tool for a "what it is, when to use it, how" written
 explainer. Press **Ctrl+K** anywhere to open the command palette.

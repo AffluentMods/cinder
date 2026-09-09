@@ -15,6 +15,7 @@ jobs:
   build-and-test:
     name: Build & test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -48,13 +49,19 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test .NET
+        timeout-minutes: 15
         run: dotnet test --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
-      - name: Install Python parser deps
+      # parsers/requirements.txt is the *runtime* venv list PythonBootstrap installs on a
+      # user's machine on demand — libewf, pytsk3, libesedb, libpff, pyaff4, yara-python, all
+      # native builds and several without wheels for current Python. The Python tests here
+      # exercise the JSON-RPC protocol layer and need only pydantic + pytest, so that is what
+      # CI installs. Installing the runtime list in CI was failing on packages the tests never
+      # import, which had been masking the (passing) .NET test result behind a red job.
+      - name: Install Python test deps
         run: |
           python -m pip install --upgrade pip
-          if [ -f parsers/pyproject.toml ]; then pip install -e parsers/[dev]; fi
-          if [ -f parsers/requirements.txt ]; then pip install -r parsers/requirements.txt; fi
+          pip install -e "parsers/[dev]"
         shell: bash
 
       - name: Test Python parsers
@@ -69,9 +76,35 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: "**/*.trx"
 
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore
+      # `dotnet list package --vulnerable` exits 0 even when it finds something, so the
+      # output has to be inspected. SECURITY.md claims a clean audit; this makes that
+      # claim enforced rather than asserted.
+      - name: Fail on vulnerable packages
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee audit.txt
+          # Key on the advisory URL: it appears once per vulnerable package and nowhere else,
+          # unlike the '>' prefix, which also marks every transitive package in other listings.
+          if grep -q 'github.com/advisories' audit.txt; then
+            echo "::error::Vulnerable NuGet packages detected — see the audit output above."
+            exit 1
+          fi
+          echo "No vulnerable packages."
+
   format-check:
     name: Format check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -83,6 +116,7 @@ jobs:
   python-lint:
     name: Python lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

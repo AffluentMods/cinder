@@ -7,5 +7,6 @@ public static class ToolKindHelpers
 {
     public static readonly IValueConverter HasSidecar =
         new global::Cinder.App.Views.Tools.FuncValueConverter<ToolViewModel?, bool>(
-            t => t is SidecarToolViewModel);
+            // IOC match inherits the grid tool but draws its own two-picker header.
+            t => t is SidecarToolViewModel && t.Kind != "ioc");
 }

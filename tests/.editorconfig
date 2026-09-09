@@ -1,0 +1,13 @@
+# Test-project overrides.
+#
+# Test method names are prose, not API surface: `Verify_rejects_a_container_whose_recorded_hash_is_wrong`
+# reads as a sentence in the test runner and in CI output, and appending `Async` to it because
+# the method happens to return a Task adds nothing for a reader and breaks the sentence. The
+# repo-wide async-suffix rule is therefore switched off under tests/ only — it still applies to
+# every production project.
+#
+# Without this the `dotnet format --verify-no-changes --severity warn` job in CI fails on the
+# test suite, which is what had been happening.
+
+[*.cs]
+dotnet_naming_rule.async_methods_end_in_async.severity = none

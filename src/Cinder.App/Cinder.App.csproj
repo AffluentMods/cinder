@@ -109,6 +109,7 @@
     <ProjectReference Include="..\Cinder.Cases\Cinder.Cases.csproj" />
     <ProjectReference Include="..\Cinder.Imaging\Cinder.Imaging.csproj" />
     <ProjectReference Include="..\Cinder.Carving\Cinder.Carving.csproj" />
+    <ProjectReference Include="..\Cinder.Filesystems\Cinder.Filesystems.csproj" />
     <ProjectReference Include="..\Cinder.Workflow\Cinder.Workflow.csproj" />
     <ProjectReference Include="..\Cinder.Plugins\Cinder.Plugins.csproj" />
     <ProjectReference Include="..\Cinder.Native.Windows\Cinder.Native.Windows.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />

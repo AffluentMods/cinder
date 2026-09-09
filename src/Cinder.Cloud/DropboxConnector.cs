@@ -33,8 +33,10 @@ public sealed class DropboxConnector : ICloudConnector
     {
         var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["code"] = authorizationCode, ["grant_type"] = "authorization_code",
-            ["client_id"] = ClientId, ["code_verifier"] = codeVerifier,
+            ["code"] = authorizationCode,
+            ["grant_type"] = "authorization_code",
+            ["client_id"] = ClientId,
+            ["code_verifier"] = codeVerifier,
             ["redirect_uri"] = redirectLoopbackUri,
         });
         using var resp = await _http.PostAsync("https://api.dropboxapi.com/oauth2/token", content, ct).ConfigureAwait(false);

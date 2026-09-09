@@ -47,11 +47,11 @@ public static partial class DocumentReader
             {
                 ".docx" or ".docm" => await Task.Run(() => ExtractDocx(path), ct),
                 ".xlsx" or ".xlsm" => await Task.Run(() => ExtractXlsx(path), ct),
-                ".pptx"            => await Task.Run(() => ExtractPptx(path), ct),
+                ".pptx" => await Task.Run(() => ExtractPptx(path), ct),
                 ".odt" or ".ods" or ".odp" => await Task.Run(() => ExtractOpenDocument(path), ct),
-                ".epub"            => await Task.Run(() => ExtractEpub(path), ct),
-                ".pdf"             => await Task.Run(() => ExtractPdf(path), ct),
-                ".rtf"             => new DocumentExtractResult(StripRtf(await File.ReadAllTextAsync(path, ct)), $"RTF · {info.Length:N0} bytes", true),
+                ".epub" => await Task.Run(() => ExtractEpub(path), ct),
+                ".pdf" => await Task.Run(() => ExtractPdf(path), ct),
+                ".rtf" => new DocumentExtractResult(StripRtf(await File.ReadAllTextAsync(path, ct)), $"RTF · {info.Length:N0} bytes", true),
                 ".html" or ".htm" or ".xml" or ".xhtml"
                                    => new DocumentExtractResult(StripTags(await File.ReadAllTextAsync(path, ct)), $"{ext.TrimStart('.')} · {info.Length:N0} bytes", true),
                 ".txt" or ".md" or ".log" or ".csv" or ".tsv" or ".json" or ".yaml" or ".yml"

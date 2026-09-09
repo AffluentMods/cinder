@@ -35,7 +35,7 @@ public sealed partial class StringsTool
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _statusLine;
 
-    /// <summary>Live substring filter — re-applies as the user types.</summary>
+    /// <summary>Live filter — re-applies as the user types. Meaning depends on <see cref="FilterMode"/>.</summary>
     [ObservableProperty] private string? _filter;
 
     /// <summary>Hide strings that look like compressed-byte coincidence — no letters, mostly punctuation.</summary>
@@ -44,8 +44,67 @@ public sealed partial class StringsTool
     /// <summary>One-line callout above the result grid if the file looks like a container (ZIP, gzip, etc).</summary>
     [ObservableProperty] private string? _containerHint;
 
+    /// <summary>
+    /// How <see cref="Filter"/> is applied: a plain substring, a .NET regex, or one of the
+    /// <see cref="Cinder.Core.Analysis.FeatureExtractor"/> presets (emails, URLs, IPs, card
+    /// numbers, wallet addresses, credential-shaped tokens). The presets are the
+    /// bulk_extractor-style "what identifiers are in this blob" pass every triage starts with.
+    /// </summary>
+    [ObservableProperty] private FilterModeOption _filterMode = FilterModeOption.Substring;
+
+    public IReadOnlyList<FilterModeOption> FilterModes { get; } =
+    [
+        FilterModeOption.Substring,
+        FilterModeOption.Regex,
+        .. Cinder.Core.Analysis.FeatureExtractor.Presets.Select(p => new FilterModeOption(p.Id, p.Name, p.Description)),
+    ];
+
+    /// <summary>Set when the current regex fails to compile; shown instead of a silent empty grid.</summary>
+    [ObservableProperty] private string? _filterError;
+
     partial void OnFilterChanged(string? value) => Reproject();
     partial void OnHideGibberishChanged(bool value) => Reproject();
+    partial void OnFilterModeChanged(FilterModeOption value) => Reproject();
+
+    /// <summary>Writes the currently shown hits (after filter + gibberish toggle) to CSV or JSON.</summary>
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        if (Hits.Count == 0) return;
+        var ext = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase) ? "json" : "csv";
+        var path = await ToolDialog.SaveFileAsync($"Export strings as {ext.ToUpperInvariant()}", $"strings-export.{ext}", ext);
+        if (string.IsNullOrEmpty(path)) return;
+
+        var snapshot = Hits.Cast<object>().ToList();
+        try
+        {
+            var written = await Task.Run(() =>
+            {
+                if (ext == "json")
+                {
+                    using var fs = File.Create(path);
+                    return Cinder.Core.Export.TabularExporter.WriteJson(snapshot, fs);
+                }
+                using var w = new StreamWriter(path, append: false, Encoding.UTF8);
+                return Cinder.Core.Export.TabularExporter.WriteCsv(snapshot, w);
+            }, ct);
+            StatusLine = $"Exported {written:N0} strings → {path}";
+            await ActiveCaseContext.LogAsync(CustodyAction.DataExported, new
+            {
+                Tool = "strings",
+                Format = ext,
+                Path = path,
+                Rows = written,
+                Evidence = Path,
+                Mode = FilterMode.Id,
+                Filter,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Export failed: {ex.Message}";
+        }
+    }
 
     [RelayCommand]
     private async Task PickAsync(CancellationToken ct)
@@ -88,9 +147,64 @@ public sealed partial class StringsTool
     private void Reproject()
     {
         Hits.Clear();
+        FilterError = null;
         var needle = (Filter ?? "").Trim();
-        var hasNeedle = needle.Length > 0;
         var hideJunk = HideGibberish;
+
+        // Build one predicate up front so the per-row loop stays a single call.
+        Func<string, bool> accept;
+        if (FilterMode == FilterModeOption.Regex)
+        {
+            if (needle.Length == 0)
+            {
+                accept = static _ => true;
+            }
+            else
+            {
+                try
+                {
+                    var rx = new System.Text.RegularExpressions.Regex(
+                        needle,
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                        TimeSpan.FromMilliseconds(250));
+                    accept = v =>
+                    {
+                        try { return rx.IsMatch(v); }
+                        catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return false; }
+                    };
+                }
+                catch (ArgumentException ex)
+                {
+                    FilterError = $"Invalid regex: {ex.Message}";
+                    StatusLine = BuildStatus();
+                    return;
+                }
+            }
+        }
+        else if (FilterMode == FilterModeOption.Substring)
+        {
+            accept = needle.Length == 0
+                ? static _ => true
+                : v => v.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        else
+        {
+            var preset = Cinder.Core.Analysis.FeatureExtractor.Find(FilterMode.Id);
+            if (preset is null)
+            {
+                accept = static _ => true;
+            }
+            else if (needle.Length == 0)
+            {
+                accept = preset.IsMatch;
+            }
+            else
+            {
+                // Preset AND substring: "emails containing example.com".
+                accept = v => preset.IsMatch(v) && v.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+        }
+
         var shown = 0;
         foreach (var h in _all)
         {
@@ -98,7 +212,7 @@ public sealed partial class StringsTool
             {
                 continue;
             }
-            if (hasNeedle && h.Value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+            if (!accept(h.Value))
             {
                 continue;
             }
@@ -295,6 +409,14 @@ public sealed partial class StringsTool
 }
 
 public sealed record StringHit(long Offset, string Encoding, string Value);
+
+/// <summary>One entry in the Strings tool's filter-mode picker.</summary>
+public sealed record FilterModeOption(string Id, string Label, string Description)
+{
+    public static readonly FilterModeOption Substring = new("substring", "Contains text", "Case-insensitive substring");
+    public static readonly FilterModeOption Regex = new("regex", "Regex", ".NET regular expression, case-insensitive");
+    public override string ToString() => Label;
+}
 
 // =====================================================================================
 // DOCUMENTS — pick + read text-ish files.
@@ -504,6 +626,23 @@ public sealed partial class HashSetsTool
 
     public IReadOnlyList<string> Algorithms { get; } = ["md5", "sha1", "sha256", "blake3"];
 
+    public HashSetsTool()
+    {
+        // Reopen the database the examiner picked last time, so lookups and the Filesystem
+        // walk's verdicts work without re-picking after every launch.
+        try
+        {
+            var saved = new SettingsStore().Load().HashSetDatabase;
+            if (!string.IsNullOrEmpty(saved) && File.Exists(saved))
+            {
+                _service = new HashSetService(saved);
+                DatabasePath = saved;
+                StatusLine = $"DB ready: {saved}";
+            }
+        }
+        catch { /* first launch or unreadable settings — pick manually */ }
+    }
+
     [RelayCommand]
     private async Task PickDatabaseAsync(CancellationToken ct)
     {
@@ -515,6 +654,10 @@ public sealed partial class HashSetsTool
             _service = new HashSetService(path);
             DatabasePath = path;
             StatusLine = $"DB ready: {path}";
+
+            // Remember it: the Filesystem tool reads this to hand out Known / Unknown verdicts.
+            var store = new SettingsStore();
+            store.Save(store.Load() with { HashSetDatabase = path });
             _ = ct;
         }
         catch (Exception ex)
@@ -1100,31 +1243,204 @@ public sealed partial class VerifyTool
     [ObservableProperty] private string? _resultText;
     [ObservableProperty] private string? _statusLine;
 
+    /// <summary>
+    /// Re-hashes an image and compares the result against a reference digest.
+    ///
+    /// <para>Runs entirely in-process. For an EWF container the reference is the acquisition
+    /// hash recorded inside the container itself; for a raw image it's a <c>.sha256</c> /
+    /// <c>.md5</c> companion file if one sits beside it.</para>
+    ///
+    /// <para>The three outcomes are kept distinct on purpose. "Verified" means a reference
+    /// existed and matched; "mismatch" means one existed and did not; "unverifiable" means
+    /// there was nothing to compare against. Collapsing the third case into a boolean is how a
+    /// tool ends up showing a red ✗ for an image that is merely missing a recorded hash — or,
+    /// worse, a green ✓ for one that was never actually checked.</para>
+    /// </summary>
     [RelayCommand]
     private async Task PickAndRunAsync(CancellationToken ct)
     {
         var path = await ToolDialog.PickFileAsync("Pick image to verify");
         if (string.IsNullOrEmpty(path)) return;
+
         ImagePath = path;
-        StatusLine = "Verifying…";
+        ResultText = null;
+        StatusLine = "Verifying — re-reading the whole image…";
         try
         {
-            var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
-            var verifier = new ImageVerifier(() => SidecarDiskImager.DefaultSidecar(parsers));
-            var r = await verifier.VerifyAsync(path, ct: ct);
-            ResultText = $"""
-                Match: {r.Match}
-                Expected SHA-256: {r.ExpectedSha256 ?? "—"}
-                Actual   SHA-256: {r.ActualSha256 ?? "—"}
-                Bytes verified: {r.BytesVerified:N0}
-                """;
-            StatusLine = r.Match ? "✓ verified" : "⚠ mismatch";
+            if (EvidenceOpener.IsEwf(path))
+            {
+                await VerifyEwfAsync(path, ct);
+            }
+            else
+            {
+                await VerifyRawAsync(path, ct);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Cancelled.";
         }
         catch (Exception ex)
         {
+            ResultText = null;
             StatusLine = $"Failed: {ex.Message}";
         }
     }
+
+    private async Task VerifyEwfAsync(string path, CancellationToken ct)
+    {
+        using var reader = Cinder.Imaging.Ewf.EwfReader.Open(path);
+        var progress = new Progress<long>(b => StatusLine = $"Verifying — {b:N0} bytes read…");
+        var r = await reader.VerifyAsync(progress, ct);
+
+        ResultText = $"""
+            Source            : EWF container, {reader.SegmentCount} segment(s)
+            Bytes verified    : {r.BytesVerified:N0}
+            Damaged chunks    : {r.DamagedChunkCount:N0}
+
+            Recorded MD5      : {r.ExpectedMd5 ?? "— none recorded —"}
+            Computed MD5      : {r.ComputedMd5}
+            Recorded SHA-1    : {r.ExpectedSha1 ?? "— none recorded —"}
+            Computed SHA-1    : {r.ComputedSha1}
+
+            {r.Summary()}
+            """;
+
+        StatusLine = r.Md5Match is null && r.Sha1Match is null
+            ? "⚠ unverifiable — container records no acquisition hash"
+            : r.Verified ? "✓ verified against the acquisition hash" : "✗ VERIFICATION FAILED";
+
+        // A verification is the custody event that matters most — record the digests and the
+        // verdict, not just that the tool ran.
+        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        {
+            Image = path,
+            Container = "ewf",
+            reader.SegmentCount,
+            r.BytesVerified,
+            r.ExpectedMd5,
+            r.ComputedMd5,
+            r.ExpectedSha1,
+            r.ComputedSha1,
+            r.DamagedChunkCount,
+            Verdict = r.Summary(),
+        }, ct);
+    }
+
+    private async Task VerifyRawAsync(string path, CancellationToken ct)
+    {
+        var hashes = new HashService();
+        var progress = new Progress<long>(b => StatusLine = $"Verifying — {b:N0} bytes read…");
+        var computed = await hashes.ComputeFileAsync(
+            path,
+            [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256],
+            progress,
+            ct);
+
+        var (reference, referenceSource) = ReadCompanionDigest(path);
+
+        string verdict;
+        if (reference is null)
+        {
+            verdict = "Unverifiable — no .sha256 / .md5 companion file found next to the image. " +
+                      "The digests above are this run's measurement, not a check against a reference.";
+            StatusLine = "⚠ unverifiable — no reference digest available";
+        }
+        else
+        {
+            var match =
+                string.Equals(reference, computed.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reference, computed.Md5, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reference, computed.Sha1, StringComparison.OrdinalIgnoreCase);
+
+            verdict = match
+                ? $"Verified — matches the digest in {referenceSource}."
+                : $"VERIFICATION FAILED — {referenceSource} expects {reference}, which matches none of the computed digests.";
+            StatusLine = match ? "✓ verified against companion digest" : "✗ VERIFICATION FAILED";
+        }
+
+        ResultText = $"""
+            Source            : raw image
+            Bytes verified    : {computed.BytesHashed:N0}
+
+            Reference digest  : {reference ?? "— none found —"}{(referenceSource is null ? "" : $"  ({referenceSource})")}
+            Computed MD5      : {computed.Md5}
+            Computed SHA-1    : {computed.Sha1}
+            Computed SHA-256  : {computed.Sha256}
+
+            {verdict}
+            """;
+
+        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        {
+            Image = path,
+            Container = "raw",
+            computed.BytesHashed,
+            computed.Md5,
+            computed.Sha1,
+            computed.Sha256,
+            Reference = reference,
+            ReferenceSource = referenceSource,
+            Verdict = verdict,
+        }, ct);
+    }
+
+    /// <summary>
+    /// Looks for a digest recorded alongside the image — either <c>image.ext.sha256</c> style
+    /// companions or a <c>SHA256SUMS</c>-style line naming the file. Returns the hex digest and
+    /// the file it came from, or (null, null) when there is nothing to compare against.
+    /// </summary>
+    private static (string? Digest, string? Source) ReadCompanionDigest(string imagePath)
+    {
+        var dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(imagePath)) ?? ".";
+        var name = System.IO.Path.GetFileName(imagePath);
+
+        foreach (var suffix in new[] { ".sha256", ".sha1", ".md5" })
+        {
+            foreach (var candidate in new[] { imagePath + suffix, System.IO.Path.Combine(dir, System.IO.Path.GetFileNameWithoutExtension(imagePath) + suffix) })
+            {
+                if (!File.Exists(candidate))
+                {
+                    continue;
+                }
+                var first = File.ReadLines(candidate).FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(first))
+                {
+                    continue;
+                }
+                // Both "<digest>" and "<digest>  <filename>" forms.
+                var token = first.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+                if (IsHexDigest(token))
+                {
+                    return (token!.ToLowerInvariant(), System.IO.Path.GetFileName(candidate));
+                }
+            }
+        }
+
+        foreach (var sums in new[] { "SHA256SUMS", "SHA256SUMS.txt", "MD5SUMS", "MD5SUMS.txt" })
+        {
+            var candidate = System.IO.Path.Combine(dir, sums);
+            if (!File.Exists(candidate))
+            {
+                continue;
+            }
+            foreach (var line in File.ReadLines(candidate))
+            {
+                var parts = line.Split([' ', '\t', '*'], StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 &&
+                    IsHexDigest(parts[0]) &&
+                    string.Equals(System.IO.Path.GetFileName(parts[^1]), name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (parts[0].ToLowerInvariant(), sums);
+                }
+            }
+        }
+
+        return (null, null);
+    }
+
+    private static bool IsHexDigest(string? s) =>
+        s is { Length: 32 or 40 or 64 } && s.All(Uri.IsHexDigit);
 }
 
 public sealed partial class MountTool
@@ -1146,6 +1462,12 @@ public sealed partial class MountTool
             var handle = await m.MountReadOnlyAsync(path, ct);
             MountedAt = handle.MountPoint;
             StatusLine = $"Mounted at {handle.MountPoint}";
+            await ActiveCaseContext.LogAsync(CustodyAction.EvidenceMounted, new
+            {
+                Image = path,
+                handle.MountPoint,
+                ReadOnly = true,
+            }, ct);
         }
         catch (Exception ex)
         {

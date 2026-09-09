@@ -7,6 +7,245 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Correctness and evidence-integrity pass, followed by the features a competitive
+gap analysis showed every established tool has and Cinder lacked.
+
+### Added — analysis & workflow
+
+- **Export from every grid.** Every parser tool gains Export CSV / Export JSON
+  (`TabularExporter`): exactly the columns shown, string cells guarded against
+  spreadsheet formula injection (a filename in evidence starting with `=` is a
+  realistic thing to find), numbers left raw. The Strings tool exports too.
+- **Timeline export in ecosystem formats.** Timesketch JSONL and CSV
+  (`message` / `datetime` / `timestamp_desc` plus source, user, tags) and the
+  Sleuth Kit bodyfile that `mactime`, Autopsy and Plaso read. Writes every event
+  matching the current filter, not just the 5,000 the grid shows.
+- **ATT&CK auto-tagging on the timeline.** `MitreTagger` tags events where the
+  mapping is defensible: Security event ids (4624 → T1078, 4625 → T1078 + T1110,
+  4698 → T1053.005, 7045 → T1543.003, 4720 → T1136.001, 1102 → T1070.001,
+  4719 → T1562.002, 5145 → T1021.002, 1149 → T1021.001 …), Sysmon
+  (8 → T1055, 10 on lsass → T1003.001, 12/13/14 → T1112), PowerShell
+  script-block logging (4104 → T1059.001), Prefetch/UserAssist → TA0002,
+  Recycle Bin → T1070.004. A generic 4688 is deliberately untagged. New
+  ATT&CK filter box with id suggestions, and an ATT&CK column in the grid.
+- **Strings feature presets.** Filter modes: substring, regex (with match
+  timeout), or a bulk_extractor-style preset — email, URL, IPv4/IPv6, domain,
+  Luhn-checked payment cards, phone, Bitcoin/Ethereum, MD5/SHA-1/SHA-256,
+  Windows/UNC paths, MAC, JWT, AWS key id, private-key block, Base64 (must
+  decode). Preset + text narrows within the preset. Invalid regexes are shown,
+  not swallowed.
+- **Deleted-file recovery on NTFS.** The Filesystem tool walks the $MFT for
+  records no longer in use and appends them with `IsDeleted = true` — name,
+  size, all four timestamps, MFT index and sequence — under a `[deleted]/`
+  path. Names and times only; contents are the carver's job, and the help
+  text says so.
+- **The custody log now records examiner actions.** Previously only case
+  creation and manual hashing were logged. Now: case opened (machine, Cinder
+  version), every parser run (tool, evidence, row count, whether truncated),
+  every image verification (recorded and computed digests, verdict), mounts,
+  data exports and report exports. `ActiveCaseContext.LogAsync` from anywhere;
+  no-op without a case, never throws.
+- **Filesystem walker moved into `Cinder.Filesystems` and tested against a real
+  volume.** `DiscUtilsWalker` now owns detection (ISO / NTFS / FAT / ext / whole
+  disk by partition), live enumeration with all timestamps, NTFS deleted-entry
+  recovery, and optional hashing. The Filesystem tool is a thin mapper over it.
+  Tests walk a checked-in 8 MiB NTFS image (`tests/fixtures/`, built by
+  `tools/ntfs-fixture-gen` on Windows — DiscUtils can only *format* NTFS where
+  `SecurityIdentifier` exists) — the first parser in Cinder with a
+  deterministic fixture, and the read path is verified on Linux as well as
+  Windows. The whole suite was run under WSL Ubuntu; settings 0600, executable
+  resolution and snapshot enumeration were probed there too.
+- **Known-good filtering.** Settings ▸ Hash sets: point at the NSRL database from
+  the Hash sets tool and turn on "Hash files during filesystem enumeration". Every
+  file gets a SHA-1 and a Verdict column (Known / Notable / Unknown); type
+  `Unknown` in the new row filter and operating-system noise drops out. Size cap
+  and total-bytes budget, skipped files say why. The Hash sets tool remembers
+  its database across launches.
+- **Row filter on every grid.** Substring across all columns; export writes what
+  the filter shows.
+- **Bookmarks → exhibits.** "Bookmark selected" on any grid and on the timeline
+  stores the row (as JSON, so it survives column changes), the tool, the evidence
+  path and a note in the case file (`bookmarks` table, schema v2, migrated on
+  first use) and writes a custody annotation. Reports ▸ "Load bookmarks" turns
+  them into a numbered Exhibits section with an index, in PDF / DOCX / HTML / MD.
+- **IOC match tool.** Pick an indicator list (one per line; hashes, IPs, domains,
+  URLs, emails, free text — classified by shape, CSV rows tolerated) and a
+  folder. Matches four ways at once: file hashes (MD5/SHA-1/SHA-256), file paths,
+  file contents through the YARA-lite Aho-Corasick scanner in both ASCII and
+  UTF-16LE, and every timeline event the ingester can pull from the folder.
+  Bounded (256 MB hash / 512 MB content / 200k files / 50k hits) and says so.
+
+### Fixed — critical
+
+- **Hex search never terminated.** `HexSearch.Search` relied on getting a short
+  read to exit its window loop, but no `IHexBuffer` implementation ever returns
+  one. At the tail of every buffer the window shrank to the overlap size, the
+  advance went to zero, and the loop spun forever. Any search finding fewer than
+  the caller's hit cap — the ordinary case — pinned a threadpool thread at 100%
+  and never produced a result, so find-in-hex-viewer did not work at all. The
+  loop now terminates on scanning through to the end offset, refuses a
+  non-positive advance, and fills its window across short reads. Boundary-
+  spanning matches are reported exactly once.
+- **`dotnet test` aborted instead of running.** The above hung the test host
+  ("Test host process crashed"), so the whole solution's test run aborted and CI
+  had no usable signal. The suite now completes; every `HexSearch` test carries
+  a timeout so a regression of that shape fails red rather than wedging the run.
+- **A damaged E01 chunk silently truncated the image.** `EwfReader.ReadChunk`
+  returned a short buffer when a chunk failed to inflate; `EwfStream` turned
+  that into a read of 0, which every caller — the hasher, the carver, the
+  signature scanner — correctly read as end-of-media. A partially-read image
+  therefore produced a clean-looking result over a fraction of the evidence.
+  Damaged chunks are now zero-filled to their declared length and reported via
+  `EwfReader.DamagedChunks`; the stream always yields the full media size.
+
+### Fixed — evidence integrity
+
+- **E01 hashes were displayed but never verified.** The Filesystem tool rendered
+  the MD5 / SHA-1 recorded *inside* an E01 into its metadata row, where it reads
+  as a verification result. It is not — it is an assertion made by whatever
+  wrote the container. The row is now labelled `recorded (UNVERIFIED)` and points
+  at the Verify tool.
+- **Image verify now works without Python.** `VerifyTool` routed through a
+  sidecar requiring `libewf-python`, which is not shipped, so it failed for
+  everyone. Replaced with in-process verification: `EwfReader.VerifyAsync`
+  re-reads the decoded media and compares against the container's recorded
+  digests; raw images compare against a `.sha256` / `.sha1` / `.md5` companion
+  or a `SHA256SUMS` entry. "No reference digest available" is now reported as
+  **unverifiable** rather than collapsing into a boolean — a container that
+  records no hash must not render the same as one that failed, or as one that
+  passed.
+- **Truncated artifact views announced themselves.** Parsers cap how many rows
+  they materialize (5k–100k depending on the artifact). Hitting that cap was
+  silent, so a grid showing 25,000 of 200,000 registry values looked identical
+  to a complete one. Tools now set `IsTruncated`, the status line says so, and
+  the grid carries a banner. The registry walker also reports truncation caused
+  by its key-depth limit.
+- **Slack / unallocated carving produced nothing.** `SlackUnallocCarver`'s slice
+  reported `CanSeek == false`, and the carver's extraction path returned an
+  empty blob for non-seekable input — so every hit in a slack region was
+  reported with length 0 and never written. The slice is now seekable when the
+  underlying image is, and the carver carves from its window rather than
+  returning nothing when it isn't.
+
+### Security
+
+Findings from the pre-release audit. Full write-up in SECURITY.md.
+
+- **Helper binaries were resolved by bare name (High).** ~20 `Process.Start` sites passed
+  `python.exe`, `powershell.exe`, `vssadmin.exe`, `lsblk`, `blockdev`, `zfs` and the eight
+  Python sidecar factories as bare names. Windows resolves those against the directory the
+  running executable was loaded from, ahead of the system directory and ahead of PATH. Cinder
+  ships as a portable single-file exe that examiners keep next to their case files and it
+  processes adversary-authored data, so a `python.exe` dropped beside `Cinder.exe` ran instead
+  of the real interpreter — as Administrator, per the install instructions. Verified with a
+  probe executable, not inferred: the planted binary ran. All sites now route through
+  `Cinder.Core.Diagnostics.ExecutableResolver`, which never searches the application or working
+  directory. (The current directory turned out *not* to be searched — safe process search mode
+  is on — so only the application-directory half of the documented order was exploitable.)
+- **Case-bundle extraction cap counted attacker-declared bytes (Medium).** `EncryptedBundle`
+  summed `ZipArchiveEntry.Length` against its 32 GB ceiling, then extracted unbounded. A
+  crafted bundle could declare almost nothing per entry and inflate arbitrarily. Extraction is
+  now a counting copy that aborts on real bytes and deletes the partial file.
+- **settings.json was world-readable on Linux/macOS (Medium).** It holds the AI provider API
+  key, and the non-Windows key derivation uses machine + user name — so anyone who could read
+  the file could also reproduce the key. Now created 0600 on Unix.
+- **OAuth loopback flow has no `state` parameter (Medium, not fixed).** Documented in
+  SECURITY.md rather than patched: the connectors' token exchange is unfinished and
+  unreachable, and this belongs with the work that completes it.
+
+Verified clean during the audit: no secrets in the working tree or git history; zero vulnerable
+NuGet packages across 29 projects; XXE closed on every `XmlReader`; no `BinaryFormatter`;
+zip-slip guard correct; `ArgumentList` used throughout with no shell string building.
+
+### Fixed — hostile input
+
+`EwfReader` parses attacker-controlled data by definition. Each of these was
+reachable by opening a crafted `.E01`:
+
+- Table sections declaring more entries than the section can hold caused either
+  a multi-gigabyte allocation or an out-of-range read. Entry counts are now
+  checked against the section that declares them, and capped.
+- Section sizes were used unvalidated: negative, int-truncating, and
+  past-end-of-file values all got through. Sizes are now bounded and checked
+  against the file.
+- A section chain whose `next` pointers formed a cycle looped the parser
+  forever; only the trivial self-loop was caught. The chain must now make
+  forward progress, with a hop ceiling as backstop.
+- `header2` decompression was an unbounded `CopyTo` — a zlib bomb in the case
+  metadata was an OOM before any evidence was read. Now capped.
+- Chunk offsets were used verbatim as stream positions without a bounds check.
+- Volume geometry (bytes-per-sector, sectors-per-chunk) was adopted unvalidated,
+  so a container could dictate a multi-gigabyte chunk buffer or a divide-by-zero.
+- A corrupt compressed chunk could inflate past its own extent into the
+  following chunk's bytes. Decompression is now bounded to the chunk.
+
+### Fixed — other
+
+- `parsers/requirements.txt` pinned `pyaff4>=1.0`, a version that has never
+  existed (PyPI tops out at 0.34). pip stopped at that line, so PythonBootstrap
+  could not create the sidecar venv on any machine, and CI's Python step had
+  been red for the same reason while the .NET results underneath it passed.
+  Removed — `imager_worker.py` lists AFF4 as a TODO and imports nothing from
+  it. CI now installs only what the Python tests need (`pydantic` + `pytest`).
+- Serilog pinned to 4.3.0, which `Serilog.Extensions.Hosting 10.0.0` requires.
+- PCAP parsing looped forever on a truncated or corrupt capture: a non-`PacketRead`
+  status other than `NoRemainingPackets` hit `continue` and repeated indefinitely.
+- `EwfReader.Open` and the Filesystem tool's E01 path leaked one open file handle
+  per segment on every load.
+- `HexSearch.DecodeHex` did an unbounded `stackalloc` sized from the user's query
+  string — a long pasted query overflowed the stack.
+- `EwfReader.DiscoverSegments` had an unreachable-branch `if/else` that always
+  broke, and appended `.EAA`-style segments to chains that had not filled all 99
+  numeric slots.
+
+### Changed
+
+- **File carver is substantially faster.** Signature matching used a scalar
+  byte-by-byte compare across every signature for every offset — roughly
+  `window × signatures × headerLength` operations per 4 MiB window, which made a
+  whole-disk carve impractical. Now uses vectorized `Span.IndexOf`.
+- **Carver no longer emits duplicate hits.** The retained overlap tail was
+  re-scanned without tracking which window owned a hit, so any header landing in
+  the last `maxHeaderLength` bytes of a window was reported twice.
+
+### Added — tests
+
+110 tests, up from 40; `dotnet test` exits clean.
+
+- `Cinder.Imaging.Tests` (new, 24 tests) — synthetic EWF container builder
+  covering round-trip of compressed and uncompressed media, partial final
+  chunks, seek/partial reads, verification pass / fail / unverifiable, damaged
+  chunk handling, segment discovery, `EvidenceOpener` routing, and every
+  hostile-input case listed above.
+- `Cinder.Carving.Tests` (new, 18 tests) — window-boundary straddling and
+  duplicate suppression, objects extending past their window, footer trimming,
+  validator rejection, short-read and non-seekable streams, slack-region offset
+  translation.
+- `Cinder.Hex.Tests` expanded 6 → 20 — termination, boundary spanning, mmap
+  search against a real file, short-read buffers, start/end offsets, oversized
+  and malformed queries, cancellation, regex.
+- `Cinder.Core.Tests` 33 → 47 — `ExecutableResolverTests` asserts the negative
+  property that matters (a binary planted in the application directory is never
+  selected); `EncryptedBundleTests` seals deliberately malformed archives through
+  the production framing to cover zip-slip and unbounded inflation.
+
+### Documentation
+
+- **SECURITY.md** — new section stating plainly what the chain-of-custody log
+  does and does not prove. It is tamper-evident against modification of an
+  existing log; it is not tamper-proof, because the hash is unkeyed and stored
+  in the same file as the entries it protects, so anyone who can write that file
+  can recompute the whole chain. Records the three tracked options for adding an
+  external anchor. Same caveat added to `CustodyLog`'s own docs and to
+  LIMITATIONS.md.
+- **README** — corrected claims that overstated the current state: the Windows
+  artifact suite is marked unverified against reference tools (no parity tests
+  exist yet), imaging is "read + verify" rather than implying acquisition,
+  "court-ready" dropped from report descriptions, and the custody format
+  described as tamper-evident.
+- **LIMITATIONS.md** — DOCX entry was stale (real OpenXml export has shipped);
+  replaced with the actual remaining gap, PDF/A conformance.
+
 ## [0.2.2] — 2026-09-09
 
 The "cross-artifact + memory + PST + updates" release. v0.2.1 shipped

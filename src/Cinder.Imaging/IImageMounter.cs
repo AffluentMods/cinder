@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.Imaging;
 
@@ -65,7 +66,7 @@ public sealed class LinuxLoopMounter(string mountRoot) : IImageMounter
 
     private static async Task<string> RunCaptureAsync(string file, IReadOnlyList<string> args, CancellationToken ct)
     {
-        var psi = new System.Diagnostics.ProcessStartInfo(file)
+        var psi = new System.Diagnostics.ProcessStartInfo(ExecutableResolver.ResolveRequired(file))
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -148,7 +149,7 @@ public sealed class WindowsImageMounter(string parsersDir) : IImageMounter
     /// </summary>
     private static async Task<string> RunPowerShellAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
     {
-        var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe")
+        var psi = new System.Diagnostics.ProcessStartInfo(ExecutableResolver.ResolveRequired("powershell.exe"))
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

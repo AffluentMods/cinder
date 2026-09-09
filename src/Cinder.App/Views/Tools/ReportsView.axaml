@@ -55,6 +55,16 @@
                         <TextBlock Text="EXPORT" FontWeight="600"
                                    FontSize="{DynamicResource CinderFontSizeXs}"
                                    Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <!-- Bookmarks → exhibits. Loaded from the open case on demand so the
+                             report reflects findings flagged after the tool was opened. -->
+                        <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                            <Button Grid.Column="0" Content="Load bookmarks" Command="{Binding LoadBookmarksCommand}" Margin="2" />
+                            <CheckBox Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                      IsChecked="{Binding IncludeBookmarks}" Content="as exhibits" />
+                        </Grid>
+                        <TextBlock Text="{Binding BookmarkSummary}" TextWrapping="Wrap"
+                                   FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" Margin="2,0,2,6" />
                         <UniformGrid Rows="2" Columns="3">
                             <Button Content="Markdown" Command="{Binding ExportCommand}" CommandParameter="md"   Margin="2" />
                             <Button Content="HTML"     Command="{Binding ExportCommand}" CommandParameter="html" Margin="2" />

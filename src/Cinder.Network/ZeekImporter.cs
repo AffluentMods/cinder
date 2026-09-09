@@ -12,12 +12,12 @@ namespace Cinder.Network;
 public sealed class ZeekImporter
 {
     public IAsyncEnumerable<TcpFlow> ImportConnLog(string path, CancellationToken ct = default)
-        => ImportTsv<TcpFlow>(path, ct, RowToFlow);
+        => ImportTsvAsync<TcpFlow>(path, ct, RowToFlow);
 
     public IAsyncEnumerable<DnsQuery> ImportDnsLog(string path, CancellationToken ct = default)
-        => ImportTsv<DnsQuery>(path, ct, RowToDns);
+        => ImportTsvAsync<DnsQuery>(path, ct, RowToDns);
 
-    private static async IAsyncEnumerable<T> ImportTsv<T>(string path, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct, Func<IReadOnlyDictionary<string, string>, T?> map)
+    private static async IAsyncEnumerable<T> ImportTsvAsync<T>(string path, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct, Func<IReadOnlyDictionary<string, string>, T?> map)
     {
         using var reader = new StreamReader(path);
         var headers = new List<string>();

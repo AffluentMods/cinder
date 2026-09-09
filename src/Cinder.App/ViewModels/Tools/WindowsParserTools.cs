@@ -19,6 +19,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using Microsoft.Data.Sqlite;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.App.ViewModels.Tools;
 
@@ -26,18 +27,28 @@ namespace Cinder.App.ViewModels.Tools;
 
 public sealed partial class RegistryTool
 {
+    /// <summary>Rows the grid will materialize before it stops. See <see cref="ToolViewModel"/>.</summary>
+    private const int RowBudget = 25_000;
+
+    /// <summary>Key nesting depth walked. Deeper keys exist but are not enumerated.</summary>
+    private const int DepthBudget = 8;
+
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         // Registry parsing is CPU-bound on big hives (50–500 MB SOFTWARE), so hand off
         // to the thread pool and only marshal individual rows back to the UI thread.
-        var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
+        var result = await Task.Run(() => Parse(evidencePath, ct), ct);
+        foreach (var r in result.Rows)
         {
             Rows.Add(r);
         }
+
+        // The budgets above mean a large hive is shown as a prefix. Flag that rather than
+        // letting the grid imply it holds the whole hive.
+        IsTruncated = result.Truncated;
     }
 
-    private static List<object> Parse(string path, CancellationToken ct)
+    private static (List<object> Rows, bool Truncated) Parse(string path, CancellationToken ct)
     {
         var hive = new global::Registry.RegistryHive(path)
         {
@@ -45,16 +56,28 @@ public sealed partial class RegistryTool
         };
         hive.ParseHive();
         var rows = new List<object>(capacity: 4096);
-        Walk(hive.Root, rows, ct, depthBudget: 8, rowBudget: 25_000);
-        return rows;
+        var truncated = false;
+        Walk(hive.Root, rows, ct, DepthBudget, RowBudget, ref truncated);
+        return (rows, truncated);
     }
 
     private static void Walk(global::Registry.Abstractions.RegistryKey? key,
                              List<object> rows, CancellationToken ct,
-                             int depthBudget, int rowBudget)
+                             int depthBudget, int rowBudget, ref bool truncated)
     {
-        if (key is null || depthBudget < 0 || rows.Count >= rowBudget)
+        if (key is null)
         {
+            return;
+        }
+        if (depthBudget < 0)
+        {
+            // Keys below the depth limit exist but were not walked — still a partial view.
+            truncated = true;
+            return;
+        }
+        if (rows.Count >= rowBudget)
+        {
+            truncated = true;
             return;
         }
         ct.ThrowIfCancellationRequested();
@@ -62,7 +85,11 @@ public sealed partial class RegistryTool
         // Emit a row per value at this key.
         foreach (var v in key.Values)
         {
-            if (rows.Count >= rowBudget) return;
+            if (rows.Count >= rowBudget)
+            {
+                truncated = true;
+                return;
+            }
             rows.Add(new
             {
                 Key = key.KeyPath,
@@ -75,7 +102,7 @@ public sealed partial class RegistryTool
 
         foreach (var child in key.SubKeys)
         {
-            Walk(child, rows, ct, depthBudget - 1, rowBudget);
+            Walk(child, rows, ct, depthBudget - 1, rowBudget, ref truncated);
         }
     }
 
@@ -93,10 +120,7 @@ public sealed partial class EventLogTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 100_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -149,10 +173,7 @@ public sealed partial class PrefetchTool
             }
             return list;
         }, ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 5_000);
     }
 
     private static void ParseOne(string path, List<object> rows)
@@ -215,10 +236,7 @@ public sealed partial class LnkTool
             }
             return list;
         }, ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 10_000);
     }
 
     private static void ParseOne(string path, List<object> rows)
@@ -280,10 +298,7 @@ public sealed partial class JumplistsTool
             }
             return list;
         }, ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 20_000);
     }
 
     private static void ParseOne(string path, List<object> rows)
@@ -367,10 +382,7 @@ public sealed partial class BrowserHistoryTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 100_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -640,10 +652,7 @@ public sealed partial class AmcacheTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 25_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -683,10 +692,7 @@ public sealed partial class ShimcacheTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 25_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -807,10 +813,7 @@ public sealed partial class EmailTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 50_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -1099,6 +1102,10 @@ pff.close()
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Cinder", "venv", "Scripts", "python.exe");
         if (File.Exists(local)) return local;
-        return OperatingSystem.IsWindows() ? "python.exe" : "python3";
+
+        // Absolute path, not a bare name — see ExecutableResolver for why that matters here.
+        return ExecutableResolver.ResolveRequired(
+            OperatingSystem.IsWindows() ? "python.exe" : "python3",
+            "Install Python 3.12+ and make sure it is on PATH.");
     }
 }

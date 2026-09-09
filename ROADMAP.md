@@ -72,7 +72,10 @@ Not in the original plan; landed alongside Phase 1.
 - ✅ **Strings tool live-filter + container-format detection** — type to
   filter, "Hide gibberish" toggle suppresses compressed-byte coincidence,
   HEADS-UP banner explains when the file is a ZIP/gzip/PDF/etc.
-  Double-click a row → jump to the byte in the Hex viewer.
+  Double-click a row → jump to the byte in the Hex viewer. Filter
+  modes: substring, regex, or a feature preset (email, URL, IP, Luhn
+  card numbers, wallets, hashes, paths, JWT/AWS/private-key tokens,
+  Base64). CSV / JSON export.
 - ✅ **Documents tool real extraction** — DOCX/DOCM, XLSX/XLSM, PPTX,
   ODT/ODS/ODP, EPUB, RTF, PDF (via PdfPig), HTML/XML, and 20+
   plain-text/code formats. ZIP-based formats parse the inner XML
@@ -102,6 +105,10 @@ copies are placeholders until the platform-specific drivers ship.
   need pytsk3 sidecar (tracked).
 - ✅ File carver — header+footer scan via `Cinder.Carving.FileCarver`
   with 30+ default signatures.
+- ✅ Deleted-file recovery (NTFS) — $MFT walk of not-in-use records
+  surfaces name, size, MAC/creation times, MFT index and sequence as
+  `IsDeleted` rows. Names and timestamps only; contents via the carver.
+  $UsnJrnl / $LogFile parsing still tracked.
 
 ## Phase 4 — Windows artifacts ✅ (most) / 🟡 (some)
 
@@ -173,7 +180,9 @@ libraries do the heavy lifting in-process.
   NTUSER UserAssist last-execution, Chromium + Firefox browser history,
   .eml/.msg Date headers, $I recycle-bin deletions with owning SID.
   Sort + histogram + range filter + user filter + text-contains filter
-  all work on the merged view.
+  all work on the merged view. Events are ATT&CK-tagged on ingest
+  (`MitreTagger`) and filterable by technique/tactic id. Export to
+  Timesketch JSONL / CSV and Sleuth Kit bodyfile.
 - ✅ Map — auto-ingest from a folder of images. MetadataExtractor pulls
   every photo's EXIF GPS, plots one point per geo-tagged image with
   filename + mtime. Manual add still available for non-image evidence.
@@ -185,7 +194,14 @@ libraries do the heavy lifting in-process.
   `src/Cinder.Search/` with `ImportNsrlMinimalCsv` (~200k rows/sec on
   a typical SSD) + `Lookup(algorithm, digest)`. HashSetsTool exposes
   PickDatabase / ImportNsrl / Lookup commands. SQLite-backed so
-  100M-row NSRL RDS imports stream in without RAM pressure.
+  100M-row NSRL RDS imports stream in without RAM pressure. Wired into
+  the Filesystem walk (Settings ▸ Hash sets): per-file SHA-1 + Known /
+  Notable / Unknown verdict, so the row filter is the known-good filter.
+- ✅ IOC match — indicator list × folder: file hashes, paths, contents
+  (ASCII + UTF-16LE via YARA-lite), timeline events. Bounded, exportable.
+- ✅ Bookmarks — flag any grid row or timeline event with a note; stored
+  in the case file (schema v2) and echoed to custody; Reports turns them
+  into a numbered Exhibits section.
 - ✅ YARA-lite — in-house parser + Aho-Corasick matcher. Loads `.yar`
   files, parses the common `rule { meta: strings: condition: }` grammar
   (literal `"strings"`, `nocase`, hex `{ 4D 5A }` patterns; condition
@@ -214,7 +230,11 @@ libraries do the heavy lifting in-process.
   page. DOCX: structurally valid Word document with title page,
   per-section bodies (paragraphs + bullets), exhibit cards, exhibit
   index table, and proper Office core properties.
-- ✅ Custody chain view — fully working.
+- ✅ Custody chain view — fully working. The log records case open,
+  every parser run (tool / evidence / rows / truncated), verifications
+  with digests and verdict, mounts, data and report exports, manual
+  hashes. Tamper-evident, not tamper-proof — see SECURITY.md.
+- ✅ Export — CSV / JSON from every artifact grid and from Strings.
 - ✅ Case create / open / branch — working.
 - ✅ Workflows — JSON DAG loader + topological executor. Built-in
   handlers: `open-image`, `hash`, `registry`, `fs-enumerate`, `carve`,

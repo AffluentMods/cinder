@@ -18,6 +18,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.App.Services;
 
@@ -142,7 +143,13 @@ public static class Vol3Runner
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Cinder", "venv", "Scripts", "python.exe");
         if (File.Exists(local)) return local;
-        return OperatingSystem.IsWindows() ? "python.exe" : "python3";
+
+        // Resolved to an absolute path rather than handed to Process.Start as a bare name:
+        // Windows would otherwise search Cinder's own directory first, so a python.exe sitting
+        // beside the portable executable would run in preference to the real interpreter.
+        return ExecutableResolver.ResolveRequired(
+            OperatingSystem.IsWindows() ? "python.exe" : "python3",
+            "Install Python 3.12+ and make sure it is on PATH.");
     }
 
     private static IDictionary<string, object?> JsonToDict(JsonElement el)

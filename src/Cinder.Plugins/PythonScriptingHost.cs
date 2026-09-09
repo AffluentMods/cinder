@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Cinder.Sidecar;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Cinder.Core.Diagnostics;
 
 namespace Cinder.Plugins;
 
@@ -20,7 +21,9 @@ public sealed class PythonScriptingHost : IAsyncDisposable
     {
         var psi = new ProcessStartInfo
         {
-            FileName = OperatingSystem.IsWindows() ? "python.exe" : "python3",
+            FileName = ExecutableResolver.ResolveRequired(
+            OperatingSystem.IsWindows() ? "python.exe" : "python3",
+            "Install Python 3.12+ and make sure it is on PATH."),
             ArgumentList = { "-m", "scripting.script_host" },
             WorkingDirectory = parsersDir,
         };
