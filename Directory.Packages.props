@@ -118,9 +118,9 @@
     <PackageVersion Include="Polly.Extensions.Http" Version="3.0.0" />
 
     <!-- Search (Lucene.NET — picked over Tantivy per docs/plan.md §13.3) -->
-    <PackageVersion Include="Lucene.Net" Version="4.8.0-beta00017" />
-    <PackageVersion Include="Lucene.Net.Analysis.Common" Version="4.8.0-beta00017" />
-    <PackageVersion Include="Lucene.Net.QueryParser" Version="4.8.0-beta00017" />
+    <PackageVersion Include="Lucene.Net" Version="4.8.0-beta00018" />
+    <PackageVersion Include="Lucene.Net.Analysis.Common" Version="4.8.0-beta00018" />
+    <PackageVersion Include="Lucene.Net.QueryParser" Version="4.8.0-beta00018" />
 
     <!-- Multi-pattern string matching (Aho-Corasick) — backs the in-house YARA-lite scanner. -->
     <PackageVersion Include="AhoCorasick" Version="2.0.279" />
