@@ -84,11 +84,18 @@ public sealed class FeatureExtractorTests
     [Fact]
     public void Credential_shaped_tokens()
     {
+        // AKIAIOSFODNN7EXAMPLE is Amazon's own documented placeholder key id, allow-listed by
+        // secret scanners. The JWT is assembled here from throwaway parts rather than written
+        // as a literal: a token-shaped string in a public repository trips secret scanning
+        // forever, whether or not it was ever issued by anything.
         Values("awskey", "key AKIAIOSFODNN7EXAMPLE here").Should().Equal("AKIAIOSFODNN7EXAMPLE");
-        static string B64Url(string x) =>
-            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(x)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+        static string B64Url(string s) =>
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(s)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         var fakeJwt = B64Url("{\"alg\":\"none\"}") + "." + B64Url("{\"sub\":\"fixture\"}") + "." + B64Url("not-a-signature");
+        fakeJwt.Should().StartWith("eyJ");
         Values("jwt", $"bearer {fakeJwt} end").Should().Equal(fakeJwt);
+
         var pemHeader = "-----BEGIN " + "OPENSSH PRIVATE KEY" + "-----";
         Values("privatekey", pemHeader + "\nabc").Should().ContainSingle();
     }
