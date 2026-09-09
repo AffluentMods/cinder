@@ -62,6 +62,36 @@ that was already claimed to work.
   underlying image is, and the carver carves from its window rather than
   returning nothing when it isn't.
 
+### Security
+
+Findings from the pre-release audit. Full write-up in SECURITY.md.
+
+- **Helper binaries were resolved by bare name (High).** ~20 `Process.Start` sites passed
+  `python.exe`, `powershell.exe`, `vssadmin.exe`, `lsblk`, `blockdev`, `zfs` and the eight
+  Python sidecar factories as bare names. Windows resolves those against the directory the
+  running executable was loaded from, ahead of the system directory and ahead of PATH. Cinder
+  ships as a portable single-file exe that examiners keep next to their case files and it
+  processes adversary-authored data, so a `python.exe` dropped beside `Cinder.exe` ran instead
+  of the real interpreter — as Administrator, per the install instructions. Verified with a
+  probe executable, not inferred: the planted binary ran. All sites now route through
+  `Cinder.Core.Diagnostics.ExecutableResolver`, which never searches the application or working
+  directory. (The current directory turned out *not* to be searched — safe process search mode
+  is on — so only the application-directory half of the documented order was exploitable.)
+- **Case-bundle extraction cap counted attacker-declared bytes (Medium).** `EncryptedBundle`
+  summed `ZipArchiveEntry.Length` against its 32 GB ceiling, then extracted unbounded. A
+  crafted bundle could declare almost nothing per entry and inflate arbitrarily. Extraction is
+  now a counting copy that aborts on real bytes and deletes the partial file.
+- **settings.json was world-readable on Linux/macOS (Medium).** It holds the AI provider API
+  key, and the non-Windows key derivation uses machine + user name — so anyone who could read
+  the file could also reproduce the key. Now created 0600 on Unix.
+- **OAuth loopback flow has no `state` parameter (Medium, not fixed).** Documented in
+  SECURITY.md rather than patched: the connectors' token exchange is unfinished and
+  unreachable, and this belongs with the work that completes it.
+
+Verified clean during the audit: no secrets in the working tree or git history; zero vulnerable
+NuGet packages across 29 projects; XXE closed on every `XmlReader`; no `BinaryFormatter`;
+zip-slip guard correct; `ArgumentList` used throughout with no shell string building.
+
 ### Fixed — hostile input
 
 `EwfReader` parses attacker-controlled data by definition. Each of these was
@@ -108,7 +138,7 @@ reachable by opening a crafted `.E01`:
 
 ### Added — tests
 
-96 tests, up from 40; `dotnet test` exits clean.
+110 tests, up from 40; `dotnet test` exits clean.
 
 - `Cinder.Imaging.Tests` (new, 24 tests) — synthetic EWF container builder
   covering round-trip of compressed and uncompressed media, partial final
@@ -122,6 +152,10 @@ reachable by opening a crafted `.E01`:
 - `Cinder.Hex.Tests` expanded 6 → 20 — termination, boundary spanning, mmap
   search against a real file, short-read buffers, start/end offsets, oversized
   and malformed queries, cancellation, regex.
+- `Cinder.Core.Tests` 33 → 47 — `ExecutableResolverTests` asserts the negative
+  property that matters (a binary planted in the application directory is never
+  selected); `EncryptedBundleTests` seals deliberately malformed archives through
+  the production framing to cover zip-slip and unbounded inflation.
 
 ### Documentation
 
