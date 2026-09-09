@@ -117,9 +117,9 @@ public abstract partial class ToolViewModel : ViewModelBase
 /// <summary>One renderable block in a tool's help body.</summary>
 public sealed record HelpBlock(HelpBlockKind Kind, string Text, string Marker = "")
 {
-    public bool IsHeading   => Kind == HelpBlockKind.Heading;
+    public bool IsHeading => Kind == HelpBlockKind.Heading;
     public bool IsParagraph => Kind == HelpBlockKind.Paragraph;
-    public bool IsBullet    => Kind == HelpBlockKind.Bullet;
+    public bool IsBullet => Kind == HelpBlockKind.Bullet;
 }
 
 public enum HelpBlockKind { Heading, Paragraph, Bullet }

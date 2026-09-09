@@ -43,7 +43,9 @@ public sealed partial class VssEnumerator : IShadowCopyEnumerator
         {
             var psi = new ProcessStartInfo("vssadmin.exe")
             {
-                RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
             };
             psi.ArgumentList.Add("list");
             psi.ArgumentList.Add("shadows");

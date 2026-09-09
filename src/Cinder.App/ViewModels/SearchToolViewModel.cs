@@ -83,7 +83,7 @@ public sealed partial class SearchToolViewModel : ViewModelBase
         try
         {
             _index.OpenForWrite();
-            var indexed = await Task.Run(async () => await Ingest(sourcePath, _index, ct), ct);
+            var indexed = await Task.Run(async () => await IngestAsync(sourcePath, _index, ct), ct);
             _index.Commit();
             DocCount += indexed;
             StatusLine = $"Indexed {indexed:N0} file{(indexed == 1 ? "" : "s")} from {sourcePath}.";
@@ -104,7 +104,7 @@ public sealed partial class SearchToolViewModel : ViewModelBase
     /// falls back to a printable-strings extraction for binaries — captures every URL,
     /// filename, error message etc. embedded in executables, memory dumps, images, etc.
     /// </summary>
-    private static async Task<int> Ingest(string root, CaseIndex index, CancellationToken ct)
+    private static async Task<int> IngestAsync(string root, CaseIndex index, CancellationToken ct)
     {
         int n = 0;
         var enumeration = new EnumerationOptions

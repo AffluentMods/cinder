@@ -474,7 +474,7 @@ public sealed partial class SrumTool
     private const string NetworkDataTable = "{973F5D5C-1D90-4944-BE8E-24B94231A174}";
     private const string AppResourceTable = "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA89}";
     private const string NetworkConnTable = "{DD6636C4-8929-4683-974E-22C046A43763}";
-    private const string EnergyEstTable   = "{FEE4E14F-02A9-4550-B5CE-5FA2DA202E37}";
+    private const string EnergyEstTable = "{FEE4E14F-02A9-4550-B5CE-5FA2DA202E37}";
 
     private static List<object> Parse(string path, CancellationToken ct)
     {
@@ -817,7 +817,7 @@ public sealed partial class NetworkTool
                     DstPort = tcp?.DestinationPort ?? udp?.DestinationPort ?? 0,
                     Bytes = raw.Data.Length,
                     Note = tcp is not null
-                        ? $"flags={(tcp.Synchronize?"S":"")}{(tcp.Acknowledgment?"A":"")}{(tcp.Finished?"F":"")}{(tcp.Reset?"R":"")}{(tcp.Push?"P":"")}"
+                        ? $"flags={(tcp.Synchronize ? "S" : "")}{(tcp.Acknowledgment ? "A" : "")}{(tcp.Finished ? "F" : "")}{(tcp.Reset ? "R" : "")}{(tcp.Push ? "P" : "")}"
                         : "",
                 });
             }

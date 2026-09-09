@@ -15,6 +15,7 @@ jobs:
   build-and-test:
     name: Build & test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +49,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test .NET
+        timeout-minutes: 15
         run: dotnet test --no-build --configuration Release --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
 
       - name: Install Python parser deps
@@ -69,9 +71,33 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: "**/*.trx"
 
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore
+      # `dotnet list package --vulnerable` exits 0 even when it finds something, so the
+      # output has to be inspected. SECURITY.md claims a clean audit; this makes that
+      # claim enforced rather than asserted.
+      - name: Fail on vulnerable packages
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee audit.txt
+          if grep -qE '^\s+>' audit.txt; then
+            echo "::error::Vulnerable NuGet packages detected — see the audit output above."
+            exit 1
+          fi
+          echo "No vulnerable packages."
+
   format-check:
     name: Format check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -83,6 +109,7 @@ jobs:
   python-lint:
     name: Python lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

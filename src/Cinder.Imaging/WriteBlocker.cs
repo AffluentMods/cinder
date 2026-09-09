@@ -109,7 +109,9 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
     {
         var psi = new ProcessStartInfo("lsblk")
         {
-            RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
         };
         psi.ArgumentList.Add("-dno");
         psi.ArgumentList.Add("NAME");

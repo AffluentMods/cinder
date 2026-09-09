@@ -64,28 +64,31 @@ Known limits with workarounds: **[LIMITATIONS.md](LIMITATIONS.md)**.
 
 ## Screenshots
 
-> Screenshots from the v0.2.0 build. Generated against synthetic test
-> data — no real case material is shown.
+_Not yet captured._ The four shots below are the intended set; the capture
+protocol (window size, theme, synthetic evidence to load, redaction rules) is in
+[docs/screenshots.md](docs/screenshots.md). Drop the files into
+`assets/screenshots/` with the names given there and uncomment the block below.
 
 <!--
-  Once you've launched the v0.2.0 build, drop screenshots into
-  assets/screenshots/ with the filenames below and they'll appear here.
-  See docs/screenshots.md for the suggested capture protocol.
--->
+  Uncomment once assets/screenshots/{home,hex,evtx,report}.png exist. Leaving
+  these as live <img> tags before the files land renders four broken images on
+  the project's front page, which is a worse first impression than saying the
+  shots aren't taken yet.
 
 <div align="center">
 
 | Home dashboard | Hex viewer |
 |---|---|
-| <img src="assets/screenshots/home.png" alt="Home dashboard with recent cases and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex viewer with 100 GB image and inspector" /> |
+| <img src="assets/screenshots/home.png" alt="Home dashboard with recent cases and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex viewer with a large image open and the inspector visible" /> |
 | Recent cases, recent evidence, quick-start guide. | Memory-mapped, opens 100 GB images instantly. Inspector decodes 14 types at the caret. |
 
-| Event Log timeline | Court-ready PDF report |
+| Event Log timeline | PDF report |
 |---|---|
 | <img src="assets/screenshots/evtx.png" alt="Event Log viewer with filter and channel column" /> | <img src="assets/screenshots/report.png" alt="Generated PDF report with exhibit cards and index" /> |
 | Streams every record with timestamp, channel, EventId, user, computer. | Cover, per-section narrative, embedded exhibit cards, exhibit index. |
 
 </div>
+-->
 
 ## Cinder vs the alternatives
 

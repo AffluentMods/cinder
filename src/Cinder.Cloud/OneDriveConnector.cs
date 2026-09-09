@@ -41,8 +41,11 @@ public sealed class OneDriveConnector : ICloudConnector
     {
         var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["client_id"] = ClientId, ["code"] = authorizationCode, ["code_verifier"] = codeVerifier,
-            ["grant_type"] = "authorization_code", ["redirect_uri"] = redirectLoopbackUri,
+            ["client_id"] = ClientId,
+            ["code"] = authorizationCode,
+            ["code_verifier"] = codeVerifier,
+            ["grant_type"] = "authorization_code",
+            ["redirect_uri"] = redirectLoopbackUri,
             ["scope"] = Scope,
         });
         using var resp = await _http.PostAsync($"https://login.microsoftonline.com/{Tenant}/oauth2/v2.0/token", content, ct).ConfigureAwait(false);
