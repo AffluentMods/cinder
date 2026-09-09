@@ -49,8 +49,12 @@ gap analysis showed every established tool has and Cinder lacked.
   volume.** `DiscUtilsWalker` now owns detection (ISO / NTFS / FAT / ext / whole
   disk by partition), live enumeration with all timestamps, NTFS deleted-entry
   recovery, and optional hashing. The Filesystem tool is a thin mapper over it.
-  Tests format an NTFS volume in memory with DiscUtils, write files, delete one,
-  and assert the walk — the first parser in Cinder with a deterministic fixture.
+  Tests walk a checked-in 8 MiB NTFS image (`tests/fixtures/`, built by
+  `tools/ntfs-fixture-gen` on Windows — DiscUtils can only *format* NTFS where
+  `SecurityIdentifier` exists) — the first parser in Cinder with a
+  deterministic fixture, and the read path is verified on Linux as well as
+  Windows. The whole suite was run under WSL Ubuntu; settings 0600, executable
+  resolution and snapshot enumeration were probed there too.
 - **Known-good filtering.** Settings ▸ Hash sets: point at the NSRL database from
   the Hash sets tool and turn on "Hash files during filesystem enumeration". Every
   file gets a SHA-1 and a Verdict column (Known / Notable / Unknown); type
