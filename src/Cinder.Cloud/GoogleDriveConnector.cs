@@ -22,6 +22,8 @@ public sealed class GoogleDriveConnector : ICloudConnector
 
     public GoogleDriveConnector(HttpClient http) => _http = http ?? throw new ArgumentNullException(nameof(http));
 
+    public string? PendingState { get; private set; }
+
     public Task<Uri> BeginAuthAsync(string redirectLoopbackUri, CancellationToken ct)
     {
         var (verifier, challenge) = OAuthPkceHelper.GeneratePkcePair();
@@ -34,6 +36,7 @@ public sealed class GoogleDriveConnector : ICloudConnector
             ["scope"] = Scope,
             ["code_challenge"] = challenge,
             ["code_challenge_method"] = "S256",
+            ["state"] = PendingState = OAuthPkceHelper.GenerateState(),
             ["access_type"] = "offline",
             ["prompt"] = "consent",
         });

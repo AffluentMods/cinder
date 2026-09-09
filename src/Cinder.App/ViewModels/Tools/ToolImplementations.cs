@@ -564,6 +564,82 @@ public sealed partial class CustodyTool
 
     public ObservableCollection<CustodyEntry> Entries { get; } = new();
 
+    /// <summary>Signed tip attestations found in the file, each with its verification result.</summary>
+    public ObservableCollection<AttestationVerification> Attestations { get; } = new();
+
+    [ObservableProperty] private string? _attestationVerdict;
+    [ObservableProperty] private string? _keyFingerprint;
+
+    private Guid? _loadedCaseId;
+
+    /// <summary>
+    /// Signs the chain's current tip with the examiner key held in this user's profile. The
+    /// chain alone is unkeyed and lives in the case file; the attestation is what makes a
+    /// later rewrite detectable by anyone holding the file. Export it and send it somewhere
+    /// you do not control to anchor it against yourself as well.
+    /// </summary>
+    [RelayCommand]
+    private async Task SignTipAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(CasePath) || _loadedCaseId is not { } caseId)
+        {
+            StatusLine = "Open + verify a case first.";
+            return;
+        }
+        try
+        {
+            var signer = new CustodySigner(new CaseStore(CasePath));
+            var a = await signer.SignTipAsync(caseId, Environment.UserName, ct);
+            KeyFingerprint = a.KeyFingerprint;
+            StatusLine = $"Signed tip: sequence {a.Sequence}, hash {a.EntryHash[..16]}…, key {a.KeyFingerprint}. Export it to anchor the chain outside this file.";
+            await ReloadAttestationsAsync(signer, caseId, ct);
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Signing failed: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportAttestationAsync(CancellationToken ct)
+    {
+        var latest = Attestations.LastOrDefault()?.Attestation;
+        if (latest is null)
+        {
+            StatusLine = "No attestation to export — sign the chain tip first.";
+            return;
+        }
+        var path = await ToolDialog.SaveFileAsync("Export custody attestation", $"attestation-seq{latest.Sequence}.json", "json");
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            await File.WriteAllTextAsync(path, CustodySigner.ExportAttestation(latest), ct);
+            StatusLine = $"Attestation written to {path}. Mail it, ticket it, or drop it on a WORM share — anywhere you cannot edit later.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Export failed: {ex.Message}";
+        }
+    }
+
+    private async Task ReloadAttestationsAsync(CustodySigner signer, Guid caseId, CancellationToken ct)
+    {
+        Attestations.Clear();
+        foreach (var v in await signer.VerifyAsync(caseId, ct))
+        {
+            Attestations.Add(v);
+        }
+        if (Attestations.Count == 0)
+        {
+            AttestationVerdict = "No signed attestations — the chain is self-checking only. Sign the tip to anchor it.";
+            return;
+        }
+        var bad = Attestations.Where(a => !a.Ok).ToList();
+        AttestationVerdict = bad.Count == 0
+            ? $"✓ {Attestations.Count} attestation(s) verify; latest covers sequence {Attestations[^1].Attestation.Sequence}"
+            : $"✗ attestation at sequence {bad[0].Attestation.Sequence} fails: {bad[0].Reason}";
+    }
+
     [RelayCommand]
     private async Task PickAndVerifyAsync(CancellationToken ct)
     {
@@ -571,6 +647,9 @@ public sealed partial class CustodyTool
         if (string.IsNullOrEmpty(path)) return;
         CasePath = path;
         Entries.Clear();
+        Attestations.Clear();
+        AttestationVerdict = null;
+        _loadedCaseId = null;
         try
         {
             var store = new CaseStore(path);
@@ -598,6 +677,14 @@ public sealed partial class CustodyTool
                     allOk = false;
                     Verdict = $"⚠ chain broken at sequence {v.FirstBrokenSequence} ({v.Reason})";
                 }
+
+                // Attestations catch what the chain cannot: a full rewrite that re-hashes
+                // consistently. Verified with nothing but the file — the public key travels
+                // inside each attestation.
+                _loadedCaseId = caseId;
+                var signer = new CustodySigner(store);
+                await ReloadAttestationsAsync(signer, caseId, ct);
+                try { KeyFingerprint = File.Exists(signer.KeyPath) ? signer.KeyFingerprint() : null; } catch { KeyFingerprint = null; }
             }
             if (allOk) Verdict = $"✓ chain intact across {total:N0} entries";
             StatusLine = $"{Entries.Count:N0} entries shown.";
@@ -1219,20 +1306,62 @@ public sealed partial class ImagerTool
             StatusLine = "Pick a source and an output path.";
             return;
         }
-        StatusLine = "Imaging via parsers/imager sidecar (requires libewf-python for E01)…";
+        var fmt = Enum.Parse<ImageFormat>(Format);
+        BytesRead = 0;
         try
         {
-            var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
-            var imager = new SidecarDiskImager(() => SidecarDiskImager.DefaultSidecar(parsers));
-            var fmt = Enum.Parse<ImageFormat>(Format);
-            var job = new ImageJob(Source, Output, fmt);
             var progress = new Progress<ImageJobProgress>(p => BytesRead = p.BytesRead);
-            var result = await imager.ImageAsync(job, progress, ct);
-            StatusLine = $"Done. SHA-256 {result.Sha256?[..16]}… · {result.BytesWritten:N0} bytes · {result.BadSectors} bad sectors";
+            ImageJobResult result;
+            if (fmt == ImageFormat.Raw)
+            {
+                // In-process: file, block device (\\.\PhysicalDriveN, /dev/sdX) or an E01 chain
+                // decoded on the fly. Hash-on-read, retry then sector-level fallback on read
+                // errors, .sha256 companion the Verify tool reads, and a JSON acquisition log.
+                StatusLine = RawImager.IsDevicePath(Source)
+                    ? "Imaging device — this needs Administrator / root and a write-blocker on the source…"
+                    : "Imaging…";
+                var job = new ImageJob(Source, Output, ImageFormat.Raw,
+                    ExaminerName: Environment.UserName,
+                    CaseNumber: ActiveCaseContext.Current?.Name,
+                    Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : null);
+                result = await new RawImager().ImageAsync(job, progress, ct);
+            }
+            else
+            {
+                StatusLine = $"Imaging to {fmt} via parsers/imager sidecar (requires Python + libewf-python)…";
+                var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
+                var imager = new SidecarDiskImager(() => SidecarDiskImager.DefaultSidecar(parsers));
+                result = await imager.ImageAsync(new ImageJob(Source, Output, fmt), progress, ct);
+            }
+
+            StatusLine = $"Done. {result.BytesWritten:N0} bytes → {Output} · SHA-256 {result.Sha256} · {result.BadSectors} bad sector(s)" +
+                         (result.BadSectors > 0 ? " — offsets in the .log.json beside the image" : "");
+            await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
+            {
+                Source,
+                Output,
+                Format = fmt.ToString(),
+                result.BytesWritten,
+                result.Md5,
+                result.Sha1,
+                result.Sha256,
+                result.BadSectors,
+                ElapsedSeconds = result.Elapsed.TotalSeconds,
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Cancelled.";
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            StatusLine = $"Access denied: {ex.Message}. Imaging a device needs Administrator (Windows) or root (Linux).";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Imaging failed: {ex.Message}. (Sidecar requires Python + libewf-python.)";
+            StatusLine = fmt == ImageFormat.Raw
+                ? $"Imaging failed: {ex.Message}"
+                : $"Imaging failed: {ex.Message}. (Sidecar requires Python + libewf-python.)";
         }
     }
 }
@@ -1483,12 +1612,15 @@ public sealed partial class ConvertTool
     [ObservableProperty] private string _format = "raw";
     [ObservableProperty] private string? _statusLine;
 
-    public IReadOnlyList<string> Formats { get; } = ["raw", "e01"];
+    /// <summary>Raw is the only in-process target; writing EWF needs the sidecar and stays out of the list until it works.</summary>
+    public IReadOnlyList<string> Formats { get; } = ["raw"];
+
+    [ObservableProperty] private long _bytesConverted;
 
     [RelayCommand]
     private async Task PickSourceAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.PickFileAsync("Source image");
+        var p = await ToolDialog.PickFileAsync("Source image (.E01 chain or raw)");
         if (!string.IsNullOrEmpty(p)) Source = p;
     }
 
@@ -1499,10 +1631,76 @@ public sealed partial class ConvertTool
         if (!string.IsNullOrEmpty(p)) Output = p;
     }
 
+    /// <summary>
+    /// E01 → raw in-process: every chunk decoded through <see cref="Cinder.Imaging.Ewf.EwfReader"/>,
+    /// hashed as it streams, written flat, and compared with the digests the container recorded —
+    /// the conversion doubles as a verification. A raw source is copied and hashed the same way.
+    /// </summary>
     [RelayCommand]
-    private void Run()
+    private async Task RunAsync(CancellationToken ct)
     {
-        StatusLine = "Image format conversion runs through parsers/imager (requires libewf-python). Use the Imager tab to drive it.";
+        if (string.IsNullOrEmpty(Source) || string.IsNullOrEmpty(Output))
+        {
+            StatusLine = "Pick a source and an output path.";
+            return;
+        }
+        BytesConverted = 0;
+        StatusLine = "Converting…";
+        try
+        {
+            var progress = new Progress<ImageJobProgress>(p => BytesConverted = p.BytesRead);
+            if (EvidenceOpener.IsEwf(Source))
+            {
+                var r = await ImageConverter.EwfToRawAsync(Source, Output, Environment.UserName, progress, ct);
+                var verdict = r.MatchesRecorded switch
+                {
+                    true => "✓ output hash matches the recorded acquisition hash",
+                    false when r.DamagedChunks > 0 => $"✗ {r.DamagedChunks:N0} damaged chunk(s) zero-filled — output does not match the acquisition",
+                    false => "✗ output hash does NOT match the recorded acquisition hash",
+                    null => "⚠ container recorded no hash — nothing to compare against",
+                };
+                StatusLine = $"Done. {r.Image.BytesWritten:N0} bytes → {Output} · MD5 {r.Image.Md5} · SHA-256 {r.Image.Sha256} · {verdict}";
+                await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
+                {
+                    Operation = "convert-ewf-to-raw",
+                    Source,
+                    Output,
+                    r.Image.BytesWritten,
+                    r.Image.Md5,
+                    r.Image.Sha1,
+                    r.Image.Sha256,
+                    r.RecordedMd5,
+                    r.RecordedSha1,
+                    r.DamagedChunks,
+                    r.MatchesRecorded,
+                }, ct);
+            }
+            else
+            {
+                var job = new ImageJob(Source, Output, ImageFormat.Raw, ExaminerName: Environment.UserName, Description: "Raw copy");
+                var r = await new RawImager().ImageAsync(job, progress, ct);
+                StatusLine = $"Done. {r.BytesWritten:N0} bytes → {Output} · SHA-256 {r.Sha256} · {r.BadSectors} bad sector(s)";
+                await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
+                {
+                    Operation = "copy-raw",
+                    Source,
+                    Output,
+                    r.BytesWritten,
+                    r.Md5,
+                    r.Sha1,
+                    r.Sha256,
+                    r.BadSectors,
+                }, ct);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Cancelled.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Conversion failed: {ex.Message}";
+        }
     }
 }
 

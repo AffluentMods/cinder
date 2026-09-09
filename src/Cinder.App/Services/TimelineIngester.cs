@@ -87,6 +87,12 @@ public static class TimelineIngester
                     {
                         IngestRecycleBin(timeline, file, stats);
                     }
+                    else if (lower == "$j" || lower.EndsWith("$usnjrnl$j", StringComparison.Ordinal) || lower == "$usnjrnl:$j")
+                    {
+                        // KAPE and most triage tools export the change journal as $Extend\$UsnJrnl$J.
+                        IngestUsnJournal(timeline, file, stats);
+                        progress?.Report($"usn: {file}");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -115,6 +121,29 @@ public static class TimelineIngester
             timeline.Add(new Synth($"evtx.{src}", rec.UserName, when, summary));
             stats.Evtx++;
         }
+    }
+
+    /// <summary>
+    /// Every change-journal record becomes an event. Reason flags are kept in the summary so
+    /// "FILE_CREATE" and "FILE_DELETE" are filterable text, and the MFT reference ties the
+    /// event to a record even after the file is gone.
+    /// </summary>
+    private static void IngestUsnJournal(SuperTimeline timeline, string path, IngestStats stats)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+            var n = 0;
+            foreach (var r in Cinder.Filesystems.UsnJournal.Parse(fs))
+            {
+                if (r.Timestamp == DateTimeOffset.MinValue) continue;
+                timeline.Add(new Synth("ntfs.usn", null, r.Timestamp,
+                    $"{r.ReasonText}: {r.FileName} (MFT {r.MftIndex}-{r.MftSequence}, parent {r.ParentMftIndex})"));
+                stats.Usn++;
+                if (++n >= 2_000_000) break;   // a rolled-over journal on a busy volume can be larger than memory
+            }
+        }
+        catch { stats.Errors++; }
     }
 
     private static void IngestPrefetch(SuperTimeline timeline, string path, IngestStats stats)
@@ -385,10 +414,11 @@ public sealed class IngestStats
     public int Browser;
     public int Email;
     public int RecycleBin;
+    public int Usn;
     public int Errors;
     public string? LastError;
     public int Total =>
-        Evtx + Prefetch + Lnk + UserAssist + Browser + Email + RecycleBin;
+        Evtx + Prefetch + Lnk + UserAssist + Browser + Email + RecycleBin + Usn;
     public override string ToString() =>
-        $"evtx={Evtx} pf={Prefetch} lnk={Lnk} userassist={UserAssist} browser={Browser} email={Email} recycle={RecycleBin} errors={Errors}";
+        $"evtx={Evtx} pf={Prefetch} lnk={Lnk} userassist={UserAssist} browser={Browser} email={Email} recycle={RecycleBin} usn={Usn} errors={Errors}";
 }

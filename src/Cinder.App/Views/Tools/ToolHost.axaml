@@ -104,6 +104,7 @@
             <tv:SettingsView   IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='settings'}" />
 
             <tv:IocMatchView   IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='ioc'}" />
+            <tv:BookmarksView  IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='bookmarks'}" />
 
             <tv:SidecarRunnerView IsVisible="{Binding ., Converter={x:Static tools:ToolKindHelpers.HasSidecar}}" />
         </Panel>

@@ -43,6 +43,7 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
                     new GalleryTool(),
                     new DocumentsTool(),
                     new FilesystemTool(),
+                    new UsnJournalTool(),
                     new RegistryTool(),
                     new EventLogTool(),
                     new PrefetchTool(),
@@ -100,6 +101,7 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
                 Tools =
                 [
                     new CasesTool(),
+                    new BookmarksTool(),
                     new ReportsTool(),
                     new CustodyTool(),
                     new WorkflowsTool(),

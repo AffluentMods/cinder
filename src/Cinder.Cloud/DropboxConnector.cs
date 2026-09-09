@@ -14,9 +14,17 @@ public sealed class DropboxConnector : ICloudConnector
     private readonly HttpClient _http;
     public DropboxConnector(HttpClient http) => _http = http;
 
+    private string? _pendingVerifier;
+
+    public string? PendingState { get; private set; }
+
     public Task<Uri> BeginAuthAsync(string redirectLoopbackUri, CancellationToken ct)
     {
-        var (_, challenge) = OAuthPkceHelper.GeneratePkcePair();
+        // The verifier must survive until CompleteAuthAsync — it was previously discarded here,
+        // which made the exchange impossible to complete.
+        var (verifier, challenge) = OAuthPkceHelper.GeneratePkcePair();
+        _pendingVerifier = verifier;
+        PendingState = OAuthPkceHelper.GenerateState();
         var url = OAuthPkceHelper.BuildAuthUrl("https://www.dropbox.com/oauth2/authorize", new Dictionary<string, string>
         {
             ["client_id"] = ClientId,
@@ -25,6 +33,7 @@ public sealed class DropboxConnector : ICloudConnector
             ["code_challenge"] = challenge,
             ["code_challenge_method"] = "S256",
             ["token_access_type"] = "offline",
+            ["state"] = PendingState,
         });
         return Task.FromResult(new Uri(url));
     }
@@ -36,7 +45,7 @@ public sealed class DropboxConnector : ICloudConnector
             ["code"] = authorizationCode,
             ["grant_type"] = "authorization_code",
             ["client_id"] = ClientId,
-            ["code_verifier"] = codeVerifier,
+            ["code_verifier"] = string.IsNullOrEmpty(codeVerifier) ? _pendingVerifier ?? "" : codeVerifier,
             ["redirect_uri"] = redirectLoopbackUri,
         });
         using var resp = await _http.PostAsync("https://api.dropboxapi.com/oauth2/token", content, ct).ConfigureAwait(false);

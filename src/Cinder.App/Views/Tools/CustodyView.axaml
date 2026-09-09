@@ -4,7 +4,7 @@
              xmlns:c="using:Cinder.Core.Custody"
              x:Class="Cinder.App.Views.Tools.CustodyView"
              x:DataType="tools:CustodyTool">
-    <Grid RowDefinitions="Auto,*">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
         <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,*,Auto">
@@ -19,7 +19,30 @@
                            IsVisible="{Binding Verdict, Converter={x:Static ObjectConverters.IsNotNull}}" />
             </Grid>
         </Border>
-        <DataGrid Grid.Row="1" ItemsSource="{Binding Entries}" AutoGenerateColumns="False" IsReadOnly="True"
+
+        <!-- Attestations: the anchor outside the file. The chain above re-verifies after a
+             consistent rewrite; a signed tip does not. -->
+        <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,8"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+                IsVisible="{Binding CasePath, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                <Button Grid.Column="0" Content="Sign chain tip" Command="{Binding SignTipCommand}"
+                        ToolTip.Tip="Signs the current tip (sequence + hash) with the examiner key in your profile. A later rewrite of the log then fails attestation even if the chain re-verifies." />
+                <Button Grid.Column="1" Margin="6,0,0,0" Content="Export attestation…" Command="{Binding ExportAttestationCommand}"
+                        ToolTip.Tip="Self-contained JSON with the public key and signature. Send it somewhere you cannot later edit." />
+                <TextBlock Grid.Column="2" Margin="14,0" VerticalAlignment="Center" TextWrapping="Wrap"
+                           Text="{Binding AttestationVerdict}"
+                           FontSize="{DynamicResource CinderFontSizeSm}"
+                           Foreground="{DynamicResource CinderForegroundBrush}" />
+                <TextBlock Grid.Column="3" VerticalAlignment="Center" Classes="mono"
+                           Text="{Binding KeyFingerprint, StringFormat='key {0}'}"
+                           FontSize="{DynamicResource CinderFontSizeXs}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           IsVisible="{Binding KeyFingerprint, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </Grid>
+        </Border>
+
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Entries}" AutoGenerateColumns="False" IsReadOnly="True"
                   Background="{DynamicResource CinderBackground0Brush}">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Seq"        Binding="{Binding Sequence}" Width="60" />
@@ -30,5 +53,12 @@
                 <DataGridTextColumn Header="Hash"       Binding="{Binding EntryHash}" Width="180" />
             </DataGrid.Columns>
         </DataGrid>
+
+        <Border Grid.Row="3" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
+            <TextBlock Text="{Binding StatusLine}" TextWrapping="Wrap"
+                       FontSize="{DynamicResource CinderFontSizeXs}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </Border>
     </Grid>
 </UserControl>

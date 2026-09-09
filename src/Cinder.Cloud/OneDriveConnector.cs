@@ -21,10 +21,14 @@ public sealed class OneDriveConnector : ICloudConnector
 
     public OneDriveConnector(HttpClient http) => _http = http;
 
+    private string? _pendingVerifier;
+
+    public string? PendingState { get; private set; }
+
     public Task<Uri> BeginAuthAsync(string redirectLoopbackUri, CancellationToken ct)
     {
         var (verifier, challenge) = OAuthPkceHelper.GeneratePkcePair();
-        _ = verifier; // surface via CompleteAuthAsync's codeVerifier parameter
+        _pendingVerifier = verifier;
         var url = OAuthPkceHelper.BuildAuthUrl($"https://login.microsoftonline.com/{Tenant}/oauth2/v2.0/authorize", new Dictionary<string, string>
         {
             ["client_id"] = ClientId,
@@ -33,6 +37,7 @@ public sealed class OneDriveConnector : ICloudConnector
             ["scope"] = Scope,
             ["code_challenge"] = challenge,
             ["code_challenge_method"] = "S256",
+            ["state"] = PendingState = OAuthPkceHelper.GenerateState(),
         });
         return Task.FromResult(new Uri(url));
     }
@@ -43,7 +48,7 @@ public sealed class OneDriveConnector : ICloudConnector
         {
             ["client_id"] = ClientId,
             ["code"] = authorizationCode,
-            ["code_verifier"] = codeVerifier,
+            ["code_verifier"] = string.IsNullOrEmpty(codeVerifier) ? _pendingVerifier ?? "" : codeVerifier,
             ["grant_type"] = "authorization_code",
             ["redirect_uri"] = redirectLoopbackUri,
             ["scope"] = Scope,

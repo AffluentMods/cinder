@@ -858,21 +858,35 @@ public sealed partial class ImagerTool
 {
     public override string HelpMarkdown => """
 ## What this is
-A tool that copies an entire physical disk into a single forensic image file (E01,
-AFF4, or raw .dd), hashing every byte on the way. Once imaged, you do all analysis
-against the copy and the original drive stays write-protected.
+A tool that copies an entire physical disk, or an existing image, into a single
+forensic image file, hashing every byte on the way. Once imaged, you do all
+analysis against the copy and the original drive stays write-protected.
 
 ## When you'd use it
 This is step ZERO of nearly every disk investigation: image first, never analyse
-the original. Cinder verifies the SHA-256 of the source matches the image so you
-can prove they're identical.
+the original.
 
 ## How to use it in Cinder
 1. Plug the source drive into a write-blocker (hardware preferred) or engage
    Cinder's software write-blocker.
-2. Select source disk, destination path, and format. E01 is the standard.
-3. Cinder reads the entire disk, computes hashes, and writes the image. Bad
-   sectors are recorded but don't stop the imaging.
+2. Give the source: a device (`\\.\PhysicalDrive1` on Windows, `/dev/sdb` on
+   Linux — both need Administrator / root), a plain file, or an E01 (which is
+   decoded on the fly, so this doubles as E01 → raw conversion).
+3. Pick the destination and format.
+   - **Raw** is acquired in-process: MD5 / SHA-1 / SHA-256 are computed as the
+     bytes stream, a `.sha256` companion (sha256sum format, so the Verify tool
+     reads it) and a `.log.json` acquisition log are written beside the image,
+     and the run is recorded in the custody log.
+   - **E01 / AFF4** are handed to the Python imager sidecar (libewf), which must
+     be installed.
+4. Read errors: Cinder retries, then re-reads the failing block one sector at a
+   time so a bad sector costs 512 zero bytes rather than a megabyte. Every
+   zero-filled sector is counted, and its offset is listed in the log.
+
+## What the hashes mean
+They are the hash of what was *written*, which — if there were bad sectors — is
+the hash of the zero-filled image, not of the original media. The log says how
+many sectors were substituted; put that number in your report.
 """;
 }
 
@@ -934,12 +948,31 @@ public sealed partial class ConvertTool
 {
     public override string HelpMarkdown => """
 ## What this is
-A converter between forensic image formats: raw .dd ↔ E01 ↔ VHD ↔ AFF4. Hashes
-are preserved through the conversion so chain of custody is maintained.
+E01 → raw conversion, done in-process: every chunk of the EWF container is
+decoded, hashed as it streams, and written flat as a `.dd`.
 
 ## When you'd use it
-When the analysis tool you need only understands one format and your image is in
-another.
+When the tool you need next only understands raw images — a loop-mount, a
+hypervisor, an older carver — and your evidence arrived as E01.
+
+## How to use it in Cinder
+1. Pick the E01 (the first segment; the rest of the chain is followed).
+2. Pick the output path. A `.sha256` and a `.log.json` are written beside it.
+3. Run. The result line compares the hash of what was written with the hash the
+   acquisition tool recorded inside the container, so the conversion is also a
+   verification:
+   - **matches** — the container's recorded hash reproduces; the raw image is
+     the acquired bytes.
+   - **MISMATCH** — do not trust either file until you know why.
+   - **damaged chunks** — some chunks could not be decoded and were zero-filled;
+     the count is in the result and the log.
+   - **unverifiable** — the container recorded no hash. The raw image is still
+     the faithful decode of what was in the E01, but nothing ties it to the media.
+4. The conversion is recorded in the custody log with both digests.
+
+## Not yet
+raw → E01 needs an EWF writer, which Cinder does not have; use the Imager's E01
+output via the sidecar for that.
 """;
 }
 
@@ -1088,23 +1121,34 @@ spliced in breaks the chain and Verify says so.
 - Case created and case opened (with machine name and Cinder version).
 - Every parser run: which tool, which evidence file, how many rows came back, and
   whether the grid was truncated at its display limit.
-- Every image verification, with the recorded and computed digests and the verdict.
+- Every image verification, imaging run and conversion, with digests and verdict.
 - Every mount, every data export (which tool, format, path, row count) and every
   report export (title, template, format, sections).
-- Manual hashes from the Hash dialog.
+- Bookmarks added or deleted, and manual hashes from the Hash dialog.
 
 ## How to use it in Cinder
-1. Open this tool — it shows every entry as a row.
-2. Click "Open + verify…" to recompute the chain and confirm nothing has been altered.
-3. Export the log as part of your report.
+1. Click "Open + verify…" — the chain is recomputed and every entry listed.
+2. Click "Sign chain tip" at milestones (end of a session, before handing the
+   case over, before writing the report). Cinder signs the tip — sequence
+   number, entry hash and time — with an ECDSA P-256 key created on first use in
+   your user profile (`Cinder/examiner-signing-key.p8`). The attestation, public
+   key included, is stored in the case file.
+3. Click "Export attestation…" and send the JSON somewhere you cannot later
+   edit: a supervisor's inbox, the case ticket, a WORM share.
+4. Export the log as part of your report.
 
-## What it does and does not prove
-Verify detects accidental corruption and naive tampering. It does not resist a
-deliberate rewrite: the hash is unkeyed and lives in the same file as the entries,
-so anyone who can write the case database can recompute the whole chain. Treat the
-log as a structured, self-checking record of what was done — the same standing as an
-examiner's contemporaneous notes — not as independent proof the case file is
-untouched. SECURITY.md has the full reasoning and the planned external anchor.
+## What it proves
+The chain alone catches accidental corruption and naive tampering. It does not
+resist a deliberate rewrite: the hash is unkeyed and lives in the same file as
+the entries, so anyone who can write the case database can recompute the whole
+chain and Verify will still say "intact".
+
+An attestation changes that. After a rewrite the entry at the attested sequence
+no longer carries the attested hash, and re-signing needs the private key — so
+nobody without your key can alter the log up to that point without the
+attestation failing. The remaining gap is you, the key holder; that is what
+publishing the exported attestation out of your own reach is for. SECURITY.md
+has the full reasoning.
 """;
 }
 

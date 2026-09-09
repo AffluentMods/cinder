@@ -87,12 +87,16 @@ Not in the original plan; landed alongside Phase 1.
 UI surfaces exist for every tool. Image acquisition / mounting / shadow
 copies are placeholders until the platform-specific drivers ship.
 
-- 🟡 Disk imager (E01 / AFF4 / raw) — UI shell; native acquisition pending
-  per-platform raw-device access work.
-- 🟡 Image verify — UI shell; bit-compare logic implemented but unsignaled.
+- ✅ Disk imager (raw) — `RawImager`: file / block device / E01 chain →
+  `.dd` with hash-on-read, retry + sector-level fallback with bad-sector
+  offsets logged, `.sha256` + `.log.json` companions, custody entry. Needs
+  Administrator / root for devices. 🟡 EWF / AFF4 output still via sidecar.
+- ✅ Image verify — in-process: E01 against recorded digests, raw against a
+  companion digest or SHA256SUMS; verified / failed / unverifiable.
 - 🟡 Mount image — VHD/VHDX/ISO via PowerShell `Mount-DiskImage` on Windows
   works; E01 mount requires Arsenal Image Mounter (free, external).
-- 🟡 Convert format — UI shell; conversion service pending.
+- ✅ Convert format — E01 → raw in-process, result compared with the
+  container's recorded hash. 🟡 raw → E01 pending an EWF writer.
 - 🟡 Write-blocker (Windows) — placeholder, real version blocked on a
   signed kernel driver in `drivers/cinder-wb-windows`.
 - 🟡 Write-blocker (Linux) — `blockdev --setro` wrapper, works.
@@ -108,7 +112,9 @@ copies are placeholders until the platform-specific drivers ship.
 - ✅ Deleted-file recovery (NTFS) — $MFT walk of not-in-use records
   surfaces name, size, MAC/creation times, MFT index and sequence as
   `IsDeleted` rows. Names and timestamps only; contents via the carver.
-  $UsnJrnl / $LogFile parsing still tracked.
+- ✅ $UsnJrnl:$J — USN_RECORD_V2/V3 parser + USN journal tool (image or
+  extracted `$J`); timeline ingest of `$J` from triage folders. $LogFile
+  still tracked.
 
 ## Phase 4 — Windows artifacts ✅ (most) / 🟡 (some)
 
@@ -201,7 +207,11 @@ libraries do the heavy lifting in-process.
   (ASCII + UTF-16LE via YARA-lite), timeline events. Bounded, exportable.
 - ✅ Bookmarks — flag any grid row or timeline event with a note; stored
   in the case file (schema v2) and echoed to custody; Reports turns them
-  into a numbered Exhibits section.
+  into a numbered Exhibits section; Bookmarks tool to review / delete /
+  export.
+- ✅ Custody attestations — sign the chain tip with an examiner key
+  (ECDSA P-256), verify from the file alone, export for out-of-band
+  publication. A consistent rewrite now fails attestation.
 - ✅ YARA-lite — in-house parser + Aho-Corasick matcher. Loads `.yar`
   files, parses the common `rule { meta: strings: condition: }` grammar
   (literal `"strings"`, `nocase`, hex `{ 4D 5A }` patterns; condition

@@ -164,14 +164,12 @@ the open rather than leaving them implicit.
   enforced; isolation via `AssemblyLoadContext` / sidecar process is on the Phase 9 roadmap.
 - **Self-update.** Not implemented. Users are responsible for downloading new releases and
   verifying SHA-256 against `SHA256SUMS.txt` in the GitHub Release.
-- **OAuth loopback flow has no `state` parameter.** `OAuthPkceHelper.AwaitRedirectCodeAsync`
-  accepts any callback carrying a `code` and ignores an `error` response, so nothing binds the
-  callback to the request that started it. PKCE limits the damage — a foreign authorization
-  code fails the exchange — but RFC 8252 asks for both, and the listener also binds whatever
-  prefix its caller passes rather than forcing loopback. Separately,
-  `DropboxConnector.BeginAuthAsync` discards the verifier it generates, so that flow cannot
-  complete. The connectors' token exchange is unfinished, so none of this is reachable today;
-  it is fixed as part of finishing Phase 10.1.
+- **OAuth loopback flow** — fixed: every connector now issues a `state` nonce,
+  `AwaitRedirectCodeAsync` requires it back (constant-time compare), surfaces provider
+  `error` responses, and refuses to bind anything but a loopback prefix. The Dropbox
+  connector keeps its PKCE verifier. Covered by `OAuthPkceHelperTests` against a live
+  loopback listener. The connectors' end-to-end token exchange is still unfinished
+  (Phase 10.1).
 
 ## What the chain-of-custody log does and does not prove
 
@@ -194,18 +192,29 @@ tamper-proof, and not "court-defensible" on its own. Its evidentiary value comes
 place it does for any examiner's notes: the surrounding process — who held the file, on what
 media, under what access controls.
 
-Closing the gap needs an anchor Cinder does not yet have. Tracked options, in the order we'd
-take them:
+### Attestations — the anchor (shipped)
 
-1. **Sign the chain tip** with a per-examiner key held outside the case file, so a rewrite
-   requires the key rather than just write access.
-2. **Publish the tip** — periodically export `(case_id, sequence, entry_hash, timestamp)` to
-   an append-only location the examiner does not control (a signed email to themselves, a
-   timestamping authority, an internal WORM store).
-3. **RFC 3161 trusted timestamps** on the tip, which binds the chain to a point in time that
-   the holder of the case file cannot backdate.
+`CustodySigner` signs the chain's tip — `(case_id, sequence, entry_hash, signed_utc)` — with an
+ECDSA P-256 key generated in the examiner's own profile
+(`<LocalAppData>/Cinder/examiner-signing-key.p8`, mode 0600 on Unix). The attestation, public
+key included, is stored in the case file (`custody_attestations`, schema v3) and can be
+exported as a self-contained JSON document. **Verification needs only the case file.**
 
-Until at least (1) lands, do not present a Cinder custody log as independent proof that a case
-file was not altered. Present it as what it is: a structured, self-checking activity record.
+What that changes: a rewrite of the log after signing re-hashes the chain consistently, and
+`VerifyAsync` on the chain says "intact" — but the entry at the attested sequence no longer
+carries the attested hash, and re-signing needs the private key. So the guarantee becomes:
+**nobody who lacks the examiner's key can alter the log up to the attested point without it
+showing.** `CustodySignerTests` demonstrates exactly this: full rewrite, chain re-verifies,
+attestation fails.
+
+What it still does not do: protect against the examiner themself, whose key it is. That is
+what exporting the attestation and sending it somewhere the examiner cannot edit — a
+supervisor's inbox, a ticket, a WORM share — is for, and it is a process step, not code.
+RFC 3161 timestamping over the attestation remains the tracked next step for binding the
+signing time to an external clock.
+
+Present a Cinder custody log with attestations as: a self-checking activity record whose
+state at each attested point is signed by the examiner's key. Without attestations, present
+it as a self-checking record only.
 
 If you find anything that isn't listed here, report it through GitHub Security Advisories.
