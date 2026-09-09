@@ -13,7 +13,10 @@ pydantic>=2.7
 
 # disk-imaging sidecar (parsers/imager)
 libewf-python>=20231119
-pyaff4>=1.0
+# AFF4 support is a TODO in imager_worker.py and imports nothing yet. pyaff4 has never
+# shipped a 1.x (PyPI tops out at 0.34), so the previous `pyaff4>=1.0` pin made this
+# whole file uninstallable — PythonBootstrap failed on every machine before installing
+# anything. Add the real requirement when the AFF4 reader lands.
 
 # filesystem-parsing sidecar (parsers/filesystem)
 pytsk3>=20230125

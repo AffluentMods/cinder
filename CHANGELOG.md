@@ -181,6 +181,13 @@ reachable by opening a crafted `.E01`:
 
 ### Fixed — other
 
+- `parsers/requirements.txt` pinned `pyaff4>=1.0`, a version that has never
+  existed (PyPI tops out at 0.34). pip stopped at that line, so PythonBootstrap
+  could not create the sidecar venv on any machine, and CI's Python step had
+  been red for the same reason while the .NET results underneath it passed.
+  Removed — `imager_worker.py` lists AFF4 as a TODO and imports nothing from
+  it. CI now installs only what the Python tests need (`pydantic` + `pytest`).
+- Serilog pinned to 4.3.0, which `Serilog.Extensions.Hosting 10.0.0` requires.
 - PCAP parsing looped forever on a truncated or corrupt capture: a non-`PacketRead`
   status other than `NoRemainingPackets` hit `continue` and repeated indefinitely.
 - `EwfReader.Open` and the Filesystem tool's E01 path leaked one open file handle
