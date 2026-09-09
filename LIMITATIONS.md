@@ -107,16 +107,30 @@ This means **Cinder's parsers compile and run, but their correctness against rea
 unverified**. Treat results from a parser-driven Phase 4–7 view as preliminary until the
 fixture-vs-reference diff is in CI.
 
-## <a id="docx-pdfa"></a> DOCX export and PDF/A export
+## <a id="docx-pdfa"></a> PDF/A export
 
 - **Where:** [`Cinder.Reports.ReportExporter`](src/Cinder.Reports/ReportExporter.cs)
-- **State:**
-  - PDF: works when `wkhtmltopdf`, `chrome`, `msedge`, or `chromium` is on PATH; otherwise
-    surfaces a clear error and writes the HTML next to the requested PDF.
-  - DOCX: writes Markdown with a `.md` suffix — full DOCX via DocumentFormat.OpenXml lands
-    in 8.1.
-- **Blockers:** none for PDF; for DOCX, a DocumentFormat.OpenXml dependency in
-  `Directory.Packages.props`.
+- **State:** PDF renders in-process via QuestPDF. DOCX ships for real through
+  [`DocxReportWriter`](src/Cinder.Reports/DocxReportWriter.cs) on DocumentFormat.OpenXml —
+  covered by `DocxReportWriterTests`.
+- **Blockers:** PDF/A-specific conformance (embedded font subsetting, XMP metadata, the
+  PDF/A-2b identifier) is not implemented — output is ordinary PDF, not archival PDF/A.
+
+## <a id="custody-anchor"></a> Chain-of-custody log has no external anchor
+
+- **Where:** [`Cinder.Core.Custody.CustodyLog`](src/Cinder.Core/Custody/CustodyLog.cs)
+- **State:** Works as designed — every entry is SHA-256-chained to its predecessor and
+  `VerifyAsync` recomputes the chain, catching edited, deleted, reordered and spliced entries.
+- **The gap:** the hash is unkeyed and the chain lives in the same SQLite file as the entries
+  it protects. Anyone who can write the case database can recompute the chain from genesis and
+  produce a log that verifies clean. That makes it tamper-**evident** against modification of
+  an existing log, not tamper-proof against a deliberate rewrite.
+- **Blockers:** none technical — it needs a key or a publication target that lives outside the
+  case file, which is a deployment decision as much as a code one. Tracked options, in order:
+  sign the chain tip with a per-examiner key; periodically publish the tip somewhere the
+  examiner doesn't control; RFC 3161 trusted timestamps over the tip.
+- **Until then:** don't present a Cinder custody log as independent proof that a case file was
+  not altered. Full reasoning in [SECURITY.md](SECURITY.md).
 
 ## <a id="trademark-domains"></a> Trademark and domains
 

@@ -5,6 +5,12 @@ namespace Cinder.Imaging.Ewf;
 /// <see cref="EwfReader"/>. Caches one chunk at a time — reads spanning chunks
 /// concatenate transparently. Thread-unsafe by design; create a per-reader stream
 /// or wrap accesses externally.
+///
+/// <para>The stream always yields exactly <see cref="Length"/> bytes. A chunk that fails to
+/// decode is zero-filled by <see cref="EwfReader"/> and counted in
+/// <see cref="EwfReader.DamagedChunks"/>, never shortened: a short read here would be
+/// indistinguishable from end-of-stream to a hasher or a carver, which would then report a
+/// clean result over a partially-read image.</para>
 /// </summary>
 public sealed class EwfStream : Stream
 {
@@ -15,7 +21,7 @@ public sealed class EwfStream : Stream
 
     public EwfStream(EwfReader reader)
     {
-        _reader = reader;
+        _reader = reader ?? throw new ArgumentNullException(nameof(reader));
     }
 
     public override bool CanRead => true;
@@ -57,6 +63,7 @@ public sealed class EwfStream : Stream
         {
             return 0;
         }
+
         int chunkSize = _reader.ChunkSize;
         int totalCopied = 0;
         long remaining = Math.Min(buffer.Length, Length - _position);
@@ -65,14 +72,39 @@ public sealed class EwfStream : Stream
         {
             int chunkIndex = checked((int)(_position / chunkSize));
             int offsetInChunk = checked((int)(_position % chunkSize));
+
+            // The media size comes from the volume section and the chunk index from the table
+            // sections; nothing in the format forces them to agree. When they don't, say so
+            // rather than letting an out-of-range index escape as an ArgumentOutOfRangeException
+            // from somewhere deeper.
+            if (chunkIndex >= _reader.ChunkCount)
+            {
+                throw new InvalidDataException(
+                    $"EWF: media size implies at least {chunkIndex + 1:N0} chunks but the chunk table " +
+                    $"holds {_reader.ChunkCount:N0}. The container's volume and table sections disagree.");
+            }
+
             var chunk = LoadChunk(chunkIndex);
-            int copyable = Math.Min(chunk.Length - offsetInChunk, (int)Math.Min(remaining, int.MaxValue));
-            if (copyable <= 0) break;
+
+            var availableInChunk = chunk.Length - offsetInChunk;
+            if (availableInChunk <= 0)
+            {
+                // The chunk decoded shorter than its geometry says it should. EwfReader
+                // zero-fills to the logical length, so reaching here means the index and the
+                // volume geometry disagree — a structural defect, not an end-of-media. Report
+                // it rather than returning a short read that reads as a clean EOF.
+                throw new InvalidDataException(
+                    $"EWF: chunk {chunkIndex} decoded to {chunk.Length} bytes but the media geometry " +
+                    $"requires at least {offsetInChunk + 1}. The container's volume and table sections disagree.");
+            }
+
+            int copyable = (int)Math.Min(availableInChunk, remaining);
             chunk.AsSpan(offsetInChunk, copyable).CopyTo(buffer[totalCopied..]);
             totalCopied += copyable;
             _position += copyable;
             remaining -= copyable;
         }
+
         return totalCopied;
     }
 

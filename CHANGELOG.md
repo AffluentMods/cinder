@@ -7,6 +7,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Correctness and evidence-integrity pass. Everything here is a fix to something
+that was already claimed to work.
+
+### Fixed — critical
+
+- **Hex search never terminated.** `HexSearch.Search` relied on getting a short
+  read to exit its window loop, but no `IHexBuffer` implementation ever returns
+  one. At the tail of every buffer the window shrank to the overlap size, the
+  advance went to zero, and the loop spun forever. Any search finding fewer than
+  the caller's hit cap — the ordinary case — pinned a threadpool thread at 100%
+  and never produced a result, so find-in-hex-viewer did not work at all. The
+  loop now terminates on scanning through to the end offset, refuses a
+  non-positive advance, and fills its window across short reads. Boundary-
+  spanning matches are reported exactly once.
+- **`dotnet test` aborted instead of running.** The above hung the test host
+  ("Test host process crashed"), so the whole solution's test run aborted and CI
+  had no usable signal. The suite now completes; every `HexSearch` test carries
+  a timeout so a regression of that shape fails red rather than wedging the run.
+- **A damaged E01 chunk silently truncated the image.** `EwfReader.ReadChunk`
+  returned a short buffer when a chunk failed to inflate; `EwfStream` turned
+  that into a read of 0, which every caller — the hasher, the carver, the
+  signature scanner — correctly read as end-of-media. A partially-read image
+  therefore produced a clean-looking result over a fraction of the evidence.
+  Damaged chunks are now zero-filled to their declared length and reported via
+  `EwfReader.DamagedChunks`; the stream always yields the full media size.
+
+### Fixed — evidence integrity
+
+- **E01 hashes were displayed but never verified.** The Filesystem tool rendered
+  the MD5 / SHA-1 recorded *inside* an E01 into its metadata row, where it reads
+  as a verification result. It is not — it is an assertion made by whatever
+  wrote the container. The row is now labelled `recorded (UNVERIFIED)` and points
+  at the Verify tool.
+- **Image verify now works without Python.** `VerifyTool` routed through a
+  sidecar requiring `libewf-python`, which is not shipped, so it failed for
+  everyone. Replaced with in-process verification: `EwfReader.VerifyAsync`
+  re-reads the decoded media and compares against the container's recorded
+  digests; raw images compare against a `.sha256` / `.sha1` / `.md5` companion
+  or a `SHA256SUMS` entry. "No reference digest available" is now reported as
+  **unverifiable** rather than collapsing into a boolean — a container that
+  records no hash must not render the same as one that failed, or as one that
+  passed.
+- **Truncated artifact views announced themselves.** Parsers cap how many rows
+  they materialize (5k–100k depending on the artifact). Hitting that cap was
+  silent, so a grid showing 25,000 of 200,000 registry values looked identical
+  to a complete one. Tools now set `IsTruncated`, the status line says so, and
+  the grid carries a banner. The registry walker also reports truncation caused
+  by its key-depth limit.
+- **Slack / unallocated carving produced nothing.** `SlackUnallocCarver`'s slice
+  reported `CanSeek == false`, and the carver's extraction path returned an
+  empty blob for non-seekable input — so every hit in a slack region was
+  reported with length 0 and never written. The slice is now seekable when the
+  underlying image is, and the carver carves from its window rather than
+  returning nothing when it isn't.
+
+### Fixed — hostile input
+
+`EwfReader` parses attacker-controlled data by definition. Each of these was
+reachable by opening a crafted `.E01`:
+
+- Table sections declaring more entries than the section can hold caused either
+  a multi-gigabyte allocation or an out-of-range read. Entry counts are now
+  checked against the section that declares them, and capped.
+- Section sizes were used unvalidated: negative, int-truncating, and
+  past-end-of-file values all got through. Sizes are now bounded and checked
+  against the file.
+- A section chain whose `next` pointers formed a cycle looped the parser
+  forever; only the trivial self-loop was caught. The chain must now make
+  forward progress, with a hop ceiling as backstop.
+- `header2` decompression was an unbounded `CopyTo` — a zlib bomb in the case
+  metadata was an OOM before any evidence was read. Now capped.
+- Chunk offsets were used verbatim as stream positions without a bounds check.
+- Volume geometry (bytes-per-sector, sectors-per-chunk) was adopted unvalidated,
+  so a container could dictate a multi-gigabyte chunk buffer or a divide-by-zero.
+- A corrupt compressed chunk could inflate past its own extent into the
+  following chunk's bytes. Decompression is now bounded to the chunk.
+
+### Fixed — other
+
+- PCAP parsing looped forever on a truncated or corrupt capture: a non-`PacketRead`
+  status other than `NoRemainingPackets` hit `continue` and repeated indefinitely.
+- `EwfReader.Open` and the Filesystem tool's E01 path leaked one open file handle
+  per segment on every load.
+- `HexSearch.DecodeHex` did an unbounded `stackalloc` sized from the user's query
+  string — a long pasted query overflowed the stack.
+- `EwfReader.DiscoverSegments` had an unreachable-branch `if/else` that always
+  broke, and appended `.EAA`-style segments to chains that had not filled all 99
+  numeric slots.
+
+### Changed
+
+- **File carver is substantially faster.** Signature matching used a scalar
+  byte-by-byte compare across every signature for every offset — roughly
+  `window × signatures × headerLength` operations per 4 MiB window, which made a
+  whole-disk carve impractical. Now uses vectorized `Span.IndexOf`.
+- **Carver no longer emits duplicate hits.** The retained overlap tail was
+  re-scanned without tracking which window owned a hit, so any header landing in
+  the last `maxHeaderLength` bytes of a window was reported twice.
+
+### Added — tests
+
+96 tests, up from 40; `dotnet test` exits clean.
+
+- `Cinder.Imaging.Tests` (new, 24 tests) — synthetic EWF container builder
+  covering round-trip of compressed and uncompressed media, partial final
+  chunks, seek/partial reads, verification pass / fail / unverifiable, damaged
+  chunk handling, segment discovery, `EvidenceOpener` routing, and every
+  hostile-input case listed above.
+- `Cinder.Carving.Tests` (new, 18 tests) — window-boundary straddling and
+  duplicate suppression, objects extending past their window, footer trimming,
+  validator rejection, short-read and non-seekable streams, slack-region offset
+  translation.
+- `Cinder.Hex.Tests` expanded 6 → 20 — termination, boundary spanning, mmap
+  search against a real file, short-read buffers, start/end offsets, oversized
+  and malformed queries, cancellation, regex.
+
+### Documentation
+
+- **SECURITY.md** — new section stating plainly what the chain-of-custody log
+  does and does not prove. It is tamper-evident against modification of an
+  existing log; it is not tamper-proof, because the hash is unkeyed and stored
+  in the same file as the entries it protects, so anyone who can write that file
+  can recompute the whole chain. Records the three tracked options for adding an
+  external anchor. Same caveat added to `CustodyLog`'s own docs and to
+  LIMITATIONS.md.
+- **README** — corrected claims that overstated the current state: the Windows
+  artifact suite is marked unverified against reference tools (no parity tests
+  exist yet), imaging is "read + verify" rather than implying acquisition,
+  "court-ready" dropped from report descriptions, and the custody format
+  described as tamper-evident.
+- **LIMITATIONS.md** — DOCX entry was stale (real OpenXml export has shipped);
+  replaced with the actual remaining gap, PDF/A conformance.
+
 ## [0.2.2] — 2026-09-09
 
 The "cross-artifact + memory + PST + updates" release. v0.2.1 shipped

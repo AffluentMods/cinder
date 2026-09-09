@@ -13,6 +13,14 @@ namespace Cinder.Core.Custody;
 /// <c>entry_hash = SHA-256(prev_hash || US || sequence || US || timestamp || US || examiner ||
 ///   US || action || US || details)</c> where US = U+001F (ASCII Unit Separator).
 /// Genesis prev_hash is 64 zero hex chars.
+///
+/// <para><b>What the chain proves.</b> <see cref="VerifyAsync"/> detects accidental corruption
+/// and naive tampering — an edited, deleted, reordered or spliced entry all break it. It does
+/// not resist a deliberate rewrite: the hash is unkeyed and lives in the same file as the data,
+/// so anyone who can write the case database can recompute the whole chain and produce a log
+/// that verifies clean. This is tamper-<em>evident</em>, not tamper-proof. Making it resist a
+/// motivated rewrite needs an anchor outside the file — a signature over the tip, or a
+/// published/timestamped tip. See the custody section of SECURITY.md.</para>
 /// </summary>
 public sealed class CustodyLog : ICustodyLog
 {
@@ -41,10 +49,9 @@ public sealed class CustodyLog : ICustodyLog
 
         // SECURITY: the chain hash uses U+001F as a field separator. If any field were allowed
         // to contain U+001F, an attacker could craft two semantically different entries that
-        // hash to the same value (separator-injection / Length-extension-style preimage). We
-        // reject the separator (and other C0 control characters that have no business in
-        // examiner / action / details) up front. Defense for the court-defensible custody
-        // chain.
+        // hash to the same value (separator injection), defeating the chain's one real
+        // guarantee — that an existing entry cannot be altered undetected. We reject the
+        // separator, and the other C0 controls that have no business in these fields, up front.
         if (ContainsSeparatorOrControl(examiner))
         {
             throw new ArgumentException("Examiner contains forbidden control characters.", nameof(examiner));

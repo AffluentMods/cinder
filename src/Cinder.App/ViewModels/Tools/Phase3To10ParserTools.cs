@@ -57,8 +57,16 @@ public sealed partial class FilesystemTool
             if (ext == ".e01")
             {
                 stream.Dispose();
-                var ewf = EwfReader.Open(path);
-                var ewfStream = ewf.OpenStream();
+
+                // `using`: EwfReader holds an open FileStream per segment in the chain. Without
+                // this every load of an .E01 leaked one handle per segment.
+                using var ewf = EwfReader.Open(path);
+                using var ewfStream = ewf.OpenStream();
+
+                // The hashes below are the ones the container records about itself — they are
+                // an assertion by whatever wrote the image, not a verification of it. They are
+                // labelled "recorded" so nobody reads the row as a checked result; the Imaging
+                // tool's Verify action re-hashes the decoded media and compares.
                 rows.Add(new
                 {
                     Inode = 0L,
@@ -69,7 +77,9 @@ public sealed partial class FilesystemTool
                     IsDeleted = false,
                     Modified = ewf.AcquisitionDate ?? "",
                     Owner = "",
-                    Note = $"EWF media_size={ewf.MediaSize:N0} bytes · sectors={ewf.NumberOfSectors:N0} · MD5={ewf.RecordedMd5 ?? "?"} · SHA1={ewf.RecordedSha1 ?? "?"}",
+                    Note = $"EWF media_size={ewf.MediaSize:N0} bytes · sectors={ewf.NumberOfSectors:N0} · " +
+                           $"segments={ewf.SegmentCount} · recorded (UNVERIFIED) MD5={ewf.RecordedMd5 ?? "none"} · " +
+                           $"SHA1={ewf.RecordedSha1 ?? "none"} — run Imaging ▸ Verify image to check them",
                 });
 
                 // From here we treat the EWF-backed stream as a raw disk image — try every parser.
@@ -310,10 +320,7 @@ public sealed partial class ShellbagsTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 25_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -763,10 +770,7 @@ public sealed partial class NetworkTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 50_000);
     }
 
     private static List<object> Parse(string path, CancellationToken ct)
@@ -781,13 +785,12 @@ public sealed partial class NetworkTool
             if (rows.Count >= 50_000) break;
 
             var status = reader.GetNextPacket(out var capture);
-            if (status == GetPacketStatus.NoRemainingPackets)
-            {
-                break;
-            }
             if (status != GetPacketStatus.PacketRead)
             {
-                continue;
+                // Anything that isn't a successful read ends the walk. `continue` here would
+                // spin forever on a truncated or corrupt capture, because an error status
+                // repeats indefinitely rather than advancing to NoRemainingPackets.
+                break;
             }
             packetIndex++;
 
@@ -835,10 +838,7 @@ public sealed partial class LinuxArtifactsTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 50_000);
     }
 
     private static List<object> Parse(string root, CancellationToken ct)
@@ -981,10 +981,7 @@ public sealed partial class MobileTool
     protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
     {
         var rows = await Task.Run(() => Parse(evidencePath, ct), ct);
-        foreach (var r in rows)
-        {
-            Rows.Add(r);
-        }
+        AddRows(rows, budget: 50_000);
     }
 
     private static List<object> Parse(string root, CancellationToken ct)

@@ -29,7 +29,14 @@ public sealed class SlackUnallocCarver(FileCarver carver)
         }
     }
 
-    /// <summary>Stream wrapper that exposes a fixed slice of an underlying stream.</summary>
+    /// <summary>
+    /// Stream wrapper that exposes a fixed slice of an underlying stream.
+    ///
+    /// <para>Seekable whenever the underlying image is. That matters: the carver falls back to
+    /// window-bounded extraction on a non-seekable source, so a slice that refused to seek
+    /// capped every carved object at the current 4 MiB window. Positions are slice-relative
+    /// and every read re-seats the underlying stream, so interleaved use is safe.</para>
+    /// </summary>
     private sealed class SubStream(Stream inner, long length) : Stream
     {
         private readonly Stream _inner = inner;
@@ -37,19 +44,54 @@ public sealed class SlackUnallocCarver(FileCarver carver)
         private long _read;
 
         public override bool CanRead => true;
-        public override bool CanSeek => false;
+        public override bool CanSeek => _inner.CanSeek;
         public override bool CanWrite => false;
         public override long Length => length;
-        public override long Position { get => _read; set => throw new NotSupportedException(); }
+
+        public override long Position
+        {
+            get => _read;
+            set
+            {
+                if (!CanSeek)
+                {
+                    throw new NotSupportedException();
+                }
+                if (value < 0 || value > length)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                }
+                _read = value;
+            }
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            Position = origin switch
+            {
+                SeekOrigin.Begin => offset,
+                SeekOrigin.Current => _read + offset,
+                SeekOrigin.End => length + offset,
+                _ => throw new ArgumentOutOfRangeException(nameof(origin)),
+            };
+            return _read;
+        }
 
         public override int Read(byte[] buffer, int offset, int count)
+            => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
         {
             var remaining = length - _read;
             if (remaining <= 0)
             {
                 return 0;
             }
-            var n = _inner.Read(buffer, offset, (int)Math.Min(count, remaining));
+            if (_inner.CanSeek)
+            {
+                _inner.Position = _start + _read;
+            }
+            var n = _inner.Read(buffer[..(int)Math.Min(buffer.Length, remaining)]);
             _read += n;
             return n;
         }
@@ -61,13 +103,16 @@ public sealed class SlackUnallocCarver(FileCarver carver)
             {
                 return 0;
             }
+            if (_inner.CanSeek)
+            {
+                _inner.Position = _start + _read;
+            }
             var n = await _inner.ReadAsync(buffer[..(int)Math.Min(buffer.Length, remaining)], ct).ConfigureAwait(false);
             _read += n;
             return n;
         }
 
         public override void Flush() { }
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }

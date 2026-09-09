@@ -814,8 +814,28 @@ sat on slow storage for a while.
 
 ## How to use it in Cinder
 1. Pick the image file.
-2. Cinder reads every block and compares against the hashes recorded when the
-   image was created.
+2. Cinder reads every block and compares against a reference digest. For an E01
+   that reference is the MD5 / SHA-1 the acquisition tool wrote inside the
+   container; for a raw image it's a .sha256 / .sha1 / .md5 companion file, or a
+   SHA256SUMS line naming the image, sitting next to it.
+
+## Reading the result
+There are three distinct outcomes, and the difference matters.
+
+- Verified — a reference digest existed and the bytes on disk reproduce it.
+- VERIFICATION FAILED — a reference existed and the bytes do not match it, or
+  chunks were too damaged to decode. Treat the image as unreliable and go back
+  to the source media.
+- Unverifiable — there was nothing to compare against. This is not a pass. It
+  means the container recorded no acquisition hash and no companion digest was
+  found, so nothing about the image's integrity has been established.
+
+## Why the metadata panel isn't enough
+The Filesystem tool shows an E01's recorded MD5 and SHA-1 in its metadata row,
+marked UNVERIFIED. Those are the hashes the container claims about itself — an
+assertion written by whatever produced the file, which a tampered or corrupt
+image will happily keep displaying. Only this tool re-reads the media and turns
+that claim into a finding.
 """;
 }
 

@@ -81,11 +81,25 @@
         </Border>
 
         <!-- Populated state — DataGrid + footer -->
-        <Grid Grid.Row="2" RowDefinitions="*,Auto"
+        <Grid Grid.Row="2" RowDefinitions="Auto,*,Auto"
               IsVisible="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}">
-            <DataGrid Grid.Row="0" ItemsSource="{Binding Rows}" AutoGenerateColumns="True" IsReadOnly="True"
+
+            <!-- Truncation banner. A grid showing a prefix of an artifact must say so where the
+                 examiner cannot miss it: the muted status line below is not enough weight for
+                 "what you are looking at is not the whole thing". -->
+            <Border Grid.Row="0" IsVisible="{Binding IsTruncated}"
+                    Background="{DynamicResource CinderDangerBrush}"
+                    Padding="14,7">
+                <TextBlock Text="{Binding StatusLine}"
+                           TextWrapping="Wrap"
+                           FontWeight="SemiBold"
+                           FontSize="{DynamicResource CinderFontSizeSm}"
+                           Foreground="{DynamicResource CinderBackground0Brush}" />
+            </Border>
+
+            <DataGrid Grid.Row="1" ItemsSource="{Binding Rows}" AutoGenerateColumns="True" IsReadOnly="True"
                       Background="{DynamicResource CinderBackground0Brush}" />
-            <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
+            <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0" Text="{Binding StatusLine, FallbackValue='Pick evidence to begin.'}"
                                FontSize="{DynamicResource CinderFontSizeXs}"

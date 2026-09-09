@@ -145,14 +145,51 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
     [ObservableProperty]
     private string? _errorMessage;
 
+    /// <summary>
+    /// Set by a parser that stopped early against a row budget. Several parsers cap how much
+    /// they materialize so a 500 MB SOFTWARE hive can't lock the UI; when that cap bites, the
+    /// grid is showing a prefix of the evidence rather than all of it. Saying so is not
+    /// optional — an examiner who reads a truncated view as complete draws a wrong conclusion
+    /// from it, and nothing on screen would otherwise contradict them.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isTruncated;
+
+    /// <summary>Total rows the parser would have produced, when it knows. Null if unknown.</summary>
+    [ObservableProperty]
+    private long? _availableRowCount;
+
     /// <summary>Human-readable hint shown in the empty state.</summary>
     public override string? EmptyStateHint => "Load evidence to populate this tool.";
 
     /// <summary>
     /// Subclasses run their sidecar and populate <see cref="Rows"/> here. Failures should be
-    /// caught and surfaced via <see cref="ErrorMessage"/> rather than thrown.
+    /// caught and surfaced via <see cref="ErrorMessage"/> rather than thrown. A subclass that
+    /// stops against a row budget must set <see cref="IsTruncated"/>, or add its rows through
+    /// <see cref="AddRows"/>, which sets it.
     /// </summary>
     protected abstract Task LoadAsync(string evidencePath, CancellationToken ct);
+
+    /// <summary>
+    /// Appends parsed rows and flags truncation when the parser produced exactly its budget.
+    ///
+    /// <para>Parsers cap how much they materialize so a huge artifact can't lock the UI. Landing
+    /// exactly on the cap means the parser stopped there rather than running out of input, so
+    /// the grid holds a prefix of the evidence. (An artifact with exactly <paramref name="budget"/>
+    /// rows is flagged too — over-warning is the safe direction here, since the alternative is
+    /// an examiner treating a partial view as the complete artifact.)</para>
+    /// </summary>
+    protected void AddRows(IEnumerable<object> rows, int budget)
+    {
+        foreach (var r in rows)
+        {
+            Rows.Add(r);
+        }
+        if (Rows.Count >= budget)
+        {
+            IsTruncated = true;
+        }
+    }
 
     [CommunityToolkit.Mvvm.Input.RelayCommand]
     private async Task LoadEvidenceAsync(string? path, CancellationToken ct)
@@ -164,11 +201,17 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
         EvidencePath = path;
         ErrorMessage = null;
         IsLoading = true;
+        IsTruncated = false;
+        AvailableRowCount = null;
         Rows.Clear();
         try
         {
             await LoadAsync(path, ct);
-            StatusLine = $"{Rows.Count:N0} entries";
+            StatusLine = IsTruncated
+                ? $"⚠ {Rows.Count:N0} entries shown — TRUNCATED at the display limit" +
+                  (AvailableRowCount is { } total ? $" of {total:N0} present" : "") +
+                  ". This is not the whole artifact; narrow the input or export to see the rest."
+                : $"{Rows.Count:N0} entries";
         }
         catch (Exception ex)
         {

@@ -122,4 +122,39 @@ the open rather than leaving them implicit.
 - **Self-update.** Not implemented. Users are responsible for downloading new releases and
   verifying SHA-256 against `SHA256SUMS.txt` in the GitHub Release.
 
+## What the chain-of-custody log does and does not prove
+
+This deserves to be stated plainly, because the phrase "hash-chained custody log" invites a
+stronger reading than the implementation supports.
+
+`Cinder.Core.Custody.CustodyLog` chains each entry to its predecessor with
+`SHA-256(prev_hash ‖ sequence ‖ timestamp ‖ examiner ‖ action ‖ details)` and
+`VerifyAsync` recomputes the whole chain. That reliably detects **accidental** corruption and
+**naive** tampering: editing one row's text, deleting a row, reordering rows, or splicing a row
+in all break the chain and are reported.
+
+It does **not** resist a deliberate rewrite. The hash is unkeyed and every entry — including
+every stored hash — lives in the same SQLite file as the data it protects. Anyone who can write
+that file can recompute the entire chain from the genesis entry forward and produce a log that
+verifies cleanly. There is no secret an attacker lacks and no external anchor to check against.
+
+So the correct claim is **tamper-evident against modification of an existing log**, not
+tamper-proof, and not "court-defensible" on its own. Its evidentiary value comes from the same
+place it does for any examiner's notes: the surrounding process — who held the file, on what
+media, under what access controls.
+
+Closing the gap needs an anchor Cinder does not yet have. Tracked options, in the order we'd
+take them:
+
+1. **Sign the chain tip** with a per-examiner key held outside the case file, so a rewrite
+   requires the key rather than just write access.
+2. **Publish the tip** — periodically export `(case_id, sequence, entry_hash, timestamp)` to
+   an append-only location the examiner does not control (a signed email to themselves, a
+   timestamping authority, an internal WORM store).
+3. **RFC 3161 trusted timestamps** on the tip, which binds the chain to a point in time that
+   the holder of the case file cannot backdate.
+
+Until at least (1) lands, do not present a Cinder custody log as independent proof that a case
+file was not altered. Present it as what it is: a structured, self-checking activity record.
+
 If you find anything that isn't listed here, report it through GitHub Security Advisories.
