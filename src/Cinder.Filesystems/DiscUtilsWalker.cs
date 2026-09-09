@@ -10,10 +10,12 @@ using DiscUtils.Ntfs.Internals;
 namespace Cinder.Filesystems;
 
 // CA1416: DiscUtils annotates NtfsFileSystem and its Internals MFT API as Windows-only. The
-// code behind them is pure managed parsing of on-disk NTFS structures — nothing calls an OS
-// API, and the same library parses NTFS on Linux in production today. Gating this walker to
-// Windows would remove NTFS support from Linux examiners for no reason, so the analyzer is
-// overridden for the file rather than the calls guarded.
+// annotation is earned by the *write* path — formatting and creating files go through
+// System.Security.Principal.SecurityIdentifier, which throws on Linux — but this walker only
+// reads, and the read path is pure managed parsing of on-disk structures with no OS
+// dependency. DiscUtilsWalkerTests runs against a checked-in NTFS image on Linux in CI, which
+// is what makes suppressing the analyzer here a verified decision rather than a hopeful one.
+// Nothing in this file may call a DiscUtils NTFS write API.
 #pragma warning disable CA1416
 
 /// <summary>A hash-set answer for one file, kept free of any dependency on the search project.</summary>
