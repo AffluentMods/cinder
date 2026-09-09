@@ -96,6 +96,8 @@ public sealed class FeatureExtractorTests
         fakeJwt.Should().StartWith("eyJ");
         Values("jwt", $"bearer {fakeJwt} end").Should().Equal(fakeJwt);
 
+        // Assembled at runtime for the same reason as the JWT: a PEM header literal is a
+        // secret-scanner hit whether or not any key material follows it.
         var pemHeader = "-----BEGIN " + "OPENSSH PRIVATE KEY" + "-----";
         Values("privatekey", pemHeader + "\nabc").Should().ContainSingle();
     }
