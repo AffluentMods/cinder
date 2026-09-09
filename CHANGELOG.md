@@ -7,8 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Correctness and evidence-integrity pass. Everything here is a fix to something
-that was already claimed to work.
+Correctness and evidence-integrity pass, followed by the features a competitive
+gap analysis showed every established tool has and Cinder lacked.
+
+### Added — analysis & workflow
+
+- **Export from every grid.** Every parser tool gains Export CSV / Export JSON
+  (`TabularExporter`): exactly the columns shown, string cells guarded against
+  spreadsheet formula injection (a filename in evidence starting with `=` is a
+  realistic thing to find), numbers left raw. The Strings tool exports too.
+- **Timeline export in ecosystem formats.** Timesketch JSONL and CSV
+  (`message` / `datetime` / `timestamp_desc` plus source, user, tags) and the
+  Sleuth Kit bodyfile that `mactime`, Autopsy and Plaso read. Writes every event
+  matching the current filter, not just the 5,000 the grid shows.
+- **ATT&CK auto-tagging on the timeline.** `MitreTagger` tags events where the
+  mapping is defensible: Security event ids (4624 → T1078, 4625 → T1078 + T1110,
+  4698 → T1053.005, 7045 → T1543.003, 4720 → T1136.001, 1102 → T1070.001,
+  4719 → T1562.002, 5145 → T1021.002, 1149 → T1021.001 …), Sysmon
+  (8 → T1055, 10 on lsass → T1003.001, 12/13/14 → T1112), PowerShell
+  script-block logging (4104 → T1059.001), Prefetch/UserAssist → TA0002,
+  Recycle Bin → T1070.004. A generic 4688 is deliberately untagged. New
+  ATT&CK filter box with id suggestions, and an ATT&CK column in the grid.
+- **Strings feature presets.** Filter modes: substring, regex (with match
+  timeout), or a bulk_extractor-style preset — email, URL, IPv4/IPv6, domain,
+  Luhn-checked payment cards, phone, Bitcoin/Ethereum, MD5/SHA-1/SHA-256,
+  Windows/UNC paths, MAC, JWT, AWS key id, private-key block, Base64 (must
+  decode). Preset + text narrows within the preset. Invalid regexes are shown,
+  not swallowed.
+- **Deleted-file recovery on NTFS.** The Filesystem tool walks the $MFT for
+  records no longer in use and appends them with `IsDeleted = true` — name,
+  size, all four timestamps, MFT index and sequence — under a `[deleted]/`
+  path. Names and times only; contents are the carver's job, and the help
+  text says so.
+- **The custody log now records examiner actions.** Previously only case
+  creation and manual hashing were logged. Now: case opened (machine, Cinder
+  version), every parser run (tool, evidence, row count, whether truncated),
+  every image verification (recorded and computed digests, verdict), mounts,
+  data exports and report exports. `ActiveCaseContext.LogAsync` from anywhere;
+  no-op without a case, never throws.
 
 ### Fixed — critical
 

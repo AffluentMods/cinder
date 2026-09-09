@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using Avalonia.Platform.Storage;
 using Cinder.App.Services;
+using Cinder.App.ViewModels.Tools;
+using Cinder.Core.Custody;
 using Cinder.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -32,18 +34,43 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
     [ObservableProperty]
     private string? _sourceFilter;
 
+    /// <summary>
+    /// ATT&amp;CK technique or tactic id prefix (<c>T1078</c>, <c>T1053</c>, <c>TA0002</c>).
+    /// Matches by prefix so <c>T1053</c> catches <c>T1053.005</c>.
+    /// </summary>
+    [ObservableProperty]
+    private string? _mitreFilter;
+
     [ObservableProperty]
     private string _statusLine = "0 events.";
+
+    /// <summary>Ids the tagger can emit, for the filter's suggestion list.</summary>
+    public IReadOnlyList<string> KnownMitreIds { get; } =
+        MitreTagger.KnownIds.OrderBy(id => id, StringComparer.Ordinal).Select(MitreTagger.Describe).ToArray();
+
+    private TimelineFilter CurrentFilter() => new(
+        User: string.IsNullOrWhiteSpace(UserFilter) ? null : UserFilter,
+        Sources: string.IsNullOrWhiteSpace(SourceFilter) ? null : [SourceFilter],
+        TextContains: string.IsNullOrWhiteSpace(TextFilter) ? null : TextFilter,
+        MitreTechnique: NormaliseMitre(MitreFilter));
+
+    /// <summary>Accepts "T1078", "T1078 Valid Accounts" (from the picker), or whitespace.</summary>
+    private static string? NormaliseMitre(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+        var first = raw.Trim().Split(' ', 2)[0];
+        return first.Length == 0 ? null : first;
+    }
 
     [RelayCommand]
     private void Refresh()
     {
         Events.Clear();
         Histogram.Clear();
-        var filter = new TimelineFilter(
-            User: UserFilter,
-            Sources: string.IsNullOrEmpty(SourceFilter) ? null : [SourceFilter],
-            TextContains: TextFilter);
+        var filter = CurrentFilter();
         foreach (var e in Timeline.Range(From, To, filter))
         {
             Events.Add(e);
@@ -55,6 +82,66 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
         var hist = Timeline.Histogram(From, To, 64, filter);
         foreach (var h in hist) Histogram.Add(h);
         StatusLine = $"{Events.Count:N0} events shown · {Timeline.Count:N0} indexed.";
+    }
+
+    /// <summary>
+    /// Writes every event matching the current filter — not just the 5,000 the grid shows — in
+    /// one of the ecosystem's interchange formats: Timesketch JSONL, Timesketch CSV, or the
+    /// Sleuth Kit body format that <c>mactime</c>, Autopsy and Plaso read.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var (ext, label) = format switch
+        {
+            "jsonl" => ("jsonl", "Timesketch JSONL"),
+            "body" => ("body", "bodyfile (mactime)"),
+            _ => ("csv", "Timesketch CSV"),
+        };
+
+        var path = await ToolDialog.SaveFileAsync($"Export timeline as {label}", $"timeline.{ext}", ext);
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        StatusLine = $"Exporting {label}…";
+        try
+        {
+            var filter = CurrentFilter();
+            var events = Timeline.Range(From, To, filter).ToList();
+
+            var written = await Task.Run(() =>
+            {
+                using var w = new StreamWriter(path, append: false, System.Text.Encoding.UTF8);
+                return format switch
+                {
+                    "jsonl" => TimelineExporter.WriteTimesketchJsonl(events, w),
+                    "body" => TimelineExporter.WriteBodyfile(events, w),
+                    _ => TimelineExporter.WriteTimesketchCsv(events, w),
+                };
+            }, ct);
+
+            StatusLine = $"Exported {written:N0} events → {path}";
+            await ActiveCaseContext.LogAsync(CustodyAction.DataExported, new
+            {
+                Tool = "timeline",
+                Format = label,
+                Path = path,
+                Events = written,
+                From,
+                To,
+                Filter = new { filter.User, filter.TextContains, Source = SourceFilter, Mitre = filter.MitreTechnique },
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Export cancelled.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Export failed: {ex.Message}";
+        }
     }
 
     [RelayCommand]
@@ -86,6 +173,13 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
             }
             Refresh();
             StatusLine = $"Ingested: {stats}. {Timeline.Count:N0} events on the timeline.";
+            await ActiveCaseContext.LogAsync(CustodyAction.ParserRan, new
+            {
+                Tool = "timeline.ingest",
+                Folder = path,
+                Events = Timeline.Count,
+                Stats = stats.ToString(),
+            }, ct);
         }
         catch (Exception ex)
         {

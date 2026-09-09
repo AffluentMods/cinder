@@ -35,7 +35,7 @@ public sealed partial class StringsTool
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _statusLine;
 
-    /// <summary>Live substring filter — re-applies as the user types.</summary>
+    /// <summary>Live filter — re-applies as the user types. Meaning depends on <see cref="FilterMode"/>.</summary>
     [ObservableProperty] private string? _filter;
 
     /// <summary>Hide strings that look like compressed-byte coincidence — no letters, mostly punctuation.</summary>
@@ -44,8 +44,67 @@ public sealed partial class StringsTool
     /// <summary>One-line callout above the result grid if the file looks like a container (ZIP, gzip, etc).</summary>
     [ObservableProperty] private string? _containerHint;
 
+    /// <summary>
+    /// How <see cref="Filter"/> is applied: a plain substring, a .NET regex, or one of the
+    /// <see cref="Cinder.Core.Analysis.FeatureExtractor"/> presets (emails, URLs, IPs, card
+    /// numbers, wallet addresses, credential-shaped tokens). The presets are the
+    /// bulk_extractor-style "what identifiers are in this blob" pass every triage starts with.
+    /// </summary>
+    [ObservableProperty] private FilterModeOption _filterMode = FilterModeOption.Substring;
+
+    public IReadOnlyList<FilterModeOption> FilterModes { get; } =
+    [
+        FilterModeOption.Substring,
+        FilterModeOption.Regex,
+        .. Cinder.Core.Analysis.FeatureExtractor.Presets.Select(p => new FilterModeOption(p.Id, p.Name, p.Description)),
+    ];
+
+    /// <summary>Set when the current regex fails to compile; shown instead of a silent empty grid.</summary>
+    [ObservableProperty] private string? _filterError;
+
     partial void OnFilterChanged(string? value) => Reproject();
     partial void OnHideGibberishChanged(bool value) => Reproject();
+    partial void OnFilterModeChanged(FilterModeOption value) => Reproject();
+
+    /// <summary>Writes the currently shown hits (after filter + gibberish toggle) to CSV or JSON.</summary>
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        if (Hits.Count == 0) return;
+        var ext = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase) ? "json" : "csv";
+        var path = await ToolDialog.SaveFileAsync($"Export strings as {ext.ToUpperInvariant()}", $"strings-export.{ext}", ext);
+        if (string.IsNullOrEmpty(path)) return;
+
+        var snapshot = Hits.Cast<object>().ToList();
+        try
+        {
+            var written = await Task.Run(() =>
+            {
+                if (ext == "json")
+                {
+                    using var fs = File.Create(path);
+                    return Cinder.Core.Export.TabularExporter.WriteJson(snapshot, fs);
+                }
+                using var w = new StreamWriter(path, append: false, Encoding.UTF8);
+                return Cinder.Core.Export.TabularExporter.WriteCsv(snapshot, w);
+            }, ct);
+            StatusLine = $"Exported {written:N0} strings → {path}";
+            await ActiveCaseContext.LogAsync(CustodyAction.DataExported, new
+            {
+                Tool = "strings",
+                Format = ext,
+                Path = path,
+                Rows = written,
+                Evidence = Path,
+                Mode = FilterMode.Id,
+                Filter,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Export failed: {ex.Message}";
+        }
+    }
 
     [RelayCommand]
     private async Task PickAsync(CancellationToken ct)
@@ -88,9 +147,64 @@ public sealed partial class StringsTool
     private void Reproject()
     {
         Hits.Clear();
+        FilterError = null;
         var needle = (Filter ?? "").Trim();
-        var hasNeedle = needle.Length > 0;
         var hideJunk = HideGibberish;
+
+        // Build one predicate up front so the per-row loop stays a single call.
+        Func<string, bool> accept;
+        if (FilterMode == FilterModeOption.Regex)
+        {
+            if (needle.Length == 0)
+            {
+                accept = static _ => true;
+            }
+            else
+            {
+                try
+                {
+                    var rx = new System.Text.RegularExpressions.Regex(
+                        needle,
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                        TimeSpan.FromMilliseconds(250));
+                    accept = v =>
+                    {
+                        try { return rx.IsMatch(v); }
+                        catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return false; }
+                    };
+                }
+                catch (ArgumentException ex)
+                {
+                    FilterError = $"Invalid regex: {ex.Message}";
+                    StatusLine = BuildStatus();
+                    return;
+                }
+            }
+        }
+        else if (FilterMode == FilterModeOption.Substring)
+        {
+            accept = needle.Length == 0
+                ? static _ => true
+                : v => v.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+        else
+        {
+            var preset = Cinder.Core.Analysis.FeatureExtractor.Find(FilterMode.Id);
+            if (preset is null)
+            {
+                accept = static _ => true;
+            }
+            else if (needle.Length == 0)
+            {
+                accept = preset.IsMatch;
+            }
+            else
+            {
+                // Preset AND substring: "emails containing example.com".
+                accept = v => preset.IsMatch(v) && v.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+        }
+
         var shown = 0;
         foreach (var h in _all)
         {
@@ -98,7 +212,7 @@ public sealed partial class StringsTool
             {
                 continue;
             }
-            if (hasNeedle && h.Value.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+            if (!accept(h.Value))
             {
                 continue;
             }
@@ -295,6 +409,14 @@ public sealed partial class StringsTool
 }
 
 public sealed record StringHit(long Offset, string Encoding, string Value);
+
+/// <summary>One entry in the Strings tool's filter-mode picker.</summary>
+public sealed record FilterModeOption(string Id, string Label, string Description)
+{
+    public static readonly FilterModeOption Substring = new("substring", "Contains text", "Case-insensitive substring");
+    public static readonly FilterModeOption Regex = new("regex", "Regex", ".NET regular expression, case-insensitive");
+    public override string ToString() => Label;
+}
 
 // =====================================================================================
 // DOCUMENTS — pick + read text-ish files.
@@ -1166,6 +1288,22 @@ public sealed partial class VerifyTool
         StatusLine = r.Md5Match is null && r.Sha1Match is null
             ? "⚠ unverifiable — container records no acquisition hash"
             : r.Verified ? "✓ verified against the acquisition hash" : "✗ VERIFICATION FAILED";
+
+        // A verification is the custody event that matters most — record the digests and the
+        // verdict, not just that the tool ran.
+        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        {
+            Image = path,
+            Container = "ewf",
+            reader.SegmentCount,
+            r.BytesVerified,
+            r.ExpectedMd5,
+            r.ComputedMd5,
+            r.ExpectedSha1,
+            r.ComputedSha1,
+            r.DamagedChunkCount,
+            Verdict = r.Summary(),
+        }, ct);
     }
 
     private async Task VerifyRawAsync(string path, CancellationToken ct)
@@ -1211,6 +1349,19 @@ public sealed partial class VerifyTool
 
             {verdict}
             """;
+
+        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        {
+            Image = path,
+            Container = "raw",
+            computed.BytesHashed,
+            computed.Md5,
+            computed.Sha1,
+            computed.Sha256,
+            Reference = reference,
+            ReferenceSource = referenceSource,
+            Verdict = verdict,
+        }, ct);
     }
 
     /// <summary>
@@ -1290,6 +1441,12 @@ public sealed partial class MountTool
             var handle = await m.MountReadOnlyAsync(path, ct);
             MountedAt = handle.MountPoint;
             StatusLine = $"Mounted at {handle.MountPoint}";
+            await ActiveCaseContext.LogAsync(CustodyAction.EvidenceMounted, new
+            {
+                Image = path,
+                handle.MountPoint,
+                ReadOnly = true,
+            }, ct);
         }
         catch (Exception ex)
         {

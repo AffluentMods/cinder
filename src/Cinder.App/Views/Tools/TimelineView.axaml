@@ -25,6 +25,21 @@
                         Command="{Binding IngestFolderCommand}"
                         ToolTip.Tip="Walk a triage folder; cross-merge EVTX + Registry + Prefetch + LNK + browser + email + recycle-bin events"
                         Margin="6,0,0,0" />
+                <!-- Export: everything matching the current filter, in the formats the rest of
+                     the DFIR ecosystem reads. Timesketch takes JSONL/CSV directly; the bodyfile
+                     feeds mactime, Autopsy and Plaso. -->
+                <Button DockPanel.Dock="Right" Content="Export bodyfile"
+                        Command="{Binding ExportCommand}" CommandParameter="body"
+                        ToolTip.Tip="Sleuth Kit body format — mactime / Autopsy / Plaso"
+                        Margin="6,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Export CSV"
+                        Command="{Binding ExportCommand}" CommandParameter="csv"
+                        ToolTip.Tip="Timesketch CSV (message, datetime, timestamp_desc, …)"
+                        Margin="6,0,0,0" />
+                <Button DockPanel.Dock="Right" Content="Export JSONL"
+                        Command="{Binding ExportCommand}" CommandParameter="jsonl"
+                        ToolTip.Tip="Timesketch JSONL — streams on import, best for large timelines"
+                        Margin="6,0,0,0" />
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <StackPanel Spacing="3">
                         <TextBlock Text="From" FontSize="{DynamicResource CinderFontSizeXs}"
@@ -50,6 +65,16 @@
                         <TextBlock Text="Contains" FontSize="{DynamicResource CinderFontSizeXs}"
                                    Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                         <TextBox Text="{Binding TextFilter}" Watermark="text in summary" Width="200" />
+                    </StackPanel>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="ATT&amp;CK" FontSize="{DynamicResource CinderFontSizeXs}"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <AutoCompleteBox Text="{Binding MitreFilter}"
+                                         ItemsSource="{Binding KnownMitreIds}"
+                                         FilterMode="Contains"
+                                         Watermark="T1078, T1053, TA0002…"
+                                         Width="230"
+                                         ToolTip.Tip="Technique or tactic id prefix. Events are auto-tagged on ingest from Windows event ids, Sysmon, PowerShell logging, Prefetch, UserAssist and Recycle Bin." />
                     </StackPanel>
                 </StackPanel>
             </DockPanel>
@@ -91,6 +116,7 @@
                     <DataGridTextColumn Header="Timestamp (UTC)" Binding="{Binding Timestamp, StringFormat=u}" Width="200" />
                     <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="160" />
                     <DataGridTextColumn Header="User" Binding="{Binding User}" Width="120" />
+                    <DataGridTextColumn Header="ATT&amp;CK" Binding="{Binding TagsDisplay}" Width="110" />
                     <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="*" />
                 </DataGrid.Columns>
             </DataGrid>

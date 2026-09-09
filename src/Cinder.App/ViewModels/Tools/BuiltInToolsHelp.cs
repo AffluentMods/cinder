@@ -62,9 +62,17 @@ program touched.
 
 ## How to use it in Cinder
 1. Click "Pick file…" and select any file — executable, image, memory dump, whatever.
-2. The "Filter" box at the top lets you live-search the results (e.g. type "http" to
-   find every URL).
-3. The "Hide gibberish" checkbox suppresses 4-byte ASCII runs that are almost
+2. The picker at the left of the filter row sets how the filter is applied:
+   "Contains text" is a plain substring, "Regex" is a .NET regular expression, and
+   the rest are feature presets — Email addresses, URLs, IPv4/IPv6, Domain names,
+   Payment card numbers (Luhn-checked), Phone numbers, Bitcoin and Ethereum
+   addresses, MD5/SHA-1/SHA-256 hashes, Windows and UNC paths, MAC addresses, JWTs,
+   AWS access keys, private-key blocks and Base64 blobs. Pick a preset and the grid
+   shows only strings containing one; type in the box as well to narrow within it
+   ("Email addresses" + "example.com"). This is the bulk_extractor-style first pass:
+   what identifiers are in this blob?
+3. "Export CSV" / "Export JSON" write whatever the grid currently shows.
+4. The "Hide gibberish" checkbox suppresses 4-byte ASCII runs that are almost
    certainly random coincidence from compressed bytes. Leave it on for sane output;
    turn it off if you're hunting for tiny tokens.
 4. "Min length" controls how long a sequence of printable bytes has to be before it
@@ -150,17 +158,20 @@ around. From here you can right-click any file to open it in another tool — a
 suspicious .lnk in the Hex Viewer, a .pst in the Email tool, etc.
 
 ## How to use it in Cinder
-1. Open a disk image (.dd, .raw, .E01, .vhd, .iso) or a mounted volume.
-2. Cinder lists every partition. Pick the one you want.
-3. Browse like Explorer or Finder — but you also see deleted files (greyed out) and
-   timestamps in MAC format (Modified / Accessed / Created).
-4. Right-click a file to open it in the right tool, hash it, or carve neighbouring
-   slack space.
+1. Open a disk image (.dd, .raw, .E01, .vhd, .vhdx, .iso).
+2. Cinder detects the filesystem — or, for a whole-disk image, lists every partition
+   and walks each one — and enumerates every live file with size and timestamps.
+3. On NTFS volumes it then walks the $MFT for records that are no longer in use and
+   appends them with IsDeleted = true, under a `[deleted]/` path. Windows deletes a
+   file by clearing one bit; the name, size and all four timestamps stay in the record
+   until it is reused, so this is where "what was here last week" comes from.
+4. "Export CSV" / "Export JSON" write the listing; large volumes are capped and the
+   banner says so when they are.
 
 ## Tip
-"Deleted" rarely means gone. Until the operating system reuses a file's blocks,
-they're still on disk. Cinder shows you both the deleted directory entry AND the
-recoverable contents.
+A deleted entry gives you the name and the timestamps, not the bytes. The data runs
+may already belong to another file. To get contents back, run the File carver over
+the image — it recovers by signature and does not need the filesystem's cooperation.
 """;
 }
 
@@ -618,15 +629,34 @@ This is usually the SECOND thing you build, right after opening the disk image. 
 super-timeline turns "what happened" into a question you can answer by scrolling.
 
 ## How to use it in Cinder
-1. After parsing artifacts, open this tool.
-2. Cinder merges every timestamped event into one table sorted by time.
-3. Filter by source (browser only? logon events only?), by user, or by MITRE
-   ATT&CK technique.
-4. Zoom into a specific hour to see exactly what happened then.
+1. Click "Ingest folder…" and point it at a triage collection (a KAPE output folder,
+   a mounted image's Windows directory, anything with .evtx / .pf / .lnk / NTUSER.DAT /
+   browser History / .eml / $Recycle.Bin inside). Cinder walks it and merges every
+   timestamped record into one table sorted by time.
+2. Filter by source (browser only? logon events only?), by user, by text in the
+   summary, or by ATT&CK technique.
+3. Narrow the From / To window to a specific hour to see exactly what happened then.
+
+## ATT&CK tags
+Events are tagged on ingest where the mapping is defensible: Windows Security event
+ids (4624 logon → T1078 Valid Accounts, 4698 → T1053.005 Scheduled Task, 7045 →
+T1543.003 Windows Service, 1102 → T1070.001 Clear Event Logs, and so on), Sysmon
+(8 → T1055 Process Injection), PowerShell script-block logging (4104 → T1059.001),
+Prefetch and UserAssist execution evidence (TA0002 Execution), Recycle Bin
+deletions (T1070.004). Type a prefix such as `T1053` in the ATT&CK box to see every
+matching event across every ingested log at once. A generic process-creation event is
+deliberately not tagged — on its own it does not indicate a technique.
+
+## Export
+The three Export buttons write every event matching the current filter (not just the
+5,000 the grid shows): Timesketch JSONL and CSV for collaborative analysis in
+Timesketch, and the Sleuth Kit body format that mactime, Autopsy and Plaso read.
+Every export is recorded in the case's chain of custody.
 
 ## Tip
-The "Live response" timeline filter (last 24 hours) is the fastest way to triage a
-"something happened today" incident.
+Build the timeline second, right after the filesystem listing. It turns "what
+happened" into a question you answer by scrolling, and it is the artifact your report
+narrative will be written from.
 """;
 }
 
@@ -1000,23 +1030,31 @@ public sealed partial class CustodyTool
 {
     public override string HelpMarkdown => """
 ## What this is
-The chain of custody log records every action taken inside the case: who created
-it, what evidence was added, who opened what, which parsers ran. Each entry is
-hashed and chained to the previous so any tampering is visible.
+The chain of custody log is the case's activity record. Each entry is hashed and
+chained to the one before it, so an entry that is edited, deleted, reordered or
+spliced in breaks the chain and Verify says so.
 
-## When you'd use it
-You always look at this before presenting evidence. If the chain has been broken,
-the evidence is challengeable.
+## What gets recorded
+- Case created and case opened (with machine name and Cinder version).
+- Every parser run: which tool, which evidence file, how many rows came back, and
+  whether the grid was truncated at its display limit.
+- Every image verification, with the recorded and computed digests and the verdict.
+- Every mount, every data export (which tool, format, path, row count) and every
+  report export (title, template, format, sections).
+- Manual hashes from the Hash dialog.
 
 ## How to use it in Cinder
 1. Open this tool — it shows every entry as a row.
-2. Click "Verify chain" to recompute hashes and confirm nothing has been altered.
+2. Click "Open + verify…" to recompute the chain and confirm nothing has been altered.
 3. Export the log as part of your report.
 
-## Why this matters
-Defense counsel WILL ask whether you can prove the evidence you're showing is the
-same evidence you collected. The custody log + image hashes is how you answer
-that.
+## What it does and does not prove
+Verify detects accidental corruption and naive tampering. It does not resist a
+deliberate rewrite: the hash is unkeyed and lives in the same file as the entries,
+so anyone who can write the case database can recompute the whole chain. Treat the
+log as a structured, self-checking record of what was done — the same standing as an
+examiner's contemporaneous notes — not as independent proof the case file is
+untouched. SECURITY.md has the full reasoning and the planned external anchor.
 """;
 }
 

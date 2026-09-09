@@ -23,6 +23,7 @@ using DiscUtils.Ext;
 using DiscUtils.Fat;
 using DiscUtils.Iso9660;
 using DiscUtils.Ntfs;
+using DiscUtils.Ntfs.Internals;
 using DiscUtils.Streams;
 using Microsoft.Data.Sqlite;
 using PacketDotNet;
@@ -222,10 +223,121 @@ public sealed partial class FilesystemTool
             if (!NtfsFileSystem.Detect(s)) return false;
             using var fs = new NtfsFileSystem(s);
             EnumerateFs(fs, rows, ct, partitionPrefix);
+            EnumerateDeletedMftEntries(fs, rows, ct, partitionPrefix);
             return true;
         }
         catch { return false; }
     }
+
+    /// <summary>Deleted-entry rows appended per NTFS volume before the walk stops.</summary>
+    private const int DeletedEntryBudget = 10_000;
+
+    /// <summary>
+    /// Recovers names of deleted files from the $MFT. Windows deletes a file by clearing the
+    /// in-use bit on its MFT record; the $FILE_NAME and $STANDARD_INFORMATION attributes —
+    /// name, size, all four timestamps — survive until the record is reused. Walking the
+    /// not-in-use records is the recovery view every commercial tool leads with, and the one
+    /// the live-filesystem enumeration above cannot provide.
+    ///
+    /// <para>Rows are marked <c>IsDeleted = true</c>. Content is not recovered here: the data
+    /// runs may already belong to another file, so a name is evidence and the bytes are a
+    /// carving job.</para>
+    /// </summary>
+    // CA1416: DiscUtils marks its Internals MFT API [SupportedOSPlatform("windows")]. The
+    // code behind it is pure managed parsing of on-disk NTFS structures — nothing in it calls
+    // an OS API, and the same assembly's NtfsFileSystem is not annotated. Gating deleted-file
+    // recovery to Windows would remove a working feature from Linux examiners for no reason,
+    // so the analyzer is overridden here rather than the call site guarded.
+#pragma warning disable CA1416
+    private static void EnumerateDeletedMftEntries(NtfsFileSystem fs, List<object> rows, CancellationToken ct, string partitionPrefix)
+    {
+        try
+        {
+            var mft = fs.GetMasterFileTable();
+            var added = 0;
+            foreach (var entry in mft.GetEntries(EntryStates.NotInUse))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (added >= DeletedEntryBudget)
+                {
+                    rows.Add(new
+                    {
+                        Inode = 0L,
+                        Path = $"{partitionPrefix}[deleted]",
+                        Name = "…",
+                        Size = 0L,
+                        IsDirectory = false,
+                        IsDeleted = true,
+                        Modified = "",
+                        Owner = "",
+                        Note = $"Deleted-entry listing TRUNCATED at {DeletedEntryBudget:N0} records — the volume has more.",
+                    });
+                    break;
+                }
+
+                FileNameAttribute? name = null;
+                StandardInformationAttribute? si = null;
+                foreach (var attr in entry.Attributes)
+                {
+                    // A record can carry both an 8.3 and a long $FILE_NAME; keep the longest.
+                    if (attr is FileNameAttribute fn && !string.IsNullOrEmpty(fn.FileName) &&
+                        (name is null || fn.FileName.Length > name.FileName.Length))
+                    {
+                        name = fn;
+                    }
+                    else if (attr is StandardInformationAttribute s)
+                    {
+                        si = s;
+                    }
+                }
+                if (name is null)
+                {
+                    continue;   // reused / never-populated record — nothing to recover
+                }
+
+                var isDir = (entry.Flags & MasterFileTableEntryFlags.IsDirectory) != 0;
+                var modified = si?.ModificationTime ?? name.ModificationTime;
+                var created = si?.CreationTime ?? name.CreationTime;
+
+                rows.Add(new
+                {
+                    Inode = entry.Index,
+                    Path = $"{partitionPrefix}[deleted]/{name.FileName}",
+                    Name = name.FileName,
+                    Size = name.RealSize,
+                    IsDirectory = isDir,
+                    IsDeleted = true,
+                    Modified = modified.ToUniversalTime().ToString("u", CultureInfo.InvariantCulture),
+                    Owner = "",
+                    Note = $"Deleted — MFT record #{entry.Index} seq {entry.SequenceNumber} not in use. " +
+                           $"Created {created.ToUniversalTime().ToString("u", CultureInfo.InvariantCulture)}. " +
+                           "Name and timestamps recovered from $FILE_NAME; content may be overwritten — carve to recover.",
+                });
+                added++;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The live listing is already in `rows`; a failure here must not discard it.
+            rows.Add(new
+            {
+                Inode = 0L,
+                Path = $"{partitionPrefix}[deleted]",
+                Name = "(unavailable)",
+                Size = 0L,
+                IsDirectory = false,
+                IsDeleted = true,
+                Modified = "",
+                Owner = "",
+                Note = $"Deleted-entry recovery failed: {ex.Message}",
+            });
+        }
+    }
+#pragma warning restore CA1416
 
     private static bool TryFat(Stream s, List<object> rows, CancellationToken ct, string source, string partitionPrefix = "")
     {

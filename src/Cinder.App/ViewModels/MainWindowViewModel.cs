@@ -153,6 +153,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     partial void OnActiveCaseChanged(CaseSession? value)
     {
         ActiveCaseName = value?.Name;
+        // Tools reach the custody log through this; it must track the active tab exactly.
+        Services.ActiveCaseContext.Set(value);
     }
 
     /// <summary>
@@ -163,6 +165,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public void OpenCase(Guid id, string name, string examiner, string? path)
     {
         var existing = OpenCases.FirstOrDefault(c => c.Id == id);
+        var newlyOpened = existing is null;
         if (existing is null)
         {
             existing = new CaseSession(id, name, examiner, path, DateTimeOffset.UtcNow);
@@ -170,6 +173,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
         ActiveCase = existing;
         Workspace.Dashboard.NoteCaseOpened(id, name, examiner, path);
+
+        if (newlyOpened)
+        {
+            // Fire-and-forget by design: LogAsync never throws, and opening a case must not
+            // wait on a database write.
+            _ = Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.CaseOpened, new
+            {
+                Path = path,
+                Machine = Environment.MachineName,
+                CinderVersion = Services.UpdateChecker.CurrentVersion(),
+            });
+        }
     }
 
     [RelayCommand]

@@ -14,5 +14,6 @@ public static class CustodyAction
     public const string EvidenceUnmounted = "evidence.unmounted";
     public const string ParserRan = "parser.ran";
     public const string ReportExported = "report.exported";
+    public const string DataExported = "data.exported";
     public const string Annotation = "annotation";
 }

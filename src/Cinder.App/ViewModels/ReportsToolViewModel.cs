@@ -137,6 +137,16 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
             var actual = await exporter.ExportAsync(rb, fmt, path);
             LastExportPath = actual;
             StatusLine = $"Exported to {actual}";
+
+            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.ReportExported, new
+            {
+                Title,
+                Template = SelectedTemplate.Id,
+                Format = fmt.ToString(),
+                Path = actual,
+                Sections = Sections.Select(s => s.Title).ToArray(),
+                Examiner,
+            });
         }
         catch (Exception ex)
         {

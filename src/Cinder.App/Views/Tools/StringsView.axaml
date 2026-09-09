@@ -26,26 +26,45 @@
         <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,8"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
                 IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
-                <TextBox Grid.Column="0"
-                         Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}"
-                         Watermark="Filter strings (case-insensitive substring) — e.g. http, password, .exe"
-                         FontSize="{DynamicResource CinderFontSizeSm}" />
-                <CheckBox Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center"
-                          IsChecked="{Binding HideGibberish}"
-                          Content="Hide gibberish"
-                          ToolTip.Tip="Suppress short ASCII runs that are almost certainly random coincidence from compressed bytes." />
-                <TextBlock Grid.Column="2" Margin="14,0,8,0" VerticalAlignment="Center"
-                           Text="Min length"
+            <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
+                    <!-- Mode first: "Contains text" / "Regex" / a feature preset such as
+                         Email addresses or Payment card numbers. With a preset selected the
+                         text box narrows within that preset. -->
+                    <ComboBox Grid.Column="0" Margin="0,0,8,0" Width="210"
+                              ItemsSource="{Binding FilterModes}"
+                              SelectedItem="{Binding FilterMode}"
+                              ToolTip.Tip="{Binding FilterMode.Description}" />
+                    <TextBox Grid.Column="1"
+                             Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}"
+                             Watermark="Filter — substring, regex, or narrow within the selected preset"
+                             FontSize="{DynamicResource CinderFontSizeSm}" />
+                    <CheckBox Grid.Column="2" Margin="14,0,0,0" VerticalAlignment="Center"
+                              IsChecked="{Binding HideGibberish}"
+                              Content="Hide gibberish"
+                              ToolTip.Tip="Suppress short ASCII runs that are almost certainly random coincidence from compressed bytes." />
+                    <TextBlock Grid.Column="3" Margin="14,0,8,0" VerticalAlignment="Center"
+                               Text="Min length"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <NumericUpDown Grid.Column="4"
+                                   Value="{Binding MinLength}"
+                                   Minimum="3" Maximum="32" Increment="1"
+                                   Width="100"
+                                   FormatString="0" />
+                    <Button Grid.Column="5" Margin="8,0,0,0" Content="Re-scan" Command="{Binding RunCommand}" />
+                    <Button Grid.Column="6" Margin="8,0,0,0" Content="Export CSV"
+                            Command="{Binding ExportCommand}" CommandParameter="csv"
+                            IsVisible="{Binding Hits.Count}" />
+                    <Button Grid.Column="7" Margin="4,0,0,0" Content="Export JSON"
+                            Command="{Binding ExportCommand}" CommandParameter="json"
+                            IsVisible="{Binding Hits.Count}" />
+                </Grid>
+                <TextBlock Text="{Binding FilterError}"
+                           Foreground="{DynamicResource CinderDangerBrush}"
                            FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <NumericUpDown Grid.Column="3"
-                               Value="{Binding MinLength}"
-                               Minimum="3" Maximum="32" Increment="1"
-                               Width="100"
-                               FormatString="0" />
-                <Button Grid.Column="4" Margin="8,0,0,0" Content="Re-scan" Command="{Binding RunCommand}" />
-            </Grid>
+                           IsVisible="{Binding FilterError, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
         </Border>
 
         <Panel Grid.Row="2" Background="{DynamicResource CinderBackground0Brush}">

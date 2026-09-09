@@ -12,6 +12,14 @@
                         Command="{Binding LoadEvidenceCommand}"
                         CommandParameter="{Binding EvidencePath}"
                         IsEnabled="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                <Button Content="Export CSV"
+                        Command="{Binding ExportCommand}" CommandParameter="csv"
+                        IsVisible="{Binding Rows.Count}"
+                        ToolTip.Tip="Write the grid as CSV (formula-injection safe)" />
+                <Button Content="Export JSON"
+                        Command="{Binding ExportCommand}" CommandParameter="json"
+                        IsVisible="{Binding Rows.Count}"
+                        ToolTip.Tip="Write the grid as a JSON array" />
                 <TextBlock VerticalAlignment="Center" Margin="14,0"
                            Text="{Binding EvidencePath, FallbackValue='No evidence loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"

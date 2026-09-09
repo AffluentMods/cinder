@@ -171,6 +171,56 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
     protected abstract Task LoadAsync(string evidencePath, CancellationToken ct);
 
     /// <summary>
+    /// Writes the current grid to CSV or JSON. Exports exactly the columns the grid shows;
+    /// string cells are guarded against spreadsheet formula injection, since a filename in
+    /// evidence beginning with <c>=</c> is a realistic thing to find.
+    /// </summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        if (Rows.Count == 0)
+        {
+            return;
+        }
+        var ext = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase) ? "json" : "csv";
+        var path = await ToolDialog.SaveFileAsync($"Export {Title} as {ext.ToUpperInvariant()}", $"{Id}-export.{ext}", ext);
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        var snapshot = Rows.ToList();
+        try
+        {
+            var written = await Task.Run(() =>
+            {
+                if (ext == "json")
+                {
+                    using var fs = File.Create(path);
+                    return Cinder.Core.Export.TabularExporter.WriteJson(snapshot, fs);
+                }
+                using var w = new StreamWriter(path, append: false, System.Text.Encoding.UTF8);
+                return Cinder.Core.Export.TabularExporter.WriteCsv(snapshot, w);
+            }, ct);
+
+            StatusLine = $"Exported {written:N0} rows → {path}" + (IsTruncated ? " (grid was truncated — export reflects only what was shown)" : "");
+            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.DataExported, new
+            {
+                Tool = Id,
+                Format = ext,
+                Path = path,
+                Rows = written,
+                Evidence = EvidencePath,
+                Truncated = IsTruncated,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Export failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
     /// Appends parsed rows and flags truncation when the parser produced exactly its budget.
     ///
     /// <para>Parsers cap how much they materialize so a huge artifact can't lock the UI. Landing
@@ -212,6 +262,16 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
                   (AvailableRowCount is { } total ? $" of {total:N0} present" : "") +
                   ". This is not the whole artifact; narrow the input or export to see the rest."
                 : $"{Rows.Count:N0} entries";
+
+            // Every parser run against evidence is an evidential act — it goes in the custody
+            // log with what was parsed and how much of it the examiner actually saw.
+            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.ParserRan, new
+            {
+                Tool = Id,
+                Evidence = path,
+                Rows = Rows.Count,
+                Truncated = IsTruncated,
+            }, ct);
         }
         catch (Exception ex)
         {

@@ -13,6 +13,11 @@ public sealed class SuperTimeline
 
     public int Count => _events.Count;
 
+    /// <summary>
+    /// Adds an artifact. When the caller supplies no tags, ATT&amp;CK technique tags are derived
+    /// from the source and summary by <see cref="MitreTagger"/>, so every ingest path gets them
+    /// without each parser knowing the mapping.
+    /// </summary>
     public void Add(IArtifact artifact, IReadOnlyList<string>? tags = null)
     {
         if (artifact.Timestamp is not { } ts)
@@ -24,7 +29,7 @@ public sealed class SuperTimeline
             Source: artifact.Source,
             User: artifact.User,
             Summary: artifact.Summary,
-            Tags: tags ?? []));
+            Tags: tags ?? MitreTagger.Tag(artifact.Source, artifact.Summary)));
     }
 
     public void Sort() => _events.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
@@ -75,7 +80,11 @@ public sealed record TimelineEvent(
     string Source,
     string? User,
     string Summary,
-    IReadOnlyList<string> Tags);
+    IReadOnlyList<string> Tags)
+{
+    /// <summary>Space-joined tags, for grid columns and CSV cells.</summary>
+    public string TagsDisplay => string.Join(" ", Tags);
+}
 
 public sealed record TimelineFilter(
     string? User = null,
