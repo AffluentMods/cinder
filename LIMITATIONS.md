@@ -125,12 +125,11 @@ fixture-vs-reference diff is in CI.
   it protects. Anyone who can write the case database can recompute the chain from genesis and
   produce a log that verifies clean. That makes it tamper-**evident** against modification of
   an existing log, not tamper-proof against a deliberate rewrite.
-- **Blockers:** none technical — it needs a key or a publication target that lives outside the
-  case file, which is a deployment decision as much as a code one. Tracked options, in order:
-  sign the chain tip with a per-examiner key; periodically publish the tip somewhere the
-  examiner doesn't control; RFC 3161 trusted timestamps over the tip.
-- **Until then:** don't present a Cinder custody log as independent proof that a case file was
-  not altered. Full reasoning in [SECURITY.md](SECURITY.md).
+- **Now:** the Custody tool signs the chain tip with an examiner key (`CustodySigner`,
+  ECDSA P-256) and stores the attestation in the case file; a rewrite after signing fails
+  attestation even though the chain re-verifies. What remains: the key is the examiner's, so
+  the examiner is not bound by it — export the attestation and publish it out of their reach.
+  RFC 3161 timestamping is the tracked next step. Full reasoning in [SECURITY.md](SECURITY.md).
 
 ## <a id="trademark-domains"></a> Trademark and domains
 

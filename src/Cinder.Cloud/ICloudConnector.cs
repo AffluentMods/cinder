@@ -25,6 +25,10 @@ public interface ICloudConnector
     /// completes the flow once Cinder receives the redirect on the loopback listener.</summary>
     Task<Uri> BeginAuthAsync(string redirectLoopbackUri, CancellationToken ct);
 
+    /// <summary>The <c>state</c> nonce the last <see cref="BeginAuthAsync"/> put in the URL; pass it to
+    /// <see cref="OAuthPkceHelper.AwaitRedirectCodeAsync"/> so a foreign callback is rejected.</summary>
+    string? PendingState { get; }
+
     Task<CloudAuthorization> CompleteAuthAsync(string authorizationCode, string codeVerifier, string redirectLoopbackUri, CancellationToken ct);
 
     IAsyncEnumerable<CloudFile> ListFilesAsync(CloudAuthorization auth, CancellationToken ct);

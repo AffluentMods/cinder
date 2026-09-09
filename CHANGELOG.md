@@ -10,6 +10,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Correctness and evidence-integrity pass, followed by the features a competitive
 gap analysis showed every established tool has and Cinder lacked.
 
+### Added — imaging, journal, custody anchor
+
+- **Raw imaging in-process.** `RawImager` reads a file, a block device
+  (`\\.\PhysicalDriveN`, `/dev/sdX`) or an E01 chain decoded on the fly, hashes
+  as it streams (MD5 / SHA-1 / SHA-256), writes a flat `.dd`, and on a read error
+  retries then drops to sector granularity so one bad sector costs 512 zero bytes,
+  counted and listed with offsets in `<image>.log.json`. `<image>.sha256` is in
+  `sha256sum` format so the Verify tool reads it. The Imager tool uses it for Raw
+  output; EWF/AFF4 output still routes to the sidecar. Logged to custody as
+  `evidence.imaged`.
+- **E01 → raw conversion.** `ImageConverter.EwfToRawAsync` decodes every chunk,
+  hashes, writes flat, and compares the result with the container's recorded
+  digests — the conversion doubles as a verification and says so (match /
+  mismatch / damaged chunks / no recorded hash). The Convert tool is real now.
+- **`$UsnJrnl:$J` parser and tool.** `UsnJournal` reads USN_RECORD_V2 and V3 from
+  an NTFS volume in any image (per partition) or an extracted `$J`, resynchronises
+  on page padding and garbage, and renders reason flags the way MFTECmd and Plaso
+  do. New USN journal tool in Examine (200k-row budget, banner when hit). The
+  timeline ingester picks up `$J` / `$UsnJrnl$J` files from triage folders.
+- **Custody chain tip signing.** `CustodySigner` signs `(case_id, sequence,
+  entry_hash, signed_utc)` with an ECDSA P-256 examiner key created on first use
+  in the user's profile; attestations live in the case file (schema v3) with the
+  public key embedded, so verification needs nothing else. A consistent rewrite of
+  the log — which the unkeyed chain cannot see — now fails attestation. Custody
+  tool: Sign chain tip, attestation verdict, key fingerprint, export as JSON to
+  publish out of the examiner's reach. SECURITY.md rewritten accordingly.
+- **Bookmarks tool.** Review, delete (recorded in custody) and export the case's
+  bookmarks; Reports still consumes them as exhibits.
+- **OAuth loopback hardened.** `state` nonce issued and required back with a
+  constant-time compare, provider `error` surfaced, listener refuses non-loopback
+  prefixes, Dropbox keeps its PKCE verifier. Closes the audit's remaining Medium.
+- **Supply chain.** Every GitHub Action pinned by commit SHA; releases ship a
+  CycloneDX SBOM (`cinder-sbom.cdx.json`) beside the binaries.
+
 ### Added — analysis & workflow
 
 - **Export from every grid.** Every parser tool gains Export CSV / Export JSON

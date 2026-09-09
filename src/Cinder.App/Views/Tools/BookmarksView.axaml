@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             x:Class="Cinder.App.Views.Tools.BookmarksView"
+             x:DataType="tools:BookmarksTool">
+    <Grid RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" Background="{DynamicResource CinderSurface2Brush}" Padding="14,10"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Classes="accent" Content="Refresh" Command="{Binding RefreshCommand}" />
+                <Button Content="Delete selected" Command="{Binding DeleteSelectedCommand}"
+                        ToolTip.Tip="Withdraws the finding; the deletion is written to the chain of custody." />
+                <Button Content="Export CSV" Command="{Binding ExportCommand}" CommandParameter="csv" IsVisible="{Binding Bookmarks.Count}" />
+                <Button Content="Export JSON" Command="{Binding ExportCommand}" CommandParameter="json" IsVisible="{Binding Bookmarks.Count}" />
+            </StackPanel>
+        </Border>
+
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Bookmarks}" SelectedItem="{Binding Selected}"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="{DynamicResource CinderBackground0Brush}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="50" />
+                <DataGridTextColumn Header="Created (UTC)" Binding="{Binding CreatedUtc, StringFormat=u}" Width="170" />
+                <DataGridTextColumn Header="Examiner" Binding="{Binding Examiner}" Width="110" />
+                <DataGridTextColumn Header="Tool" Binding="{Binding Tool}" Width="110" />
+                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="2*" />
+                <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="2*" />
+                <DataGridTextColumn Header="Evidence" Binding="{Binding EvidencePath}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
+            <TextBlock Text="{Binding StatusLine, FallbackValue='Open a case and click Refresh.'}"
+                       FontSize="{DynamicResource CinderFontSizeXs}"
+                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+        </Border>
+    </Grid>
+</UserControl>
