@@ -63,6 +63,7 @@
     <PackageVersion Include="Blake3" Version="1.0.0" />
     <PackageVersion Include="System.IO.Hashing" Version="10.0.12" />
     <PackageVersion Include="BouncyCastle.Cryptography" Version="2.5.0" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.7" />
 
     <!-- Charts / Maps / Markdown -->
     <PackageVersion Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.0.0-rc5.4" />

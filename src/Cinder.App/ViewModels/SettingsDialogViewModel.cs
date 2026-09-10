@@ -37,6 +37,7 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
 
     // Hash sets (NSRL) — shared by the Hash sets tool and the Filesystem walk.
     [ObservableProperty] private string? _hashSetDatabase;
+    [ObservableProperty] private string? _timestampAuthorityUrl;
     [ObservableProperty] private bool _hashFilesOnEnumerate;
     [ObservableProperty] private int _hashSizeLimitMb = 64;
 
@@ -71,6 +72,7 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
         HashSetDatabase = s.HashSetDatabase;
         HashFilesOnEnumerate = s.HashFilesOnEnumerate;
         HashSizeLimitMb = s.HashSizeLimitMb;
+        TimestampAuthorityUrl = s.TimestampAuthorityUrl;
     }
 
     [RelayCommand]
@@ -103,6 +105,7 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
             HashSetDatabase = string.IsNullOrWhiteSpace(HashSetDatabase) ? null : HashSetDatabase,
             HashFilesOnEnumerate = HashFilesOnEnumerate,
             HashSizeLimitMb = Math.Clamp(HashSizeLimitMb, 1, 4096),
+            TimestampAuthorityUrl = string.IsNullOrWhiteSpace(TimestampAuthorityUrl) ? null : TimestampAuthorityUrl.Trim(),
         });
     }
 }

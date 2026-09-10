@@ -1,24 +1,26 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
+using Cinder.Imaging.Ewf;
 
 namespace Cinder.Imaging;
 
 /// <summary>
-/// In-process raw (<c>.dd</c>) acquisition: a source file, block device or existing container
-/// is read once, hashed as it streams, and written flat. Unreadable regions are retried, then
-/// read sector by sector so a single bad sector costs one sector of zeros rather than a whole
-/// block, and every zero-filled sector is counted and listed in the log written beside the
-/// image.
+/// In-process acquisition: a source file, block device or existing container is read once,
+/// hashed as it streams, and written either flat (<c>.dd</c>) or as an EnCase-layout EWF chain
+/// (<c>.E01</c>, <c>.E02</c>, …) through <see cref="EwfWriter"/>. Unreadable regions are
+/// retried, then read sector by sector so a single bad sector costs one sector of zeros rather
+/// than a whole block, and every zero-filled sector is counted, listed in the log written
+/// beside the image and — for EWF — recorded in the container's <c>error2</c> section.
 ///
-/// <para>Output is a plain image plus two companions: <c>&lt;image&gt;.sha256</c> in the
-/// <c>sha256sum</c> format the Verify tool reads, and <c>&lt;image&gt;.log.json</c> with the
-/// job metadata — source, size, digests, bad sectors with offsets, examiner, start/end times.
-/// EWF output is not implemented here; use the sidecar for that.</para>
+/// <para>Companions: <c>&lt;image&gt;.sha256</c> in <c>sha256sum</c> format for raw output
+/// (the Verify tool reads it; EWF carries its digests inside), and <c>&lt;image&gt;.log.json</c>
+/// with the job metadata — source, size, digests, bad sectors with offsets, examiner,
+/// start/end times, segment list.</para>
 /// </summary>
-public sealed class RawImager : IDiskImager
+public sealed class InProcessImager : IDiskImager
 {
     private const int BlockSize = 1 << 20;
     private const int SectorSize = 512;
@@ -26,12 +28,14 @@ public sealed class RawImager : IDiskImager
     /// <summary>Bad sectors listed individually in the log before the list is capped.</summary>
     private const int MaxLoggedBadSectors = 10_000;
 
+    public static bool Supports(ImageFormat format) => format is ImageFormat.Raw or ImageFormat.Ewf;
+
     public async Task<ImageJobResult> ImageAsync(ImageJob job, IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(job);
-        if (job.Format != ImageFormat.Raw)
+        if (!Supports(job.Format))
         {
-            throw new NotSupportedException($"RawImager writes raw images only; {job.Format} is not supported in-process.");
+            throw new NotSupportedException($"InProcessImager writes raw and EWF images; {job.Format} is not supported in-process.");
         }
 
         await using var source = OpenSource(job.SourceDevice);
@@ -46,13 +50,20 @@ public sealed class RawImager : IDiskImager
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(job);
+        if (!Supports(job.Format))
+        {
+            throw new NotSupportedException($"InProcessImager writes raw and EWF images; {job.Format} is not supported in-process.");
+        }
 
         var started = DateTimeOffset.UtcNow;
         var sw = Stopwatch.StartNew();
         long? total = TryLength(source);
 
-        using var md5 = job.ComputeMd5 ? IncrementalHash.CreateHash(HashAlgorithmName.MD5) : null;
-        using var sha1 = job.ComputeSha1 ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : null;
+        // EWF records MD5 and SHA-1 in the container; make sure they exist for that format.
+        var wantMd5 = job.ComputeMd5 || job.Format == ImageFormat.Ewf;
+        var wantSha1 = job.ComputeSha1 || job.Format == ImageFormat.Ewf;
+        using var md5 = wantMd5 ? IncrementalHash.CreateHash(HashAlgorithmName.MD5) : null;
+        using var sha1 = wantSha1 ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : null;
         using var sha256 = job.ComputeSha256 ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256) : null;
 
         var badSectorOffsets = new List<long>();
@@ -61,47 +72,50 @@ public sealed class RawImager : IDiskImager
         var block = new byte[BlockSize];
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(job.OutputPath))!);
-        await using (var output = new FileStream(job.OutputPath, FileMode.Create, FileAccess.Write, FileShare.None, BlockSize, FileOptions.SequentialScan))
+        using var sink = OpenSink(job);
+        long position = 0;
+        while (true)
         {
-            long position = 0;
-            while (true)
+            ct.ThrowIfCancellationRequested();
+
+            var (n, newlyBad) = await ReadBlockAsync(source, position, block, job, badSectorOffsets, sink, ct).ConfigureAwait(false);
+            badSectors += newlyBad;
+            if (n <= 0)
             {
-                ct.ThrowIfCancellationRequested();
-
-                var (n, newlyBad) = await ReadBlockAsync(source, position, block, job, badSectorOffsets, ct).ConfigureAwait(false);
-                badSectors += newlyBad;
-                if (n <= 0)
-                {
-                    break;
-                }
-
-                md5?.AppendData(block, 0, n);
-                sha1?.AppendData(block, 0, n);
-                sha256?.AppendData(block, 0, n);
-                await output.WriteAsync(block.AsMemory(0, n), ct).ConfigureAwait(false);
-
-                position += n;
-                written += n;
-                progress?.Report(new ImageJobProgress(written, total, written / Math.Max(0.001, sw.Elapsed.TotalSeconds), badSectors, "reading"));
+                break;
             }
-            await output.FlushAsync(ct).ConfigureAwait(false);
+
+            md5?.AppendData(block, 0, n);
+            sha1?.AppendData(block, 0, n);
+            sha256?.AppendData(block, 0, n);
+            await sink.WriteAsync(block.AsMemory(0, n), ct).ConfigureAwait(false);
+
+            position += n;
+            written += n;
+            progress?.Report(new ImageJobProgress(written, total, written / Math.Max(0.001, sw.Elapsed.TotalSeconds), badSectors, "reading"));
         }
 
-        var md5Hex = md5 is null ? null : Convert.ToHexStringLower(md5.GetHashAndReset());
-        var sha1Hex = sha1 is null ? null : Convert.ToHexStringLower(sha1.GetHashAndReset());
+        var md5Bytes = md5?.GetHashAndReset();
+        var sha1Bytes = sha1?.GetHashAndReset();
+        var md5Hex = md5Bytes is null ? null : Convert.ToHexStringLower(md5Bytes);
+        var sha1Hex = sha1Bytes is null ? null : Convert.ToHexStringLower(sha1Bytes);
         var sha256Hex = sha256 is null ? null : Convert.ToHexStringLower(sha256.GetHashAndReset());
 
-        // Companions: the digest file the Verify tool reads, and the acquisition log.
-        if (sha256Hex is not null)
+        sink.Finish(md5Bytes, sha1Bytes);
+
+        // Companions: the digest file the Verify tool reads (raw only), and the acquisition log.
+        if (sha256Hex is not null && job.Format == ImageFormat.Raw)
         {
             await File.WriteAllTextAsync(job.OutputPath + ".sha256",
                 $"{sha256Hex}  {Path.GetFileName(job.OutputPath)}\n", ct).ConfigureAwait(false);
         }
         var log = new
         {
-            tool = "Cinder RawImager",
+            tool = "Cinder InProcessImager",
+            format = job.Format.ToString(),
             source = job.SourceDevice,
             output = job.OutputPath,
+            segments = sink.Paths,
             started_utc = started.ToString("O", CultureInfo.InvariantCulture),
             finished_utc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
             elapsed_seconds = sw.Elapsed.TotalSeconds,
@@ -132,7 +146,7 @@ public sealed class RawImager : IDiskImager
     /// fail are zero-filled and counted. Returns the number of bytes produced (0 at end).
     /// </summary>
     private static async Task<(int Read, long BadSectors)> ReadBlockAsync(Stream source, long position, byte[] block, ImageJob job,
-        List<long> badSectorOffsets, CancellationToken ct)
+        List<long> badSectorOffsets, ImageSink sink, CancellationToken ct)
     {
         var attempts = job.ReadErrorRetry ? job.ReadErrorRetries + 1 : 1;
         for (int attempt = 0; attempt < attempts; attempt++)
@@ -170,6 +184,7 @@ public sealed class RawImager : IDiskImager
                 {
                     badSectorOffsets.Add(position + off);
                 }
+                sink.NoteBadSector((position + off) / SectorSize);
             }
 
             if (n <= 0)
@@ -233,13 +248,83 @@ public sealed class RawImager : IDiskImager
     public static bool IsDevicePath(string path) =>
         path.StartsWith(@"\\.\", StringComparison.Ordinal) ||
         path.StartsWith("/dev/", StringComparison.Ordinal);
+
+    // ---- output sinks --------------------------------------------------------------------
+
+    private static ImageSink OpenSink(ImageJob job) => job.Format switch
+    {
+        ImageFormat.Ewf => new EwfSink(job),
+        _ => new RawSink(job.OutputPath),
+    };
+
+    private abstract class ImageSink : IDisposable
+    {
+        public abstract IReadOnlyList<string> Paths { get; }
+        public abstract ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct);
+        public virtual void NoteBadSector(long sector) { }
+        public abstract void Finish(byte[]? md5, byte[]? sha1);
+        public abstract void Dispose();
+    }
+
+    private sealed class RawSink : ImageSink
+    {
+        private readonly FileStream _out;
+        private readonly string _path;
+
+        public RawSink(string path)
+        {
+            _path = path;
+            _out = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, BlockSize, FileOptions.SequentialScan);
+        }
+
+        public override IReadOnlyList<string> Paths => [_path];
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct) => _out.WriteAsync(data, ct);
+        public override void Finish(byte[]? md5, byte[]? sha1) => _out.Flush();
+        public override void Dispose() => _out.Dispose();
+    }
+
+    private sealed class EwfSink : ImageSink
+    {
+        private readonly EwfWriter _writer;
+
+        public EwfSink(ImageJob job)
+        {
+            var segment = Math.Clamp(job.SegmentSizeMiB, 4, 2000) * 1024L * 1024;
+            _writer = new EwfWriter(job.OutputPath, new EwfWriter.Options
+            {
+                MaxSegmentBytes = segment,
+                Compress = job.CompressionLevel > 0,
+                Compression = job.CompressionLevel >= 2 ? CompressionLevel.SmallestSize : CompressionLevel.Optimal,
+                CaseNumber = job.CaseNumber,
+                EvidenceNumber = job.EvidenceNumber,
+                Examiner = job.ExaminerName,
+                Description = job.Description,
+                Notes = job.Notes,
+                MediaFlags = IsDevicePath(job.SourceDevice) ? (byte)0x02 : (byte)0x01,
+                AcquisitionTool = "Cinder " + (typeof(InProcessImager).Assembly.GetName().Version?.ToString(3) ?? ""),
+            });
+        }
+
+        public override IReadOnlyList<string> Paths => _writer.SegmentPaths;
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
+        {
+            _writer.Write(data.Span);
+            return ValueTask.CompletedTask;
+        }
+
+        public override void NoteBadSector(long sector) => _writer.AddBadSectors(sector, 1);
+        public override void Finish(byte[]? md5, byte[]? sha1) => _writer.Finish(md5, sha1);
+        public override void Dispose() => _writer.Dispose();
+    }
 }
 
 /// <summary>
-/// E01 → raw conversion is acquisition from a container: decode every chunk through
-/// <see cref="Ewf.EwfReader"/>, hash as it streams, write flat, and report damaged chunks. The
-/// hashes it produces can be compared with the container's recorded digests — the conversion
-/// doubles as a verification.
+/// Format conversion is acquisition from a container. E01 → raw decodes every chunk through
+/// <see cref="EwfReader"/>, hashes as it streams, writes flat, and compares with the digests
+/// the container recorded. Raw → E01 hashes the source as it is chunked and compressed, then
+/// re-reads the finished container and checks it reproduces the same digest — so both
+/// directions double as a verification.
 /// </summary>
 public static class ImageConverter
 {
@@ -254,12 +339,12 @@ public static class ImageConverter
         string sourceE01, string outputRaw, string? examiner = null,
         IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
     {
-        using var ewf = Ewf.EwfReader.Open(sourceE01);
+        using var ewf = EwfReader.Open(sourceE01);
         await using var stream = ewf.OpenStream();
 
         var job = new ImageJob(sourceE01, outputRaw, ImageFormat.Raw, ExaminerName: examiner,
             Description: $"Converted from EWF ({ewf.SegmentCount} segment(s))");
-        var result = await new RawImager().ImageStreamAsync(stream, job, progress, ct).ConfigureAwait(false);
+        var result = await new InProcessImager().ImageStreamAsync(stream, job, progress, ct).ConfigureAwait(false);
 
         bool? matches = null;
         if (ewf.RecordedMd5 is not null && result.Md5 is not null)
@@ -275,6 +360,30 @@ public static class ImageConverter
             matches = false;
         }
 
+        return new ConversionResult(result, ewf.RecordedMd5, ewf.RecordedSha1, ewf.DamagedChunks.Count, matches);
+    }
+
+    /// <summary>
+    /// Raw → E01. <paramref name="verify"/> re-reads the finished chain and hashes it, which
+    /// doubles the time and is what turns "written" into "verified"; leave it on unless the
+    /// Verify tool will be run separately.
+    /// </summary>
+    public static async Task<ConversionResult> RawToEwfAsync(
+        string sourceRaw, string outputE01, string? examiner = null, int compressionLevel = 1, long segmentSizeMiB = 1500,
+        bool verify = true, IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
+    {
+        var job = new ImageJob(sourceRaw, outputE01, ImageFormat.Ewf, CompressionLevel: compressionLevel, SegmentSizeMiB: segmentSizeMiB,
+            ExaminerName: examiner, Description: "Converted from raw");
+        var result = await new InProcessImager().ImageAsync(job, progress, ct).ConfigureAwait(false);
+
+        if (!verify)
+        {
+            return new ConversionResult(result, result.Md5, result.Sha1, 0, null);
+        }
+
+        using var ewf = EwfReader.Open(outputE01);
+        var v = await ewf.VerifyAsync(null, ct).ConfigureAwait(false);
+        var matches = v.Verified && string.Equals(ewf.RecordedMd5, result.Md5, StringComparison.OrdinalIgnoreCase);
         return new ConversionResult(result, ewf.RecordedMd5, ewf.RecordedSha1, ewf.DamagedChunks.Count, matches);
     }
 }

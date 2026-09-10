@@ -10,9 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Correctness and evidence-integrity pass, followed by the features a competitive
 gap analysis showed every established tool has and Cinder lacked.
 
+### Added — EWF writer, trusted timestamps
+
+- **E01 acquisition in-process.** `EwfWriter` produces EnCase 6-layout chains:
+  `header2`/`header`/`volume`, zlib-compressed 32 KiB chunks (stored with an
+  Adler-32 when compression would not help), `sectors`/`table`/`table2` runs
+  that roll to a new segment before the 31-bit offset limit, `digest`/`hash`,
+  an `error2` section listing unreadable sectors, and the Adler-32 every
+  descriptor and fixed section must carry. Media size need not be known up
+  front — geometry is patched at finish, so devices of unknown length work.
+  Verified with libewf (pyewf 20240506): multi-segment chains glob, format is
+  reported as EnCase 6, media size and both hashes agree, every header value
+  round-trips. The Imager tool now writes E01 in-process; only AFF4 still goes
+  to the sidecar.
+- **Raw → E01 conversion.** `ImageConverter.RawToEwfAsync` writes the chain,
+  then re-reads it through the reader and checks the digest reproduces. The
+  Convert tool offers both directions.
+- **RFC 3161 trusted timestamps on attestations.** `Rfc3161Timestamper` sends
+  the SHA-256 of an attestation signature to a configured Time-Stamp Authority
+  (Settings → Chain of custody; https only) and stores the countersigned token
+  in the case file (schema v4). Verification checks the token's imprint against
+  the signature and its CMS signature under the embedded certificate, and
+  reports chain trust separately. Tested against a BouncyCastle TSA on a
+  loopback listener, including a nonce mismatch and a token grafted onto a
+  different signature (both rejected).
+- EWF reader now takes the 64-bit sector count EnCase 5+ writes, so images over
+  2 TiB report the right size.
+
 ### Added — imaging, journal, custody anchor
 
-- **Raw imaging in-process.** `RawImager` reads a file, a block device
+- **Raw imaging in-process.** `InProcessImager` reads a file, a block device
   (`\\.\PhysicalDriveN`, `/dev/sdX`) or an E01 chain decoded on the fly, hashes
   as it streams (MD5 / SHA-1 / SHA-256), writes a flat `.dd`, and on a read error
   retries then drops to sector granularity so one bad sector costs 512 zero bytes,

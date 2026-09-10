@@ -87,16 +87,17 @@ Not in the original plan; landed alongside Phase 1.
 UI surfaces exist for every tool. Image acquisition / mounting / shadow
 copies are placeholders until the platform-specific drivers ship.
 
-- ✅ Disk imager (raw) — `RawImager`: file / block device / E01 chain →
-  `.dd` with hash-on-read, retry + sector-level fallback with bad-sector
-  offsets logged, `.sha256` + `.log.json` companions, custody entry. Needs
-  Administrator / root for devices. 🟡 EWF / AFF4 output still via sidecar.
+- ✅ Disk imager (raw, E01) — `InProcessImager`: file / block device / E01
+  chain → `.dd` or an EnCase 6 `.E01` chain (`EwfWriter`, libewf-verified)
+  with hash-on-read, retry + sector-level fallback with bad-sector offsets
+  logged (and in the E01's error section), `.log.json` companion, custody
+  entry. Needs Administrator / root for devices. 🟡 AFF4 still via sidecar.
 - ✅ Image verify — in-process: E01 against recorded digests, raw against a
   companion digest or SHA256SUMS; verified / failed / unverifiable.
 - 🟡 Mount image — VHD/VHDX/ISO via PowerShell `Mount-DiskImage` on Windows
   works; E01 mount requires Arsenal Image Mounter (free, external).
-- ✅ Convert format — E01 → raw in-process, result compared with the
-  container's recorded hash. 🟡 raw → E01 pending an EWF writer.
+- ✅ Convert format — E01 ↔ raw in-process; E01 → raw compared with the
+  container's recorded hash, raw → E01 re-read and checked after writing.
 - 🟡 Write-blocker (Windows) — placeholder, real version blocked on a
   signed kernel driver in `drivers/cinder-wb-windows`.
 - 🟡 Write-blocker (Linux) — `blockdev --setro` wrapper, works.
@@ -212,6 +213,9 @@ libraries do the heavy lifting in-process.
 - ✅ Custody attestations — sign the chain tip with an examiner key
   (ECDSA P-256), verify from the file alone, export for out-of-band
   publication. A consistent rewrite now fails attestation.
+- ✅ RFC 3161 timestamps — with a TSA configured, attestations are
+  countersigned by a third-party clock; verification checks the token
+  against the signature and reports chain trust separately.
 - ✅ YARA-lite — in-house parser + Aho-Corasick matcher. Loads `.yar`
   files, parses the common `rule { meta: strings: condition: }` grammar
   (literal `"strings"`, `nocase`, hex `{ 4D 5A }` patterns; condition

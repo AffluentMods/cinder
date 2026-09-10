@@ -877,8 +877,12 @@ the original.
      bytes stream, a `.sha256` companion (sha256sum format, so the Verify tool
      reads it) and a `.log.json` acquisition log are written beside the image,
      and the run is recorded in the custody log.
-   - **E01 / AFF4** are handed to the Python imager sidecar (libewf), which must
-     be installed.
+   - **E01** is also in-process: EnCase 6 layout, 32 KiB chunks, zlib
+     compression, 1.5 GB segments (`.E01`, `.E02`, …), case metadata in the
+     header, MD5 + SHA-1 in the container, unreadable sectors in its error
+     section. Verified readable by libewf, which is what FTK Imager, Autopsy,
+     X-Ways and EnCase-compatible tools use.
+   - **AFF4** is handed to the Python imager sidecar, which must be installed.
 4. Read errors: Cinder retries, then re-reads the failing block one sector at a
    time so a bad sector costs 512 zero bytes rather than a megabyte. Every
    zero-filled sector is counted, and its offset is listed in the log.
@@ -948,19 +952,25 @@ public sealed partial class ConvertTool
 {
     public override string HelpMarkdown => """
 ## What this is
-E01 → raw conversion, done in-process: every chunk of the EWF container is
-decoded, hashed as it streams, and written flat as a `.dd`.
+Conversion between raw and E01 in both directions, in-process. E01 → raw decodes
+every chunk of the EWF container, hashes as it streams, and writes flat. Raw →
+E01 chunks, compresses and hashes the source into an EnCase 6 chain, then
+re-reads the finished chain and checks it reproduces the digest.
 
 ## When you'd use it
 When the tool you need next only understands raw images — a loop-mount, a
-hypervisor, an older carver — and your evidence arrived as E01.
+hypervisor, an older carver — and your evidence arrived as E01; or when a raw
+`.dd` has to travel as a compressed, self-hashing, segmented E01 instead.
 
 ## How to use it in Cinder
-1. Pick the E01 (the first segment; the rest of the chain is followed).
-2. Pick the output path. A `.sha256` and a `.log.json` are written beside it.
-3. Run. The result line compares the hash of what was written with the hash the
-   acquisition tool recorded inside the container, so the conversion is also a
-   verification:
+1. Pick the source (an E01's first segment — the chain is followed — or a raw
+   image) and the output format.
+2. Pick the output path. A `.log.json` is written beside it; raw output also
+   gets a `.sha256`.
+3. Run. For E01 → raw the result line compares the hash of what was written with
+   the hash the acquisition tool recorded inside the container; for raw → E01
+   it reports whether the re-read of the new chain reproduces the digest. Either
+   way the conversion is also a verification:
    - **matches** — the container's recorded hash reproduces; the raw image is
      the acquired bytes.
    - **MISMATCH** — do not trust either file until you know why.
@@ -971,8 +981,8 @@ hypervisor, an older carver — and your evidence arrived as E01.
 4. The conversion is recorded in the custody log with both digests.
 
 ## Not yet
-raw → E01 needs an EWF writer, which Cinder does not have; use the Imager's E01
-output via the sidecar for that.
+AFF4 in either direction; VHD/VHDX output. AFF4 acquisition still goes through
+the Python sidecar from the Imager tool.
 """;
 }
 
@@ -1133,7 +1143,12 @@ spliced in breaks the chain and Verify says so.
    number, entry hash and time — with an ECDSA P-256 key created on first use in
    your user profile (`Cinder/examiner-signing-key.p8`). The attestation, public
    key included, is stored in the case file.
-3. Click "Export attestation…" and send the JSON somewhere you cannot later
+3. Optional but recommended: set a Time-Stamp Authority in Settings → Chain of
+   custody. Signing then also sends a SHA-256 of the signature to that RFC 3161
+   TSA and stores its countersigned token in the case file. The examiner key
+   says *who*; the TSA says *no later than when*, from a clock you do not
+   control — so the attestation cannot be backdated by re-signing.
+4. Click "Export attestation…" and send the JSON somewhere you cannot later
    edit: a supervisor's inbox, the case ticket, a WORM share.
 4. Export the log as part of your report.
 

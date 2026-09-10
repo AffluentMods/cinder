@@ -131,10 +131,10 @@ annotation; every run is written to the custody log.
 
 | Tool | Status | What it does |
 |---|---|---|
-| **Disk imager** | works (raw) | `RawImager`: file / block device / E01 chain → `.dd`, hash-on-read, retry then sector-level fallback with bad-sector offsets in `.log.json`, `.sha256` companion, custody entry. Devices need Administrator/root. EWF/AFF4 output still via the Python sidecar |
+| **Disk imager** | works (raw, E01) | `InProcessImager`: file / block device / E01 chain → `.dd` or an EnCase 6 `.E01` chain (`EwfWriter`: zlib chunks, segments, metadata header, MD5+SHA-1 inside, `error2` bad-sector section; verified readable by libewf). Hash-on-read, retry then sector-level fallback with bad-sector offsets in `.log.json`, custody entry. Devices need Administrator/root. AFF4 still via the Python sidecar |
 | **Image verify** | works | In-process. E01: `EwfReader.VerifyAsync` re-reads the decoded media and compares to the recorded MD5/SHA-1. Raw: hashes and compares to a `.sha256/.sha1/.md5` companion or a `SHA256SUMS` line. Three distinct outcomes — verified / failed / **unverifiable** — and the result is written to custody with digests |
 | **Mount image** | partial | VHD/VHDX/ISO via `Mount-DiskImage` (Windows); Linux `losetup`+`mount` read-only; E01 needs Arsenal Image Mounter |
-| **Convert format** | works (E01 → raw) | `ImageConverter.EwfToRawAsync`: decodes, hashes, writes flat, compares with the recorded acquisition hash — match / mismatch / damaged / unverifiable. raw → E01 pending an EWF writer |
+| **Convert format** | works (E01 ↔ raw) | `ImageConverter.EwfToRawAsync` decodes, hashes, writes flat, compares with the recorded acquisition hash; `RawToEwfAsync` writes the chain then re-reads it and checks the digest reproduces. Both directions double as a verification |
 | **Shadow copies** | works | `vssadmin` (Windows), btrfs/LVM/ZFS snapshots (Linux) |
 | **RAM capture** | shell | winpmem / LiME fallbacks when present; no bundled driver |
 | **File carver** | works | Vectorised header/footer carving, 30+ signatures, validators for JPEG/PNG/PE, exact window ownership (no duplicate hits), slack/unallocated regions |
@@ -151,7 +151,7 @@ portable exe run as Administrator).
 |---|---|---|
 | **Cases** | works | Create / open / recents; multi-case tabs; examiner branches (`CaseBranching`) |
 | **Reports** | works | Templates: Expert Witness, Incident Response, Internal Audit, Plain. Sections editor, Markdown preview, **bookmarks → numbered Exhibits section** (note + every row column + who/when + index), export to Markdown / HTML / PDF (QuestPDF: cover, sections, exhibit cards, index, header/footer) / DOCX (OpenXml, core properties) / JSON playbook. Exports are logged to custody |
-| **Chain of custody** | works | View + verify. Records case created/opened, every parser run (tool, evidence, row count, truncation), verifications (digests + verdict), mounts, imaging, data exports, report exports, bookmarks, manual hashes. **Sign chain tip** with the examiner's ECDSA P-256 key (`CustodySigner`); attestations verify from the file alone and catch a consistent rewrite; export as JSON for out-of-band publication |
+| **Chain of custody** | works | View + verify. Records case created/opened, every parser run (tool, evidence, row count, truncation), verifications (digests + verdict), mounts, imaging, data exports, report exports, bookmarks, manual hashes. **Sign chain tip** with the examiner's ECDSA P-256 key (`CustodySigner`); attestations verify from the file alone and catch a consistent rewrite; optional RFC 3161 countersignature from a configured TSA (`Rfc3161Timestamper`) so they cannot be backdated; export as JSON for out-of-band publication |
 | **Bookmarks** | works | Review / delete (custody-logged) / export the case's bookmarks |
 | **Workflows** | works | JSON DAG, topological run; handlers `open-image`, `hash`, `registry`, `fs-enumerate`, `carve`, `report`, `index`; `ai-summary` degrades without a provider |
 | **Plugins** | partial | C# DLL loading gated by `.cinder-trusted` sentinel + `.cinder-plugins.sha256` manifest; Python scripting host; no isolation yet |
@@ -205,10 +205,10 @@ publish unless the suite passes on both platforms; Windows binary is currently u
    `Phase3To10ParserTools.cs`, `ToolImplementations.cs` hold the real parsers; the
    `Cinder.Artifacts.*` projects are thin. The filesystem walker has been moved down to
    `Cinder.Filesystems`; the same move for registry/EVTX/etc. is what would make them testable.
-3. **Custody attestations bind everyone except the examiner** whose key it is; publishing the
-   exported attestation out of their reach is a process step. RFC 3161 timestamping is next.
+3. **Custody attestations need a configured TSA to bind time**; without one the examiner's
+   own key is the only anchor, and publishing the export out of their reach is a process step.
 4. **Deleted-file recovery is names only**; contents via the carver. `$LogFile` is not parsed.
-5. **Imaging writes raw only**; EWF/AFF4 output still needs the Python sidecar.
+5. **Imaging writes raw and E01**; AFF4 output still needs the Python sidecar.
 6. **IOC matching is folder-scoped**, not against the Lucene index or an open case's parsed
    grids; hash indicators require exact digests.
 7. RAM capture and cloud pull are shells or externally dependent; VirusTotal needs a key.
