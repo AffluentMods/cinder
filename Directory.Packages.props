@@ -15,14 +15,14 @@
     <PackageVersion Include="Microsoft.Build.Tasks.Git" Version="10.0.401" />
 
     <!-- Avalonia -->
-    <PackageVersion Include="Avalonia" Version="11.2.1" />
+    <PackageVersion Include="Avalonia" Version="12.1.2" />
     <PackageVersion Include="Avalonia.Desktop" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Themes.Fluent" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Fonts.Inter" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Diagnostics" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.ReactiveUI" Version="11.2.1" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Diagnostics" Version="11.3.21" />
+    <PackageVersion Include="Avalonia.ReactiveUI" Version="11.3.8" />
     <PackageVersion Include="FluentAvaloniaUI" Version="2.1.0" />
-    <PackageVersion Include="Avalonia.Controls.DataGrid" Version="11.2.1" />
+    <PackageVersion Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
 
     <!--
       Avalonia.FreeDesktop transitively pulls Tmds.DBus.Protocol 0.20.0 which
