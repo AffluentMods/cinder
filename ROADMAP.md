@@ -87,17 +87,19 @@ Not in the original plan; landed alongside Phase 1.
 UI surfaces exist for every tool. Image acquisition / mounting / shadow
 copies are placeholders until the platform-specific drivers ship.
 
-- ✅ Disk imager (raw, E01) — `InProcessImager`: file / block device / E01
-  chain → `.dd` or an EnCase 6 `.E01` chain (`EwfWriter`, libewf-verified)
-  with hash-on-read, retry + sector-level fallback with bad-sector offsets
-  logged (and in the E01's error section), `.log.json` companion, custody
-  entry. Needs Administrator / root for devices. 🟡 AFF4 still via sidecar.
-- ✅ Image verify — in-process: E01 against recorded digests, raw against a
-  companion digest or SHA256SUMS; verified / failed / unverifiable.
+- ✅ Disk imager (raw, E01, AFF4, VHD, VHDX) — `InProcessImager`: file /
+  block device / E01 / AFF4 → any of the five, all in-process. E01 via
+  `EwfWriter` (libewf-verified), AFF4 via `Aff4Writer` (pyaff4-verified),
+  VHD/VHDX via DiscUtils. Hash-on-read, retry + sector-level fallback with
+  bad-sector offsets logged (and in the E01's error section), `.log.json`
+  companion, custody entry. Needs Administrator / root for devices.
+- ✅ Image verify — in-process: E01 and AFF4 against recorded digests, raw
+  against a companion digest or SHA256SUMS; verified / failed / unverifiable.
 - 🟡 Mount image — VHD/VHDX/ISO via PowerShell `Mount-DiskImage` on Windows
   works; E01 mount requires Arsenal Image Mounter (free, external).
-- ✅ Convert format — E01 ↔ raw in-process; E01 → raw compared with the
-  container's recorded hash, raw → E01 re-read and checked after writing.
+- ✅ Convert format — raw / E01 / AFF4 / VHD / VHDX in any direction; output
+  re-read and checked after writing, container sources checked against
+  their recorded hash.
 - 🟡 Write-blocker (Windows) — placeholder, real version blocked on a
   signed kernel driver in `drivers/cinder-wb-windows`.
 - 🟡 Write-blocker (Linux) — `blockdev --setro` wrapper, works.
@@ -114,8 +116,10 @@ copies are placeholders until the platform-specific drivers ship.
   surfaces name, size, MAC/creation times, MFT index and sequence as
   `IsDeleted` rows. Names and timestamps only; contents via the carver.
 - ✅ $UsnJrnl:$J — USN_RECORD_V2/V3 parser + USN journal tool (image or
-  extracted `$J`); timeline ingest of `$J` from triage folders. $LogFile
-  still tracked.
+  extracted `$J`); timeline ingest of `$J` from triage folders.
+- ✅ $LogFile — transaction-log parser + tool: records reassembled across
+  pages, stale slack kept and flagged, names / parents / timestamps
+  recovered from FILE-record and index-entry payloads.
 
 ## Phase 4 — Windows artifacts ✅ (most) / 🟡 (some)
 

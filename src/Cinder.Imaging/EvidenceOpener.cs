@@ -22,6 +22,11 @@ public static class EvidenceOpener
         // Sniff first 8 bytes; if EVF magic, hand back the EWF-backed Stream.
         // Otherwise it's a raw file — return a FileStream so callers see byte-for-byte.
         var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (IsAff4Magic(fs))
+        {
+            fs.Dispose();
+            return Aff4.Aff4Reader.Open(path).OpenOwningStream();
+        }
         if (IsEwfMagic(fs))
         {
             try
@@ -39,6 +44,31 @@ public static class EvidenceOpener
             }
         }
         return fs;
+    }
+
+    /// <summary>True for an AFF4 container (a ZIP volume with a <c>container.description</c>).</summary>
+    public static bool IsAff4(string path) => Aff4.Aff4Reader.IsAff4(path);
+
+    private static bool IsAff4Magic(FileStream s)
+    {
+        var save = s.Position;
+        try
+        {
+            s.Position = 0;
+            Span<byte> head = stackalloc byte[4];
+            if (s.Read(head) < 4 || head[0] != 'P' || head[1] != 'K' || head[2] != 3 || head[3] != 4)
+            {
+                return false;
+            }
+            s.Position = 0;
+            using var zip = new System.IO.Compression.ZipArchive(s, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true);
+            return zip.GetEntry("container.description") is not null || zip.GetEntry("information.turtle") is not null;
+        }
+        catch (InvalidDataException) { return false; }
+        finally
+        {
+            s.Position = save;
+        }
     }
 
     public static bool IsEwf(string path)

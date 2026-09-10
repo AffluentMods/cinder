@@ -882,7 +882,13 @@ the original.
      header, MD5 + SHA-1 in the container, unreadable sectors in its error
      section. Verified readable by libewf, which is what FTK Imager, Autopsy,
      X-Ways and EnCase-compatible tools use.
-   - **AFF4** is handed to the Python imager sidecar, which must be installed.
+   - **AFF4** in-process: AFF4 Standard v1.0 ZIP volume, zlib-compressed 32 KiB
+     chunks in 64 MiB bevies, `Image → Map → ImageStream` objects, MD5 / SHA-1 /
+     SHA-256 and case metadata in `information.turtle`. Verified readable by
+     pyaff4.
+   - **VHD / VHDX** in-process: dynamic disks through DiscUtils' managed
+     writers, mountable in Hyper-V or Disk Management. These need the source
+     size up front, so a device that does not report one goes raw or E01.
 4. Read errors: Cinder retries, then re-reads the failing block one sector at a
    time so a bad sector costs 512 zero bytes rather than a megabyte. Every
    zero-filled sector is counted, and its offset is listed in the log.
@@ -910,8 +916,9 @@ sat on slow storage for a while.
 1. Pick the image file.
 2. Cinder reads every block and compares against a reference digest. For an E01
    that reference is the MD5 / SHA-1 the acquisition tool wrote inside the
-   container; for a raw image it's a .sha256 / .sha1 / .md5 companion file, or a
-   SHA256SUMS line naming the image, sitting next to it.
+   container; for an AFF4 container it is the MD5 / SHA-1 / SHA-256 recorded in
+   its `information.turtle`; for a raw image it's a .sha256 / .sha1 / .md5
+   companion file, or a SHA256SUMS line naming the image, sitting next to it.
 
 ## Reading the result
 There are three distinct outcomes, and the difference matters.
@@ -952,10 +959,10 @@ public sealed partial class ConvertTool
 {
     public override string HelpMarkdown => """
 ## What this is
-Conversion between raw and E01 in both directions, in-process. E01 → raw decodes
-every chunk of the EWF container, hashes as it streams, and writes flat. Raw →
-E01 chunks, compresses and hashes the source into an EnCase 6 chain, then
-re-reads the finished chain and checks it reproduces the digest.
+Conversion between forensic image formats — raw, E01, AFF4, VHD, VHDX — in any
+direction, in-process. The source is decoded through whichever reader
+understands it, hashed as it streams, and written through the target's writer;
+the finished output is then re-read and checked against that digest.
 
 ## When you'd use it
 When the tool you need next only understands raw images — a loop-mount, a
@@ -980,9 +987,11 @@ hypervisor, an older carver — and your evidence arrived as E01; or when a raw
      the faithful decode of what was in the E01, but nothing ties it to the media.
 4. The conversion is recorded in the custody log with both digests.
 
-## Not yet
-AFF4 in either direction; VHD/VHDX output. AFF4 acquisition still goes through
-the Python sidecar from the Imager tool.
+## Formats
+Source: raw, E01 chain, AFF4, VHD, VHDX. Target: any of the same five. Every
+target is re-read through its own reader after writing and must hash back to
+what was written; a container source is also checked against its recorded
+acquisition hash.
 """;
 }
 

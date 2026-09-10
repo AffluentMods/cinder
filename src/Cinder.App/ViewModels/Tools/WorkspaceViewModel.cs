@@ -44,6 +44,7 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
                     new DocumentsTool(),
                     new FilesystemTool(),
                     new UsnJournalTool(),
+                    new LogFileTool(),
                     new RegistryTool(),
                     new EventLogTool(),
                     new PrefetchTool(),

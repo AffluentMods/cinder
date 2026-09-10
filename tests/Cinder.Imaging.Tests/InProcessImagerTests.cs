@@ -108,10 +108,12 @@ public sealed class InProcessImagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Refuses_formats_it_cannot_write()
+    public void Writes_every_image_format_in_process()
     {
-        var act = async () => await new InProcessImager().ImageAsync(new ImageJob("x", Path.Combine(_dir, "y"), ImageFormat.Aff4));
-        await act.Should().ThrowAsync<NotSupportedException>();
+        foreach (var f in Enum.GetValues<ImageFormat>())
+        {
+            InProcessImager.Supports(f).Should().BeTrue($"{f} should no longer need the sidecar");
+        }
     }
 }
 
