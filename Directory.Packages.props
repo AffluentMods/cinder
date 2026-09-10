@@ -57,7 +57,7 @@
 
     <!-- Database -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
-    <PackageVersion Include="Dapper" Version="2.1.66" />
+    <PackageVersion Include="Dapper" Version="2.1.79" />
 
     <!-- Hashing / Crypto -->
     <PackageVersion Include="Blake3" Version="1.0.0" />
