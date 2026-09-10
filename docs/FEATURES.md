@@ -23,10 +23,12 @@ editor. C# / .NET 10, Avalonia 11 UI, Apache-2.0, no telemetry.
 Honest positioning: the durable value is **one modern shell over the best .NET forensics
 libraries** — Eric Zimmerman's parsers, DiscUtils, Lucene.NET, QuestPDF, SharpPcap,
 MetadataExtractor, MsgReader — plus the parts Cinder builds itself: the case store with a
-hash-chained custody log, the EWF (E01) reader with verification, the hex viewer, the
-carver, the super-timeline with ATT&CK tagging and Timesketch export, and a BYOM AI
-copilot. Every Windows-artifact parser runs in-process; Python sidecars remain only for the
-long tail (PST via pypff, Volatility 3, pytsk for non-DiscUtils filesystems).
+hash-chained custody log with signed, RFC 3161-timestamped attestations, in-process
+acquisition and conversion across raw / E01 / AFF4 / VHD / VHDX (E01 output verified with
+libewf, AFF4 with pyaff4), the three NTFS journals (`$MFT` walk, `$UsnJrnl`, `$LogFile`),
+the hex viewer, the carver, the super-timeline with ATT&CK tagging and Timesketch export,
+and a BYOM AI copilot. Every Windows-artifact parser and every image format runs in-process;
+Python sidecars remain only for Volatility 3 and RAM capture.
 
 ## 2. Architecture
 
@@ -36,7 +38,7 @@ long tail (PST via pypff, Volatility 3, pytsk for non-DiscUtils filesystems).
 |---|---|---|
 | `Cinder.App` | Avalonia shell, every view-model, every tool implementation, app services | ~55% of all code. **Parsing logic lives here**, in `ViewModels/Tools/*.cs`, not in the library projects — the biggest structural debt (see §9). |
 | `Cinder.Core` | Case store (SQLite + Dapper + migrations), custody log, hash service (MD5/SHA-1/SHA-256/BLAKE3 streaming), signature scanner (60+ magics), encrypted-container heuristic, `ExecutableResolver`, `TabularExporter`, `FeatureExtractor` | The genuinely reusable core. |
-| `Cinder.Imaging` | `EwfReader`/`EwfStream` (in-process E01, multi-segment, verification), `Aff4Reader`/`Aff4Writer` (AFF4 v1.0/v1.1, zlib/snappy/LZ4), `EwfWriter`, `InProcessImager` (raw/E01/AFF4/VHD/VHDX), `EvidenceOpener` (E01 / AFF4 / raw → `Stream`), mounters (VHD/VHDX/ISO via PowerShell; Linux loop), shadow-copy enumeration, write-blocker wrappers, sidecar imager/verifier | EWF reader is hardened against malformed input; damaged chunks are zero-filled and reported, never silently truncated. |
+| `Cinder.Imaging` | `EwfReader`/`EwfStream` (in-process E01, multi-segment, verification), `Aff4Reader`/`Aff4Writer` (AFF4 standard + pre-standard index layouts, zlib/snappy/LZ4/stored), `EwfWriter`, `InProcessImager` (raw/E01/AFF4/VHD/VHDX, retry + sector fallback), `ImageConverter` (any ↔ any with re-read), `EvidenceOpener` (E01 / AFF4 / VHD / VHDX / raw → `Stream`, detected by magic), mounters (VHD/VHDX/ISO via PowerShell; Linux loop), shadow-copy enumeration, write-blocker wrappers, sidecar imager/verifier | EWF reader is hardened against malformed input; damaged chunks are zero-filled and reported, never silently truncated. |
 | `Cinder.Carving` | `FileCarver` (header/footer, vectorised, 30+ signatures), `SlackUnallocCarver` | |
 | `Cinder.Hex` | `HexViewer` control (virtualised, `ILogicalScrollable`), `MmapHexBuffer`, `HexSearch` (streaming find), bookmarks, overlays | |
 | `Cinder.Search` | Lucene.NET `CaseIndex`, `SuperTimeline` + `TimelineExporter` + `MitreTagger`, `HashSetService` (NSRL, SQLite), `CommunicationGraph`, `GeoPoint` index, `VirusTotalClient`, `YaraScanner` (sidecar stub — real scanning is `Cinder.App/Services/YaraLite`) | |
@@ -133,7 +135,7 @@ annotation; every run is written to the custody log.
 | Tool | Status | What it does |
 |---|---|---|
 | **Disk imager** | works (raw, E01, AFF4, VHD, VHDX) | `InProcessImager`: file / block device / E01 / AFF4 → `.dd`, EnCase 6 `.E01` chain (`EwfWriter`, libewf-verified), AFF4 v1.0 container (`Aff4Writer`, pyaff4-verified), or a dynamic VHD/VHDX (DiscUtils). Hash-on-read, retry then sector-level fallback with bad-sector offsets in `.log.json` (and the E01 error section), custody entry. Devices need Administrator/root. No sidecar for any format |
-| **Image verify** | works | In-process. E01: `EwfReader.VerifyAsync` re-reads the decoded media and compares to the recorded MD5/SHA-1. Raw: hashes and compares to a `.sha256/.sha1/.md5` companion or a `SHA256SUMS` line. Three distinct outcomes — verified / failed / **unverifiable** — and the result is written to custody with digests |
+| **Image verify** | works | In-process. E01: `EwfReader.VerifyAsync` re-reads the decoded media and compares to the recorded MD5/SHA-1. AFF4: re-reads the map and compares every digest recorded in `information.turtle` (MD5/SHA-1/SHA-256). VHD/VHDX: hashes the disk *contents* (what the imager's companion covers), not the container file. Raw: hashes and compares to a `.sha256/.sha1/.md5` companion or a `SHA256SUMS` line. Three distinct outcomes — verified / failed / **unverifiable** — and the result is written to custody with digests |
 | **Mount image** | partial | VHD/VHDX/ISO via `Mount-DiskImage` (Windows); Linux `losetup`+`mount` read-only; E01 needs Arsenal Image Mounter |
 | **Convert format** | works (any ↔ any) | `ImageConverter.ConvertAsync`: raw / E01 / AFF4 / VHD / VHDX in any direction; output re-read through its own reader and checked against the digest computed while writing; a container source is checked against its recorded acquisition hash too |
 | **Shadow copies** | works | `vssadmin` (Windows), btrfs/LVM/ZFS snapshots (Linux) |
@@ -164,8 +166,9 @@ Also: **Home dashboard** (recent cases/evidence, first-run guide), **command pal
 
 ## 7. Cross-cutting behaviours worth knowing
 
-- **Evidence opening.** `EvidenceOpener.Open(path)` returns a seekable `Stream` for E01
-  (multi-segment) or raw. Everything byte-oriented consumes that.
+- **Evidence opening.** `EvidenceOpener.Open(path)` returns a seekable `Stream` over the
+  *media* for E01 (multi-segment), AFF4, VHD, VHDX or raw — detected by magic, not extension,
+  so a renamed container still opens as a disk. Everything byte-oriented consumes that.
 - **Truncation is never silent.** Parsers cap rows (5k–100k); `IsTruncated` drives a banner
   and the status line, and the custody entry records it.
 - **Custody logging.** `ActiveCaseContext.LogAsync(CustodyAction.X, details)` from anywhere;
@@ -188,9 +191,19 @@ loader, `ExecutableResolver`, `EncryptedBundle`, `TabularExporter`, `TimelineExp
 round-trip, verification pass/fail/unverifiable, damage, every hostile-input case),
 `Cinder.Carving.Tests` (window boundaries, duplicates, non-seekable sources, slack regions),
 `Cinder.Hex.Tests` (termination, boundary spanning, mmap, short reads), `Cinder.Native.Tests`.
-180 tests; `dotnet test` exits 0. `DiscUtilsWalkerTests` walks a checked-in NTFS image
-(`tests/fixtures/`, generated by `tools/ntfs-fixture-gen`); `BookmarkStoreTests` includes a v1 → v2 schema migration; `IocListTests` covers
-classification.
+241 tests; `dotnet test` exits 0 on Windows and Linux. `DiscUtilsWalkerTests` walks a
+checked-in NTFS image (`tests/fixtures/`, generated by `tools/ntfs-fixture-gen`);
+`BookmarkStoreTests` includes a v1 → v2 schema migration; `IocListTests` covers
+classification. Added since: `CustodySignerTests` (rewrite-and-rechain attack detected),
+`Rfc3161TimestamperTests` (BouncyCastle TSA on a loopback listener; nonce mismatch and grafted
+token rejected), `OAuthPkceHelperTests` (live listener), `UsnJournalTests`, `NtfsLogFileTests`
+(synthetic log with fixups, multi-page record, stale slack, torn page), `EwfWriterTests`
+(round trip, multi-segment, every Adler-32), `Aff4Tests` (round trip, pyaff4-style container,
+snappy/LZ4 reference vectors, VHD/VHDX read back through DiscUtils),
+`EvidenceOpenerHardeningTests` (renamed virtual disks, scrambled bevy, hostile geometry and
+turtle), `InProcessImagerTests` (byte-exact, bad sectors zero-filled and listed).
+Independent readers checked Cinder's writer output: libewf (pyewf 20240506) for E01, pyaff4
+0.34 for AFF4 — hashes and metadata round-trip in both.
 
 CI (`.github/workflows/ci.yml`): build + test on Windows and Linux with job timeouts,
 `dotnet format` gate, dependency-audit gate, Python lint. Release (`release.yml`) refuses to
@@ -234,10 +247,25 @@ publish unless the suite passes on both platforms; Windows binary is currently u
 - `dotnet format --verify-no-changes --severity warn` must pass; Release build is
   warnings-as-errors.
 
-## 11. State of the working branch
+## 11. State of `main`
 
-Branch `fix/correctness-evidence-integrity` (PR #1) carries: the hex-search termination fix,
-EWF hardening + verification, carver rewrite, truncation banners, CI/release gates, the
-security audit fixes (`ExecutableResolver`, bundle cap, settings mode), and — from the
-follow-up pass — grid/timeline/strings export, ATT&CK tagging + filter, Strings feature
-presets, NTFS deleted-entry recovery, and custody logging of examiner actions.
+Everything above is merged. In order: PR #1 (correctness + evidence-integrity pass, audit
+fixes, export/ATT&CK/presets/deleted entries), #25 (raw imager, E01 → raw, `$UsnJrnl`,
+custody attestations, Bookmarks tool, OAuth `state`, SHA-pinned Actions, SBOM), #26 (EWF
+writer, raw → E01, RFC 3161 timestamps), #27 (`$LogFile`, AFF4 reader/writer, VHD/VHDX
+output, any ↔ any conversion), #28 (post-audit hardening, Verify on virtual disks,
+`EvidenceOpener` by magic, `$LogFile` in the timeline). What remains is external: SignPath
+code-signing, a signed kernel driver for the write-blocker and RAM capture, Arsenal for E01
+mounting on Windows.
+
+## 12. UI surface (for a redesign)
+
+Every tool is an Avalonia `UserControl` under `src/Cinder.App/Views/Tools/`, selected by
+`ToolHost.axaml` on the view-model's `Kind`. Grid tools (`SidecarToolViewModel`) share one
+generic view: a header strip (evidence picker, row filter, truncation banner), a `DataGrid`
+bound to `VisibleRows`, and a footer (status line, Export, Bookmark). Tools with their own
+views: Hex, Timeline, Map, Communication graph, Reports, Custody, Bookmarks, Imager, Verify,
+Convert, Mount, Settings dialog, Home dashboard, Command palette, Help (F1) flyout. Styling is
+token-based (`CinderBackground0Brush`, `CinderAccentBrush`, `CinderFontSizeSm`, …) in the
+`src/Cinder.App/Themes/Cinder.Tokens.axaml` (colours, type scale, spacing) and `Cinder.Styles.axaml` (control templates), so a restyle is mostly token and template
+work; view-models expose commands and observable properties and contain no visual logic.
