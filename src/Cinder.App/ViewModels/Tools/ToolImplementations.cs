@@ -1332,29 +1332,18 @@ public sealed partial class ImagerTool
         try
         {
             var progress = new Progress<ImageJobProgress>(p => BytesRead = p.BytesRead);
-            ImageJobResult result;
-            if (InProcessImager.Supports(fmt))
-            {
-                // In-process: file, block device (\\.\PhysicalDriveN, /dev/sdX) or an E01 chain
-                // decoded on the fly. Hash-on-read, retry then sector-level fallback on read
-                // errors, a JSON acquisition log, and for raw a .sha256 companion the Verify
-                // tool reads; E01 carries its digests and bad-sector list inside.
-                StatusLine = InProcessImager.IsDevicePath(Source)
-                    ? "Imaging device — this needs Administrator / root and a write-blocker on the source…"
-                    : "Imaging…";
-                var job = new ImageJob(Source, Output, fmt,
-                    ExaminerName: Environment.UserName,
-                    CaseNumber: ActiveCaseContext.Current?.Name,
-                    Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : null);
-                result = await new InProcessImager().ImageAsync(job, progress, ct);
-            }
-            else
-            {
-                StatusLine = $"Imaging to {fmt} via parsers/imager sidecar (requires Python + libewf-python)…";
-                var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
-                var imager = new SidecarDiskImager(() => SidecarDiskImager.DefaultSidecar(parsers));
-                result = await imager.ImageAsync(new ImageJob(Source, Output, fmt), progress, ct);
-            }
+            // In-process for every format: file, block device (\\.\PhysicalDriveN, /dev/sdX)
+            // or a container decoded on the fly. Hash-on-read, retry then sector-level
+            // fallback on read errors, a JSON acquisition log; raw / VHD / VHDX get a .sha256
+            // companion the Verify tool reads, E01 and AFF4 carry their digests inside.
+            StatusLine = InProcessImager.IsDevicePath(Source)
+                ? "Imaging device — this needs Administrator / root and a write-blocker on the source…"
+                : "Imaging…";
+            var job = new ImageJob(Source, Output, fmt,
+                ExaminerName: Environment.UserName,
+                CaseNumber: ActiveCaseContext.Current?.Name,
+                Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : EvidenceOpener.IsAff4(Source) ? "Decoded from AFF4" : null);
+            var result = await new InProcessImager().ImageAsync(job, progress, ct);
 
             StatusLine = $"Done. {result.BytesWritten:N0} bytes → {Output} · MD5 {result.Md5} · SHA-256 {result.Sha256} · {result.BadSectors} bad sector(s)" +
                          (result.BadSectors > 0 ? " — offsets in the .log.json beside the image" + (fmt == ImageFormat.Ewf ? " and in the container's error section" : "") : "");
@@ -1381,9 +1370,7 @@ public sealed partial class ImagerTool
         }
         catch (Exception ex)
         {
-            StatusLine = InProcessImager.Supports(fmt)
-                ? $"Imaging failed: {ex.Message}"
-                : $"Imaging failed: {ex.Message}. (Sidecar requires Python + libewf-python.)";
+            StatusLine = $"Imaging failed: {ex.Message}";
         }
     }
 }
@@ -1555,11 +1542,10 @@ public sealed partial class VerifyTool
     {
         var hashes = new HashService();
         var progress = new Progress<long>(b => StatusLine = $"Verifying — {b:N0} bytes read…");
-        var computed = await hashes.ComputeFileAsync(
-            path,
-            [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256],
-            progress,
-            ct);
+        var virtualDisk = EvidenceOpener.VirtualDiskKind(path);
+        var computed = virtualDisk is null
+            ? await hashes.ComputeFileAsync(path, [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256], progress, ct)
+            : await HashVirtualDiskAsync(path, progress, ct);
 
         var (reference, referenceSource) = ReadCompanionDigest(path);
 
@@ -1584,7 +1570,7 @@ public sealed partial class VerifyTool
         }
 
         ResultText = $"""
-            Source            : raw image
+            Source            : {(virtualDisk is null ? "raw image" : $"{virtualDisk.ToUpperInvariant()} virtual disk (contents hashed, not the container file)")}
             Bytes verified    : {computed.BytesHashed:N0}
 
             Reference digest  : {reference ?? "— none found —"}{(referenceSource is null ? "" : $"  ({referenceSource})")}
@@ -1614,6 +1600,13 @@ public sealed partial class VerifyTool
     /// companions or a <c>SHA256SUMS</c>-style line naming the file. Returns the hex digest and
     /// the file it came from, or (null, null) when there is nothing to compare against.
     /// </summary>
+    /// <summary>The digest of a VHD / VHDX is over the disk contents — what the imager hashed and what a mount exposes.</summary>
+    private static async Task<MultiHashResult> HashVirtualDiskAsync(string path, IProgress<long> progress, CancellationToken ct)
+    {
+        await using var s = EvidenceOpener.Open(path);
+        return await new HashService().ComputeAsync(s, [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256], progress, ct);
+    }
+
     private static (string? Digest, string? Source) ReadCompanionDigest(string imagePath)
     {
         var dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(imagePath)) ?? ".";

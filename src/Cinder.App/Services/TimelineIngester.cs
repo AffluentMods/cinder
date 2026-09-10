@@ -11,6 +11,7 @@
 //   browser       — Chromium/Edge/Firefox History sqlite: per-URL last_visit_time
 //   email         — .eml/.msg: Date: header (and Sent: for .msg)
 //   recyclebin    — $Recycle.Bin\<SID>\$I*: deletion timestamp + original path
+//   usn / logfile — $UsnJrnl$J change records; $LogFile name events at $FILE_NAME creation
 //   filesystem    — every other file gets its MAC times (creation / write / access)
 //                   tagged as source=fs.* when discovered in a Documents / Desktop / Downloads
 //                   subtree (avoid drowning timeline in OS-binary noise).
@@ -93,6 +94,11 @@ public static class TimelineIngester
                         IngestUsnJournal(timeline, file, stats);
                         progress?.Report($"usn: {file}");
                     }
+                    else if (lower == "$logfile")
+                    {
+                        IngestLogFile(timeline, file, stats);
+                        progress?.Report($"logfile: {file}");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -141,6 +147,41 @@ public static class TimelineIngester
                     $"{r.ReasonText}: {r.FileName} (MFT {r.MftIndex}-{r.MftSequence}, parent {r.ParentMftIndex})"));
                 stats.Usn++;
                 if (++n >= 2_000_000) break;   // a rolled-over journal on a busy volume can be larger than memory
+            }
+        }
+        catch { stats.Errors++; }
+    }
+
+    /// <summary>
+    /// $LogFile records carry no time of their own; the only clocks in them are the $FILE_NAME
+    /// timestamps inside file-record and index-entry payloads. A record that initialises a
+    /// file record or adds a directory entry therefore yields one event at that name's
+    /// creation time — "this name existed, with this MFT record, and was created then" — which
+    /// is the one $LogFile fact that outlives both the MFT record and the USN journal. Stale
+    /// (circular-slack) records are included and labelled, since they are why the log is read.
+    /// </summary>
+    private static void IngestLogFile(SuperTimeline timeline, string path, IngestStats stats)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
+            var n = 0;
+            foreach (var r in Cinder.Filesystems.NtfsLogFile.Parse(fs))
+            {
+                if (r.FileName is null || r.Created is null) continue;
+                if (r.RedoOp is not (0x02 or 0x0C or 0x0E) && r.UndoOp is not (0x0C or 0x0E)) continue;
+                var verb = r.RedoOp switch
+                {
+                    0x02 => "file record initialised",
+                    0x0C or 0x0E => "directory entry added",
+                    _ => "directory entry removed",
+                };
+                var mft = r.MftRecordNumber is { } m ? $" (MFT {m}, parent {r.ParentMftRecord})" : "";
+                var stale = r.IsStale ? " [stale slack]" : "";
+                timeline.Add(new Synth("ntfs.logfile", null, r.Created.Value,
+                    $"{verb}: {r.FileName}{mft}; $FILE_NAME created {r.Created:u}, LSN {r.Lsn}{stale}"));
+                stats.LogFile++;
+                if (++n >= 2_000_000) break;
             }
         }
         catch { stats.Errors++; }
@@ -415,10 +456,11 @@ public sealed class IngestStats
     public int Email;
     public int RecycleBin;
     public int Usn;
+    public int LogFile;
     public int Errors;
     public string? LastError;
     public int Total =>
-        Evtx + Prefetch + Lnk + UserAssist + Browser + Email + RecycleBin + Usn;
+        Evtx + Prefetch + Lnk + UserAssist + Browser + Email + RecycleBin + Usn + LogFile;
     public override string ToString() =>
-        $"evtx={Evtx} pf={Prefetch} lnk={Lnk} userassist={UserAssist} browser={Browser} email={Email} recycle={RecycleBin} usn={Usn} errors={Errors}";
+        $"evtx={Evtx} pf={Prefetch} lnk={Lnk} userassist={UserAssist} browser={Browser} email={Email} recycle={RecycleBin} usn={Usn} logfile={LogFile} errors={Errors}";
 }

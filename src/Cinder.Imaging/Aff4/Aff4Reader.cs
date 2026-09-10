@@ -22,7 +22,8 @@ namespace Cinder.Imaging.Aff4;
 public sealed class Aff4Reader : IDisposable
 {
     private const int MaxChunkSize = 1 << 24;
-    private const long MaxBevyBytes = 1L << 31;
+    /// <summary>A bevy is chunkSize × chunksInSegment; 64 MiB by default, 256 MiB for the largest known writers.</summary>
+    private const long MaxBevyBytes = 512L << 20;
 
     private readonly ZipArchive _zip;
     private readonly FileStream _file;
@@ -249,7 +250,7 @@ public sealed class Aff4Reader : IDisposable
                 dest[done..].Clear();
                 return dest.Length;
             }
-            var chunkIndex = (int)(pos / s.ChunkSize);
+            var chunkIndex = pos / s.ChunkSize;
             var within = (int)(pos % s.ChunkSize);
             var chunk = ReadChunk(s, chunkIndex);
             var n = Math.Min(dest.Length - done, chunk.Length - within);
@@ -264,15 +265,19 @@ public sealed class Aff4Reader : IDisposable
         return done;
     }
 
-    private byte[] ReadChunk(ImageStreamInfo s, int chunkIndex)
+    private byte[] ReadChunk(ImageStreamInfo s, long chunkIndex)
     {
         var bevy = chunkIndex / s.ChunksPerSegment;
-        var inBevy = chunkIndex % s.ChunksPerSegment;
+        var inBevy = (int)(chunkIndex % s.ChunksPerSegment);
+        if (bevy > int.MaxValue)
+        {
+            return Damaged(chunkIndex, s.ChunkSize);
+        }
         if (s.LoadedBevy != bevy)
         {
-            LoadBevy(s, bevy);
+            LoadBevy(s, (int)bevy);
         }
-        var expected = (int)Math.Min(s.ChunkSize, s.Size - (long)chunkIndex * s.ChunkSize);
+        var expected = (int)Math.Min(s.ChunkSize, s.Size - chunkIndex * s.ChunkSize);
         if (expected <= 0)
         {
             return [];
@@ -405,17 +410,18 @@ public sealed class Aff4Reader : IDisposable
         return true;
     }
 
-    private byte[] Damaged(int chunkIndex, int length)
+    private byte[] Damaged(long chunkIndex, int length)
     {
         RecordDamage(chunkIndex);
         return new byte[length];
     }
 
-    private void RecordDamage(int chunkIndex)
+    private void RecordDamage(long chunkIndex)
     {
-        if (_damaged.Count < 100_000 && (_damaged.Count == 0 || _damaged[^1] != chunkIndex))
+        var index = (int)Math.Min(int.MaxValue, chunkIndex);
+        if (_damaged.Count < 100_000 && (_damaged.Count == 0 || _damaged[^1] != index))
         {
-            _damaged.Add(chunkIndex);
+            _damaged.Add(index);
         }
     }
 

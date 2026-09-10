@@ -35,6 +35,8 @@ public sealed record TimestampVerification(
 /// </summary>
 public static class Rfc3161Timestamper
 {
+    private const int MaxResponseBytes = 1 << 20;
+
     public static async Task<TimestampResult> TimestampAsync(ReadOnlyMemory<byte> data, Uri tsaUrl, HttpClient http, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tsaUrl);
@@ -54,9 +56,32 @@ public static class Rfc3161Timestamper
 
         using var content = new ByteArrayContent(request.Encode());
         content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-query");
-        using var response = await http.PostAsync(tsaUrl, content, ct).ConfigureAwait(false);
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, tsaUrl) { Content = content };
+        using var response = await http.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        // A TSA reply is a few KB; a server (or an interposed one) must not be able to make
+        // us buffer arbitrarily much before the DER parser gets a look at it.
+        if (response.Content.Headers.ContentLength is > MaxResponseBytes)
+        {
+            throw new InvalidDataException("Timestamp response is implausibly large.");
+        }
+        byte[] body;
+        await using (var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
+        {
+            using var ms = new MemoryStream();
+            var buffer = new byte[16 * 1024];
+            while (true)
+            {
+                var n = await stream.ReadAsync(buffer, ct).ConfigureAwait(false);
+                if (n == 0) break;
+                if (ms.Length + n > MaxResponseBytes)
+                {
+                    throw new InvalidDataException("Timestamp response is implausibly large.");
+                }
+                ms.Write(buffer, 0, n);
+            }
+            body = ms.ToArray();
+        }
 
         // ProcessResponse rejects a non-granted status and a token whose nonce or imprint
         // differs from the request's, so a replayed or foreign token never gets stored.

@@ -49,8 +49,8 @@ managers) are still on the roadmap.
 | **0 — Foundation** | ✅ shipped | Avalonia shell, design system, command palette, SQLite case store, hash-chained custody log, Serilog, branding, CI |
 | **1 — Hex viewer & hashing** | ✅ shipped | Memory-mapped hex viewer (opens 100 GB images instantly), inspector, MD5/SHA-1/SHA-256/BLAKE3, 60+ signature scanner |
 | **1.5 — Shell & UX** | ✅ shipped | Home dashboard, per-tool help (F1), multi-case tabs, persistent recents, friendly empty states |
-| **2 — Imaging & verification** | 🟡 partial | In-process E01 read + hash verification against the recorded acquisition digest; mount works (VHD/VHDX/ISO); E01 acquisition + signed write-blocker driver pending |
-| **3 — Filesystem & carving** | ✅ shipped | NTFS / FAT / ext2-4 / ISO9660 / VHD(X) via DiscUtils; header+footer carver with 30+ signatures |
+| **2 — Imaging & verification** | ✅ shipped | In-process acquisition to raw / E01 / AFF4 / VHD / VHDX with hash-on-read and bad-sector fallback (E01 verified with libewf, AFF4 with pyaff4); read + verify for all of them; any→any conversion with re-read; mount works (VHD/VHDX/ISO). Signed write-blocker driver pending |
+| **3 — Filesystem & carving** | ✅ shipped | NTFS / FAT / ext2-4 / ISO9660 / VHD(X) via DiscUtils; `$UsnJrnl` and `$LogFile` parsers; header+footer carver with 30+ signatures |
 | **4 — Windows artifacts** | 🟡 shipped, unverified | Registry, EVTX, Prefetch, LNK, Jumplists, Shellbags, USB/Wi-Fi history, Amcache, ShimCache, SRUM, browser history, email — all parse, none yet diffed against a reference tool ([why](LIMITATIONS.md#parser-validation)) |
 | **5 — Linux artifacts** | ✅ shipped | shell history, auth.log, syslog, cron, passwd/shadow, SSH known_hosts |
 | **6 — Search, timeline, YARA** | 🟡 partial | Lucene case-wide search ✅, YARA-lite ✅, Map ✅, Communication graph ✅; super-timeline merge pending |
@@ -97,7 +97,8 @@ protocol (window size, theme, synthetic evidence to load, redaction rules) is in
 | Modern native cross-platform UI | ✅ Avalonia 11 | 🟡 Java Swing | 🟡 Win32 only | ❌ separate CLIs | ❌ CLI |
 | Open source | ✅ Apache-2.0 | ✅ Apache-2.0 | ❌ freeware, closed | ✅ MIT | ✅ GPL-2 |
 | Hex viewer (100 GB+ images) | ✅ memory-mapped + streaming find | 🟡 basic | 🟡 basic | ❌ | ❌ |
-| Disk imaging (E01 / raw) | 🟡 read + verify only today | ✅ | ✅ | ❌ | ❌ |
+| Disk imaging (raw / E01 / AFF4 / VHD / VHDX) | ✅ in-process, libewf- and pyaff4-verified output | ✅ | ✅ E01 / raw / AFF4 | ❌ | ❌ |
+| NTFS journals (`$UsnJrnl`, `$LogFile`) | ✅ in-process, names recovered from slack | 🟡 USN via plugin | ❌ | ✅ MFTECmd / LogFileParser | ❌ |
 | Filesystem parsers (NTFS/FAT/ext) | ✅ DiscUtils, in-process | ✅ via pytsk | ❌ | ❌ | ❌ |
 | Windows artifact suite | 🟡 EZ libs in-process, unverified vs reference | ✅ ingest modules | ❌ | ✅ separate CLIs | ❌ |
 | Email (.msg / .eml / .mbox) | ✅ | ✅ via plugin | ❌ | ❌ | ❌ |
@@ -205,7 +206,7 @@ live on the next release cycle once SignPath signs the Windows exe.
 1. **Launch Cinder** and click **New case** from the home dashboard.
    Pick a name and a directory; Cinder creates a SQLite-backed case store
    with a hash-chained chain-of-custody log inside it.
-2. **Open evidence** — drop a disk image (`.E01`, `.dd`, `.raw`, `.vhd`,
+2. **Open evidence** — drop a disk image (`.E01`, `.aff4`, `.dd`, `.raw`, `.vhd`,
    `.vhdx`), a registry hive (`NTUSER.DAT`, `SYSTEM`), an event log
    (`.evtx`), a PCAP, a `.msg` / `.eml` / `.mbox`, or basically anything.
    Cinder's signature scanner auto-routes the file to the right tool.
@@ -223,8 +224,9 @@ explainer. Press **Ctrl+K** anywhere to open the command palette.
 
 ## Build from source
 
-Prerequisites: **.NET 10 SDK**, **Python 3.12** (for the sidecars that
-remain), **Git**. Full setup in [CONTRIBUTING.md](CONTRIBUTING.md).
+Prerequisites: **.NET 10 SDK** and **Git**. Python 3.12 is only needed for
+the optional Volatility 3 and RAM-capture sidecars. Full setup in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/AffluentMods/cinder.git

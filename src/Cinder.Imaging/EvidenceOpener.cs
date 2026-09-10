@@ -27,6 +27,16 @@ public static class EvidenceOpener
             fs.Dispose();
             return Aff4.Aff4Reader.Open(path).OpenOwningStream();
         }
+        var vd = VirtualDiskKind(fs);
+        if (vd is not null)
+        {
+            // VHD / VHDX: hand back the disk contents, not the container bytes, so hashes,
+            // carving and filesystem parsing see the same media a mount would.
+            DiscUtils.VirtualDisk disk = vd == "vhdx"
+                ? new DiscUtils.Vhdx.Disk(fs, DiscUtils.Streams.Ownership.Dispose)
+                : new DiscUtils.Vhd.Disk(fs, DiscUtils.Streams.Ownership.Dispose);
+            return new VirtualDiskDisposingStream(disk);
+        }
         if (IsEwfMagic(fs))
         {
             try
@@ -48,6 +58,75 @@ public static class EvidenceOpener
 
     /// <summary>True for an AFF4 container (a ZIP volume with a <c>container.description</c>).</summary>
     public static bool IsAff4(string path) => Aff4.Aff4Reader.IsAff4(path);
+
+    /// <summary>"vhd", "vhdx", or null. Detected by magic, not extension, so a renamed file still opens as a disk.</summary>
+    public static string? VirtualDiskKind(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return VirtualDiskKind(fs);
+        }
+        catch { return null; }
+    }
+
+    private static string? VirtualDiskKind(FileStream s)
+    {
+        var save = s.Position;
+        try
+        {
+            if (s.Length < 512)
+            {
+                return null;
+            }
+            Span<byte> head = stackalloc byte[8];
+            s.Position = 0;
+            if (s.Read(head) == 8)
+            {
+                if (head.SequenceEqual("vhdxfile"u8)) return "vhdx";
+                if (head.SequenceEqual("conectix"u8)) return "vhd";     // dynamic / differencing: footer copy up front
+            }
+            // Fixed VHD: only the trailing footer carries the cookie.
+            s.Position = s.Length - 512;
+            if (s.Read(head) == 8 && head.SequenceEqual("conectix"u8))
+            {
+                return "vhd";
+            }
+            return null;
+        }
+        catch (IOException) { return null; }
+        finally
+        {
+            s.Position = save;
+        }
+    }
+
+    /// <summary>Content stream of a virtual disk that tears the disk (and its file) down on dispose.</summary>
+    private sealed class VirtualDiskDisposingStream(DiscUtils.VirtualDisk disk) : Stream
+    {
+        private readonly Stream _inner = disk.Content;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => true;
+        public override bool CanWrite => false;
+        public override long Length => _inner.Length;
+        public override long Position { get => _inner.Position; set => _inner.Position = value; }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => _inner.Read(buffer);
+        public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                disk.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
 
     private static bool IsAff4Magic(FileStream s)
     {
