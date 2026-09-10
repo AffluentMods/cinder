@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Correctness and evidence-integrity pass, followed by the features a competitive
 gap analysis showed every established tool has and Cinder lacked.
 
+### Added — $LogFile, AFF4, VHD/VHDX
+
+- **`$LogFile` parser and tool.** `NtfsLogFile` reads the NTFS transaction
+  journal: restart-page geometry, fixup-protected `RCRD` pages, records
+  reassembled across page boundaries, the LSN ↔ offset check that separates live
+  records from circular-log slack (kept, flagged stale — that slack is often
+  where a long-deleted name survives), buffer-page duplicates dropped. Names,
+  parent records and `$FILE_NAME` timestamps are recovered from the payloads
+  that carry them: file-record initialisation, index-entry add / delete
+  (delete's undo side), attribute create / delete. Operation names match
+  Microsoft's. New **$LogFile** tool in Examine reads it from every NTFS volume
+  in an image or from an extracted file.
+- **AFF4 in-process, both ways.** `Aff4Writer` produces AFF4 Standard v1.0
+  containers — ZIP volume, `container.description`, `version.txt`,
+  `information.turtle`, zlib-compressed bevies with standard (offset, length) indexes, a
+  single-range `Map`, and an `Image` object with MD5 / SHA-1 / SHA-256 and case
+  metadata — the structure pyaff4 and Evimetry emit, verified readable by pyaff4.
+  `Aff4Reader` opens what Cinder, pyaff4, libaff4 and Evimetry write for disk
+  images: standard and pre-standard (Evimetry) index layouts, `Image → Map → ImageStream` chains with
+  multiple ranges and zero / unreadable targets, zlib, **snappy**, **LZ4** and
+  stored chunks (both decoders in-tree, checked against the reference
+  implementations), rdflib-style turtle. `EvidenceOpener` detects AFF4, so every
+  tool that takes an image takes an `.aff4`; the Verify tool checks all three
+  recorded digests.
+- **VHD / VHDX output** through DiscUtils' managed writers (dynamic disks).
+- **Convert tool: any → any** across raw, E01, AFF4, VHD and VHDX, with the
+  output re-read and hashed after writing and a container source checked
+  against its recorded hash.
+- The Python imager sidecar is no longer needed for any format.
+
 ### Added — EWF writer, trusted timestamps
 
 - **E01 acquisition in-process.** `EwfWriter` produces EnCase 6-layout chains:

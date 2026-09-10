@@ -28,14 +28,15 @@ public sealed class InProcessImager : IDiskImager
     /// <summary>Bad sectors listed individually in the log before the list is capped.</summary>
     private const int MaxLoggedBadSectors = 10_000;
 
-    public static bool Supports(ImageFormat format) => format is ImageFormat.Raw or ImageFormat.Ewf;
+    public static bool Supports(ImageFormat format) =>
+        format is ImageFormat.Raw or ImageFormat.Ewf or ImageFormat.Vhd or ImageFormat.Vhdx or ImageFormat.Aff4;
 
     public async Task<ImageJobResult> ImageAsync(ImageJob job, IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(job);
         if (!Supports(job.Format))
         {
-            throw new NotSupportedException($"InProcessImager writes raw and EWF images; {job.Format} is not supported in-process.");
+            throw new NotSupportedException($"InProcessImager writes raw, EWF, AFF4, VHD and VHDX images; {job.Format} is not supported in-process.");
         }
 
         await using var source = OpenSource(job.SourceDevice);
@@ -52,16 +53,17 @@ public sealed class InProcessImager : IDiskImager
         ArgumentNullException.ThrowIfNull(job);
         if (!Supports(job.Format))
         {
-            throw new NotSupportedException($"InProcessImager writes raw and EWF images; {job.Format} is not supported in-process.");
+            throw new NotSupportedException($"InProcessImager writes raw, EWF, AFF4, VHD and VHDX images; {job.Format} is not supported in-process.");
         }
 
         var started = DateTimeOffset.UtcNow;
         var sw = Stopwatch.StartNew();
         long? total = TryLength(source);
 
-        // EWF records MD5 and SHA-1 in the container; make sure they exist for that format.
-        var wantMd5 = job.ComputeMd5 || job.Format == ImageFormat.Ewf;
-        var wantSha1 = job.ComputeSha1 || job.Format == ImageFormat.Ewf;
+        // EWF and AFF4 record digests in the container; make sure they exist for those formats.
+        var container = job.Format is ImageFormat.Ewf or ImageFormat.Aff4;
+        var wantMd5 = job.ComputeMd5 || container;
+        var wantSha1 = job.ComputeSha1 || container;
         using var md5 = wantMd5 ? IncrementalHash.CreateHash(HashAlgorithmName.MD5) : null;
         using var sha1 = wantSha1 ? IncrementalHash.CreateHash(HashAlgorithmName.SHA1) : null;
         using var sha256 = job.ComputeSha256 ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256) : null;
@@ -72,7 +74,7 @@ public sealed class InProcessImager : IDiskImager
         var block = new byte[BlockSize];
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(job.OutputPath))!);
-        using var sink = OpenSink(job);
+        using var sink = OpenSink(job, total);
         long position = 0;
         while (true)
         {
@@ -97,14 +99,16 @@ public sealed class InProcessImager : IDiskImager
 
         var md5Bytes = md5?.GetHashAndReset();
         var sha1Bytes = sha1?.GetHashAndReset();
+        var sha256Bytes = sha256?.GetHashAndReset();
         var md5Hex = md5Bytes is null ? null : Convert.ToHexStringLower(md5Bytes);
         var sha1Hex = sha1Bytes is null ? null : Convert.ToHexStringLower(sha1Bytes);
-        var sha256Hex = sha256 is null ? null : Convert.ToHexStringLower(sha256.GetHashAndReset());
+        var sha256Hex = sha256Bytes is null ? null : Convert.ToHexStringLower(sha256Bytes);
 
-        sink.Finish(md5Bytes, sha1Bytes);
+        sink.Finish(md5Bytes, sha1Bytes, sha256Bytes);
 
-        // Companions: the digest file the Verify tool reads (raw only), and the acquisition log.
-        if (sha256Hex is not null && job.Format == ImageFormat.Raw)
+        // Companions: the digest file the Verify tool reads (formats that do not carry their
+        // own digest), and the acquisition log.
+        if (sha256Hex is not null && !container)
         {
             await File.WriteAllTextAsync(job.OutputPath + ".sha256",
                 $"{sha256Hex}  {Path.GetFileName(job.OutputPath)}\n", ct).ConfigureAwait(false);
@@ -251,9 +255,11 @@ public sealed class InProcessImager : IDiskImager
 
     // ---- output sinks --------------------------------------------------------------------
 
-    private static ImageSink OpenSink(ImageJob job) => job.Format switch
+    private static ImageSink OpenSink(ImageJob job, long? sourceLength) => job.Format switch
     {
         ImageFormat.Ewf => new EwfSink(job),
+        ImageFormat.Aff4 => new Aff4Sink(job),
+        ImageFormat.Vhd or ImageFormat.Vhdx => new VirtualDiskSink(job, sourceLength),
         _ => new RawSink(job.OutputPath),
     };
 
@@ -262,8 +268,91 @@ public sealed class InProcessImager : IDiskImager
         public abstract IReadOnlyList<string> Paths { get; }
         public abstract ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct);
         public virtual void NoteBadSector(long sector) { }
-        public abstract void Finish(byte[]? md5, byte[]? sha1);
+        public abstract void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256);
         public abstract void Dispose();
+    }
+
+    /// <summary>
+    /// VHD / VHDX through DiscUtils' managed writers. Dynamic disks, so unallocated zero
+    /// runs cost nothing on disk. Both formats need the capacity up front, which is why a
+    /// source of unknown length cannot go to these formats — image it raw or E01 first.
+    /// </summary>
+    private sealed class VirtualDiskSink : ImageSink
+    {
+        private readonly FileStream _file;
+        private readonly DiscUtils.VirtualDisk _disk;
+        private readonly Stream _content;
+        private readonly string _path;
+
+        public VirtualDiskSink(ImageJob job, long? sourceLength)
+        {
+            if (sourceLength is not { } capacity || capacity <= 0)
+            {
+                throw new NotSupportedException($"{job.Format} needs the source size up front; this source does not report one. Image it raw or E01.");
+            }
+            // Both formats are sector-granular; round a ragged tail up so the last bytes fit.
+            capacity = (capacity + 511) / 512 * 512;
+
+            _path = job.OutputPath;
+            _file = new FileStream(_path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, BlockSize);
+            _disk = job.Format == ImageFormat.Vhd
+                ? DiscUtils.Vhd.Disk.InitializeDynamic(_file, DiscUtils.Streams.Ownership.None, capacity)
+                : DiscUtils.Vhdx.Disk.InitializeDynamic(_file, DiscUtils.Streams.Ownership.None, capacity);
+            _content = _disk.Content;
+            _content.Position = 0;
+        }
+
+        public override IReadOnlyList<string> Paths => [_path];
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
+        {
+            _content.Write(data.Span);
+            return ValueTask.CompletedTask;
+        }
+
+        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256)
+        {
+            // DiscUtils' VHDX content stream does not implement Flush; disposing the disk
+            // writes the block allocation table and metadata for both formats.
+            _disk.Dispose();
+            _file.Flush();
+        }
+
+        public override void Dispose()
+        {
+            try { _disk.Dispose(); } catch { }
+            _file.Dispose();
+        }
+    }
+
+    private sealed class Aff4Sink : ImageSink
+    {
+        private readonly Aff4.Aff4Writer _writer;
+
+        public Aff4Sink(ImageJob job)
+        {
+            _writer = new Aff4.Aff4Writer(job.OutputPath, new Aff4.Aff4Writer.Options
+            {
+                Compress = job.CompressionLevel > 0,
+                CaseNumber = job.CaseNumber,
+                EvidenceNumber = job.EvidenceNumber,
+                Examiner = job.ExaminerName,
+                Description = job.Description,
+                Notes = job.Notes,
+                Source = job.SourceDevice,
+            });
+        }
+
+        public override IReadOnlyList<string> Paths => [_writer.Path];
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
+        {
+            _writer.Write(data.Span);
+            return ValueTask.CompletedTask;
+        }
+
+        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256) => _writer.Finish(md5, sha1, sha256);
+        public override void Dispose() => _writer.Dispose();
     }
 
     private sealed class RawSink : ImageSink
@@ -279,7 +368,7 @@ public sealed class InProcessImager : IDiskImager
 
         public override IReadOnlyList<string> Paths => [_path];
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct) => _out.WriteAsync(data, ct);
-        public override void Finish(byte[]? md5, byte[]? sha1) => _out.Flush();
+        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256) => _out.Flush();
         public override void Dispose() => _out.Dispose();
     }
 
@@ -314,7 +403,7 @@ public sealed class InProcessImager : IDiskImager
         }
 
         public override void NoteBadSector(long sector) => _writer.AddBadSectors(sector, 1);
-        public override void Finish(byte[]? md5, byte[]? sha1) => _writer.Finish(md5, sha1);
+        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256) => _writer.Finish(md5, sha1);
         public override void Dispose() => _writer.Dispose();
     }
 }
@@ -328,12 +417,147 @@ public sealed class InProcessImager : IDiskImager
 /// </summary>
 public static class ImageConverter
 {
+    /// <summary>
+    /// <see cref="MatchesRecorded"/>: the written output, re-read, reproduces the digest computed
+    /// while writing. <see cref="SourceMatchesRecorded"/>: the source container's own recorded
+    /// acquisition hash reproduced while reading (null when the source recorded none).
+    /// </summary>
     public sealed record ConversionResult(
         ImageJobResult Image,
         string? RecordedMd5,
         string? RecordedSha1,
         int DamagedChunks,
-        bool? MatchesRecorded);
+        bool? MatchesRecorded,
+        bool? SourceMatchesRecorded = null);
+
+    /// <summary>
+    /// Any supported source (raw, E01, AFF4, VHD, VHDX) to any in-process target. The output
+    /// is re-read through the matching reader and must hash back to what was written; a
+    /// container source is additionally checked against its recorded acquisition hash.
+    /// </summary>
+    public static async Task<ConversionResult> ConvertAsync(
+        string source, string output, ImageFormat format, string? examiner = null,
+        int compressionLevel = 1, long segmentSizeMiB = 1500, bool verify = true,
+        IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
+    {
+        if (!InProcessImager.Supports(format))
+        {
+            throw new NotSupportedException($"{format} cannot be written in-process.");
+        }
+
+        string? recordedMd5 = null, recordedSha1 = null;
+        var sourceDamaged = 0;
+        ImageJobResult result;
+        var job = new ImageJob(source, output, format, CompressionLevel: compressionLevel, SegmentSizeMiB: segmentSizeMiB,
+            ExaminerName: examiner, Description: $"Converted from {Path.GetFileName(source)}");
+
+        var ext = Path.GetExtension(source).ToLowerInvariant();
+        if (ext is ".vhd" or ".vhdx")
+        {
+            using var file = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using DiscUtils.VirtualDisk disk = ext == ".vhd"
+                ? new DiscUtils.Vhd.Disk(file, DiscUtils.Streams.Ownership.None)
+                : new DiscUtils.Vhdx.Disk(file, DiscUtils.Streams.Ownership.None);
+            result = await new InProcessImager().ImageStreamAsync(disk.Content, job, progress, ct).ConfigureAwait(false);
+        }
+        else if (EvidenceOpener.IsEwf(source))
+        {
+            using var ewf = EwfReader.Open(source);
+            await using var stream = ewf.OpenStream();
+            result = await new InProcessImager().ImageStreamAsync(stream, job, progress, ct).ConfigureAwait(false);
+            recordedMd5 = ewf.RecordedMd5;
+            recordedSha1 = ewf.RecordedSha1;
+            sourceDamaged = ewf.DamagedChunks.Count;
+        }
+        else if (EvidenceOpener.IsAff4(source))
+        {
+            using var aff4 = Aff4.Aff4Reader.Open(source);
+            await using var stream = aff4.OpenStream();
+            result = await new InProcessImager().ImageStreamAsync(stream, job, progress, ct).ConfigureAwait(false);
+            recordedMd5 = aff4.RecordedMd5;
+            recordedSha1 = aff4.RecordedSha1;
+            sourceDamaged = aff4.DamagedChunks.Count;
+        }
+        else
+        {
+            result = await new InProcessImager().ImageAsync(job, progress, ct).ConfigureAwait(false);
+        }
+
+        bool? sourceOk = null;
+        if (recordedMd5 is not null && result.Md5 is not null)
+        {
+            sourceOk = string.Equals(recordedMd5, result.Md5, StringComparison.OrdinalIgnoreCase) && sourceDamaged == 0;
+        }
+        else if (recordedSha1 is not null && result.Sha1 is not null)
+        {
+            sourceOk = string.Equals(recordedSha1, result.Sha1, StringComparison.OrdinalIgnoreCase) && sourceDamaged == 0;
+        }
+
+        if (!verify)
+        {
+            return new ConversionResult(result, recordedMd5, recordedSha1, sourceDamaged, null, sourceOk);
+        }
+
+        var (rereadMd5, damaged) = await RereadMd5Async(output, format, ct).ConfigureAwait(false);
+        var outputOk = rereadMd5 is null ? (bool?)null
+            : string.Equals(rereadMd5, result.Md5, StringComparison.OrdinalIgnoreCase) && damaged == 0;
+        return new ConversionResult(result, recordedMd5, recordedSha1, damaged, outputOk, sourceOk);
+    }
+
+    private static async Task<(string? Md5, int Damaged)> RereadMd5Async(string path, ImageFormat format, CancellationToken ct)
+    {
+        using var md5 = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.MD5);
+        var buffer = new byte[1 << 20];
+        var damaged = 0;
+
+        async Task HashAsync(Stream s)
+        {
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+                var n = await s.ReadAsync(buffer, ct).ConfigureAwait(false);
+                if (n == 0) break;
+                md5.AppendData(buffer, 0, n);
+            }
+        }
+
+        switch (format)
+        {
+            case ImageFormat.Vhd:
+            case ImageFormat.Vhdx:
+                {
+                    using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    using DiscUtils.VirtualDisk disk = format == ImageFormat.Vhd
+                        ? new DiscUtils.Vhd.Disk(file, DiscUtils.Streams.Ownership.None)
+                        : new DiscUtils.Vhdx.Disk(file, DiscUtils.Streams.Ownership.None);
+                    await HashAsync(disk.Content).ConfigureAwait(false);
+                    break;
+                }
+            case ImageFormat.Ewf:
+                {
+                    using var ewf = EwfReader.Open(path);
+                    await using var s = ewf.OpenStream();
+                    await HashAsync(s).ConfigureAwait(false);
+                    damaged = ewf.DamagedChunks.Count;
+                    break;
+                }
+            case ImageFormat.Aff4:
+                {
+                    using var aff4 = Aff4.Aff4Reader.Open(path);
+                    await using var s = aff4.OpenStream();
+                    await HashAsync(s).ConfigureAwait(false);
+                    damaged = aff4.DamagedChunks.Count;
+                    break;
+                }
+            default:
+                {
+                    await using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+                    await HashAsync(s).ConfigureAwait(false);
+                    break;
+                }
+        }
+        return (Convert.ToHexStringLower(md5.GetHashAndReset()), damaged);
+    }
 
     public static async Task<ConversionResult> EwfToRawAsync(
         string sourceE01, string outputRaw, string? examiner = null,

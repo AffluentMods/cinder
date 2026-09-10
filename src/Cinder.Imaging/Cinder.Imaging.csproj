@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging" />
+    <!-- VHD / VHDX output: pure managed writers, no Hyper-V dependency. -->
+    <PackageReference Include="DiscUtils.Core" />
+    <PackageReference Include="DiscUtils.Streams" />
+    <PackageReference Include="DiscUtils.Vhd" />
+    <PackageReference Include="DiscUtils.Vhdx" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Cinder.Imaging.Tests" />

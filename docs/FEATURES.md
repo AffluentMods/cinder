@@ -36,7 +36,7 @@ long tail (PST via pypff, Volatility 3, pytsk for non-DiscUtils filesystems).
 |---|---|---|
 | `Cinder.App` | Avalonia shell, every view-model, every tool implementation, app services | ~55% of all code. **Parsing logic lives here**, in `ViewModels/Tools/*.cs`, not in the library projects — the biggest structural debt (see §9). |
 | `Cinder.Core` | Case store (SQLite + Dapper + migrations), custody log, hash service (MD5/SHA-1/SHA-256/BLAKE3 streaming), signature scanner (60+ magics), encrypted-container heuristic, `ExecutableResolver`, `TabularExporter`, `FeatureExtractor` | The genuinely reusable core. |
-| `Cinder.Imaging` | `EwfReader`/`EwfStream` (in-process E01, multi-segment, verification), `EvidenceOpener` (E01-or-raw → `Stream`), mounters (VHD/VHDX/ISO via PowerShell; Linux loop), shadow-copy enumeration, write-blocker wrappers, sidecar imager/verifier | EWF reader is hardened against malformed input; damaged chunks are zero-filled and reported, never silently truncated. |
+| `Cinder.Imaging` | `EwfReader`/`EwfStream` (in-process E01, multi-segment, verification), `Aff4Reader`/`Aff4Writer` (AFF4 v1.0/v1.1, zlib/snappy/LZ4), `EwfWriter`, `InProcessImager` (raw/E01/AFF4/VHD/VHDX), `EvidenceOpener` (E01 / AFF4 / raw → `Stream`), mounters (VHD/VHDX/ISO via PowerShell; Linux loop), shadow-copy enumeration, write-blocker wrappers, sidecar imager/verifier | EWF reader is hardened against malformed input; damaged chunks are zero-filled and reported, never silently truncated. |
 | `Cinder.Carving` | `FileCarver` (header/footer, vectorised, 30+ signatures), `SlackUnallocCarver` | |
 | `Cinder.Hex` | `HexViewer` control (virtualised, `ILogicalScrollable`), `MmapHexBuffer`, `HexSearch` (streaming find), bookmarks, overlays | |
 | `Cinder.Search` | Lucene.NET `CaseIndex`, `SuperTimeline` + `TimelineExporter` + `MitreTagger`, `HashSetService` (NSRL, SQLite), `CommunicationGraph`, `GeoPoint` index, `VirusTotalClient`, `YaraScanner` (sidecar stub — real scanning is `Cinder.App/Services/YaraLite`) | |
@@ -87,6 +87,7 @@ unkeyed and stored beside the data; SECURITY.md explains.
 | **Gallery** | works | Image viewer with EXIF panel (MetadataExtractor); GPS → Map | `GalleryTool.cs` |
 | **Documents** | works | Text extraction for DOCX/DOCM, XLSX/XLSM, PPTX, ODT/ODS/ODP, EPUB, RTF, PDF (PdfPig), HTML/XML, 20+ text/code formats; 50 MB in / 2 MB out caps; XXE closed | `Services/DocumentReader` |
 | **Filesystem** | works | `DiscUtilsWalker` (in `Cinder.Filesystems`, tested against a checked-in NTFS image on Windows and Linux): NTFS / FAT / ext2-4 / ISO9660, whole-disk images per partition, VHD/VHDX, E01 via `EwfReader`; all timestamps; **deleted-file recovery** from the NTFS $MFT (`IsDeleted = true`); **optional hashing + hash-set verdict** per file (Settings ▸ Hash sets) so `Unknown` in the row filter is the known-good filter; metadata row shows recorded E01 hashes labelled UNVERIFIED | `Cinder.Filesystems/DiscUtilsWalker.cs`, `Phase3To10ParserTools.cs` |
+| **$LogFile** | works | `NtfsLogFile` parses the NTFS transaction log from any NTFS volume in an image or an extracted file: fixups, multi-page records, LSN ↔ offset validation, stale slack flagged, names / parent / `$FILE_NAME` timestamps from InitializeFileRecordSegment, Add/DeleteIndexEntry and Create/DeleteAttribute payloads; Microsoft's operation names | `Cinder.Filesystems/NtfsLogFile.cs`, `LogFileTool.cs` |
 | **USN journal** | works | `UsnJournal` parses `$UsnJrnl:$J` (V2/V3) from any NTFS volume in an image or an extracted `$J`; reason flags in MFTECmd/Plaso naming, MFT + parent references; 200k-row budget with banner. Also ingested into the timeline from triage folders | `Cinder.Filesystems/UsnJournal.cs`, `UsnJournalTool.cs` |
 | **Registry** | works | Eric Zimmerman `Registry` lib walk of any hive (NTUSER/SYSTEM/SOFTWARE/SAM/Amcache) with transaction-log replay; row and depth budgets with truncation banner | `WindowsParserTools.cs` |
 | **Event Log** | works | `evtx` lib; every record with time, channel, provider, id, level, user, computer, mapped description | " |
@@ -131,10 +132,10 @@ annotation; every run is written to the custody log.
 
 | Tool | Status | What it does |
 |---|---|---|
-| **Disk imager** | works (raw, E01) | `InProcessImager`: file / block device / E01 chain → `.dd` or an EnCase 6 `.E01` chain (`EwfWriter`: zlib chunks, segments, metadata header, MD5+SHA-1 inside, `error2` bad-sector section; verified readable by libewf). Hash-on-read, retry then sector-level fallback with bad-sector offsets in `.log.json`, custody entry. Devices need Administrator/root. AFF4 still via the Python sidecar |
+| **Disk imager** | works (raw, E01, AFF4, VHD, VHDX) | `InProcessImager`: file / block device / E01 / AFF4 → `.dd`, EnCase 6 `.E01` chain (`EwfWriter`, libewf-verified), AFF4 v1.0 container (`Aff4Writer`, pyaff4-verified), or a dynamic VHD/VHDX (DiscUtils). Hash-on-read, retry then sector-level fallback with bad-sector offsets in `.log.json` (and the E01 error section), custody entry. Devices need Administrator/root. No sidecar for any format |
 | **Image verify** | works | In-process. E01: `EwfReader.VerifyAsync` re-reads the decoded media and compares to the recorded MD5/SHA-1. Raw: hashes and compares to a `.sha256/.sha1/.md5` companion or a `SHA256SUMS` line. Three distinct outcomes — verified / failed / **unverifiable** — and the result is written to custody with digests |
 | **Mount image** | partial | VHD/VHDX/ISO via `Mount-DiskImage` (Windows); Linux `losetup`+`mount` read-only; E01 needs Arsenal Image Mounter |
-| **Convert format** | works (E01 ↔ raw) | `ImageConverter.EwfToRawAsync` decodes, hashes, writes flat, compares with the recorded acquisition hash; `RawToEwfAsync` writes the chain then re-reads it and checks the digest reproduces. Both directions double as a verification |
+| **Convert format** | works (any ↔ any) | `ImageConverter.ConvertAsync`: raw / E01 / AFF4 / VHD / VHDX in any direction; output re-read through its own reader and checked against the digest computed while writing; a container source is checked against its recorded acquisition hash too |
 | **Shadow copies** | works | `vssadmin` (Windows), btrfs/LVM/ZFS snapshots (Linux) |
 | **RAM capture** | shell | winpmem / LiME fallbacks when present; no bundled driver |
 | **File carver** | works | Vectorised header/footer carving, 30+ signatures, validators for JPEG/PNG/PE, exact window ownership (no duplicate hits), slack/unallocated regions |
@@ -207,8 +208,9 @@ publish unless the suite passes on both platforms; Windows binary is currently u
    `Cinder.Filesystems`; the same move for registry/EVTX/etc. is what would make them testable.
 3. **Custody attestations need a configured TSA to bind time**; without one the examiner's
    own key is the only anchor, and publishing the export out of their reach is a process step.
-4. **Deleted-file recovery is names only**; contents via the carver. `$LogFile` is not parsed.
-5. **Imaging writes raw and E01**; AFF4 output still needs the Python sidecar.
+4. **Deleted-file recovery is names only**; contents via the carver.
+5. **AFF4 read support covers disk images**, not logical (file-per-object) containers; encrypted
+   AFF4 is not supported.
 6. **IOC matching is folder-scoped**, not against the Lucene index or an open case's parsed
    grids; hash indicators require exact digests.
 7. RAM capture and cloud pull are shells or externally dependent; VirusTotal needs a key.

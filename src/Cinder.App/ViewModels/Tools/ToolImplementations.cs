@@ -1422,6 +1422,10 @@ public sealed partial class VerifyTool
             {
                 await VerifyEwfAsync(path, ct);
             }
+            else if (EvidenceOpener.IsAff4(path))
+            {
+                await VerifyAff4Async(path, ct);
+            }
             else
             {
                 await VerifyRawAsync(path, ct);
@@ -1475,6 +1479,75 @@ public sealed partial class VerifyTool
             r.ComputedSha1,
             r.DamagedChunkCount,
             Verdict = r.Summary(),
+        }, ct);
+    }
+
+    /// <summary>
+    /// AFF4 records MD5 / SHA-1 / SHA-256 as <c>aff4:hash</c> literals on the image. Re-read
+    /// the whole map and compare every digest that was recorded.
+    /// </summary>
+    private async Task VerifyAff4Async(string path, CancellationToken ct)
+    {
+        using var reader = Cinder.Imaging.Aff4.Aff4Reader.Open(path);
+        await using var stream = reader.OpenStream();
+        using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+        using var sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
+        using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[4 * 1024 * 1024];
+        long total = 0;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var n = await stream.ReadAsync(buffer, ct);
+            if (n == 0) break;
+            md5.AppendData(buffer, 0, n);
+            sha1.AppendData(buffer, 0, n);
+            sha256.AppendData(buffer, 0, n);
+            total += n;
+            StatusLine = $"Verifying — {total:N0} bytes read…";
+        }
+        var cMd5 = Convert.ToHexStringLower(md5.GetHashAndReset());
+        var cSha1 = Convert.ToHexStringLower(sha1.GetHashAndReset());
+        var cSha256 = Convert.ToHexStringLower(sha256.GetHashAndReset());
+
+        bool? md5Ok = reader.RecordedMd5 is null ? null : reader.RecordedMd5 == cMd5;
+        bool? sha1Ok = reader.RecordedSha1 is null ? null : reader.RecordedSha1 == cSha1;
+        bool? sha256Ok = reader.RecordedSha256 is null ? null : reader.RecordedSha256 == cSha256;
+        var any = md5Ok is not null || sha1Ok is not null || sha256Ok is not null;
+        var verified = any && md5Ok != false && sha1Ok != false && sha256Ok != false && reader.DamagedChunks.Count == 0;
+
+        ResultText = $"""
+            Source            : AFF4 container, image {reader.ImageUrn}
+            Bytes verified    : {total:N0}
+            Damaged chunks    : {reader.DamagedChunks.Count:N0}
+
+            Recorded MD5      : {reader.RecordedMd5 ?? "— none recorded —"}
+            Computed MD5      : {cMd5}
+            Recorded SHA-1    : {reader.RecordedSha1 ?? "— none recorded —"}
+            Computed SHA-1    : {cSha1}
+            Recorded SHA-256  : {reader.RecordedSha256 ?? "— none recorded —"}
+            Computed SHA-256  : {cSha256}
+
+            {(!any ? "UNVERIFIABLE: the container records no hash." : verified ? "VERIFIED: every recorded digest reproduces." : "FAILED: a recorded digest does not reproduce, or chunks were damaged.")}
+            """;
+        StatusLine = !any
+            ? "⚠ unverifiable — container records no acquisition hash"
+            : verified ? "✓ verified against the acquisition hash" : "✗ VERIFICATION FAILED";
+
+        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        {
+            Image = path,
+            Container = "aff4",
+            reader.ImageUrn,
+            BytesVerified = total,
+            reader.RecordedMd5,
+            ComputedMd5 = cMd5,
+            reader.RecordedSha1,
+            ComputedSha1 = cSha1,
+            reader.RecordedSha256,
+            ComputedSha256 = cSha256,
+            DamagedChunks = reader.DamagedChunks.Count,
+            Verdict = !any ? "unverifiable" : verified ? "verified" : "failed",
         }, ct);
     }
 
@@ -1634,32 +1707,41 @@ public sealed partial class ConvertTool
     [ObservableProperty] private string _format = "raw";
     [ObservableProperty] private string? _statusLine;
 
-    /// <summary>Both directions are in-process: E01 → raw through the reader, raw → E01 through <see cref="Cinder.Imaging.Ewf.EwfWriter"/>.</summary>
-    public IReadOnlyList<string> Formats { get; } = ["raw", "E01"];
+    /// <summary>Every target is written in-process; the source can be raw, E01, AFF4, VHD or VHDX.</summary>
+    public IReadOnlyList<string> Formats { get; } = ["raw", "E01", "AFF4", "VHD", "VHDX"];
 
     [ObservableProperty] private long _bytesConverted;
+
+    private ImageFormat TargetFormat => Format switch
+    {
+        "E01" => ImageFormat.Ewf,
+        "AFF4" => ImageFormat.Aff4,
+        "VHD" => ImageFormat.Vhd,
+        "VHDX" => ImageFormat.Vhdx,
+        _ => ImageFormat.Raw,
+    };
 
     [RelayCommand]
     private async Task PickSourceAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.PickFileAsync("Source image (.E01 chain or raw)");
+        var p = await ToolDialog.PickFileAsync("Source image (raw, .E01 chain, .aff4, .vhd, .vhdx)");
         if (!string.IsNullOrEmpty(p)) Source = p;
     }
 
     [RelayCommand]
     private async Task PickOutputAsync(CancellationToken ct)
     {
-        var ewf = Format == "E01";
-        var p = await ToolDialog.SaveFileAsync("Output", ewf ? "out.E01" : "out.dd", ewf ? "E01" : "dd");
+        var ext = TargetFormat.DefaultExtension();
+        var p = await ToolDialog.SaveFileAsync("Output", "out" + ext, ext.TrimStart('.'));
         if (!string.IsNullOrEmpty(p)) Output = p;
     }
 
     /// <summary>
-    /// E01 → raw: every chunk decoded through <see cref="Cinder.Imaging.Ewf.EwfReader"/>, hashed
-    /// as it streams, written flat, and compared with the digests the container recorded.
-    /// Raw → E01: chunked, compressed and hashed through <see cref="Cinder.Imaging.Ewf.EwfWriter"/>,
-    /// then the finished chain is re-read and must reproduce the digest. Either way the
-    /// conversion doubles as a verification.
+    /// Reads the source through whichever reader understands it, writes the target through
+    /// <see cref="InProcessImager"/> (hashing as it streams), then re-reads the finished output
+    /// and checks it hashes back to the same digest. When the source was a container with a
+    /// recorded acquisition hash, that is compared too — so the conversion is also a
+    /// verification of both ends.
     /// </summary>
     [RelayCommand]
     private async Task RunAsync(CancellationToken ct)
@@ -1670,79 +1752,41 @@ public sealed partial class ConvertTool
             return;
         }
         BytesConverted = 0;
-        StatusLine = "Converting…";
+        StatusLine = $"Converting to {Format} — hashing as it streams, then re-reading the output to verify…";
         try
         {
             var progress = new Progress<ImageJobProgress>(p => BytesConverted = p.BytesRead);
-            if (Format == "E01")
+            var r = await ImageConverter.ConvertAsync(Source, Output, TargetFormat, Environment.UserName, progress: progress, ct: ct);
+
+            var outputVerdict = r.MatchesRecorded switch
             {
-                if (EvidenceOpener.IsEwf(Source))
-                {
-                    StatusLine = "The source is already an EWF container; pick raw as the output format to unpack it.";
-                    return;
-                }
-                StatusLine = "Converting to E01 — compressing, hashing, then re-reading the chain to verify…";
-                var r = await ImageConverter.RawToEwfAsync(Source, Output, Environment.UserName, progress: progress, ct: ct);
-                var verdict = r.MatchesRecorded == true
-                    ? "✓ chain re-read and hashes back to the recorded digest"
-                    : $"✗ re-read of the written chain does not reproduce the digest ({r.DamagedChunks} damaged chunk(s)) — do not use it";
-                StatusLine = $"Done. {r.Image.BytesWritten:N0} bytes → {Output} · MD5 {r.Image.Md5} · SHA-1 {r.Image.Sha1} · {verdict}";
-                await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
-                {
-                    Operation = "convert-raw-to-ewf",
-                    Source,
-                    Output,
-                    r.Image.BytesWritten,
-                    r.Image.Md5,
-                    r.Image.Sha1,
-                    r.Image.Sha256,
-                    r.Image.BadSectors,
-                    Verified = r.MatchesRecorded,
-                }, ct);
-            }
-            else if (EvidenceOpener.IsEwf(Source))
+                true => "✓ output re-read and hashes back to what was written",
+                false => $"✗ output re-read does NOT reproduce the digest ({r.DamagedChunks} damaged chunk(s)) — do not use it",
+                null => "⚠ output could not be re-read for verification",
+            };
+            var sourceVerdict = r.SourceMatchesRecorded switch
             {
-                var r = await ImageConverter.EwfToRawAsync(Source, Output, Environment.UserName, progress, ct);
-                var verdict = r.MatchesRecorded switch
-                {
-                    true => "✓ output hash matches the recorded acquisition hash",
-                    false when r.DamagedChunks > 0 => $"✗ {r.DamagedChunks:N0} damaged chunk(s) zero-filled — output does not match the acquisition",
-                    false => "✗ output hash does NOT match the recorded acquisition hash",
-                    null => "⚠ container recorded no hash — nothing to compare against",
-                };
-                StatusLine = $"Done. {r.Image.BytesWritten:N0} bytes → {Output} · MD5 {r.Image.Md5} · SHA-256 {r.Image.Sha256} · {verdict}";
-                await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
-                {
-                    Operation = "convert-ewf-to-raw",
-                    Source,
-                    Output,
-                    r.Image.BytesWritten,
-                    r.Image.Md5,
-                    r.Image.Sha1,
-                    r.Image.Sha256,
-                    r.RecordedMd5,
-                    r.RecordedSha1,
-                    r.DamagedChunks,
-                    r.MatchesRecorded,
-                }, ct);
-            }
-            else
+                true => "; source matched its recorded acquisition hash",
+                false => "; ✗ source did NOT match its recorded acquisition hash",
+                null => r.RecordedMd5 is null ? "" : "",
+            };
+            StatusLine = $"Done. {r.Image.BytesWritten:N0} bytes → {Output} · MD5 {r.Image.Md5} · SHA-256 {r.Image.Sha256} · {outputVerdict}{sourceVerdict}";
+            await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
             {
-                var job = new ImageJob(Source, Output, ImageFormat.Raw, ExaminerName: Environment.UserName, Description: "Raw copy");
-                var r = await new InProcessImager().ImageAsync(job, progress, ct);
-                StatusLine = $"Done. {r.BytesWritten:N0} bytes → {Output} · SHA-256 {r.Sha256} · {r.BadSectors} bad sector(s)";
-                await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
-                {
-                    Operation = "copy-raw",
-                    Source,
-                    Output,
-                    r.BytesWritten,
-                    r.Md5,
-                    r.Sha1,
-                    r.Sha256,
-                    r.BadSectors,
-                }, ct);
-            }
+                Operation = "convert",
+                Source,
+                Output,
+                Format = TargetFormat.ToString(),
+                r.Image.BytesWritten,
+                r.Image.Md5,
+                r.Image.Sha1,
+                r.Image.Sha256,
+                r.Image.BadSectors,
+                OutputVerified = r.MatchesRecorded,
+                SourceRecordedMd5 = r.RecordedMd5,
+                SourceRecordedSha1 = r.RecordedSha1,
+                SourceVerified = r.SourceMatchesRecorded,
+            }, ct);
         }
         catch (OperationCanceledException)
         {

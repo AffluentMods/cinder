@@ -116,6 +116,14 @@ fixture-vs-reference diff is in CI.
 - **Blockers:** PDF/A-specific conformance (embedded font subsetting, XMP metadata, the
   PDF/A-2b identifier) is not implemented — output is ordinary PDF, not archival PDF/A.
 
+## AFF4
+
+Read support covers physical disk images as pyaff4, libaff4 and Evimetry write them: `Image →
+Map → ImageStream` chains with zlib / snappy / LZ4 / stored chunks in either index layout.
+Logical containers (one object per file), encrypted volumes and striped multi-volume sets are
+not read. The writer produces v1.0 containers with a single map range; unreadable sectors are
+zero-filled in the stream and listed in the `.log.json` rather than as a separate map target.
+
 ## <a id="custody-anchor"></a> Chain-of-custody log has no external anchor
 
 - **Where:** [`Cinder.Core.Custody.CustodyLog`](src/Cinder.Core/Custody/CustodyLog.cs)
