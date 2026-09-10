@@ -118,7 +118,7 @@ annotation; every run is written to the custody log.
 
 | Tool | Status | What it does |
 |---|---|---|
-| **Super-timeline** | works | `TimelineIngester` walks a triage folder: EVTX records, Prefetch run times, LNK MAC times, NTUSER UserAssist (ROT13), Chromium/Firefox history, `.eml/.msg` dates, `$I` deletions. Merged, sorted, histogram, filters (from/to, user, source, text, **ATT&CK**). **ATT&CK auto-tagging** on ingest (`MitreTagger`: Security/Sysmon/PowerShell event ids, execution evidence, deletions). **Export** to Timesketch JSONL, Timesketch CSV, and Sleuth Kit bodyfile — every matching event, not just the visible 5,000. |
+| **Super-timeline** | works | `TimelineIngester` walks a triage folder: EVTX records, Prefetch run times, LNK MAC times, NTUSER UserAssist (ROT13), Chromium/Firefox history, `.eml/.msg` dates, `$I` deletions, `$UsnJrnl$J` change records, `$LogFile` name events at `$FILE_NAME` creation. Merged, sorted, histogram, filters (from/to, user, source, text, **ATT&CK**). **ATT&CK auto-tagging** on ingest (`MitreTagger`: Security/Sysmon/PowerShell event ids, execution evidence, deletions). **Export** to Timesketch JSONL, Timesketch CSV, and Sleuth Kit bodyfile — every matching event, not just the visible 5,000. |
 | **Map** | works | EXIF GPS auto-ingest from a folder of images; manual points |
 | **Comm graph** | works | `.eml/.msg/.mbox` From/To → directed who-talked-to-whom, deduped identities, degrees |
 | **Full-text search** | works | Lucene.NET index built from a folder (DocumentReader for structured formats, strings fallback for binaries); standard query syntax |

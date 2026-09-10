@@ -10,6 +10,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Correctness and evidence-integrity pass, followed by the features a competitive
 gap analysis showed every established tool has and Cinder lacked.
 
+### Hardening and fixes — after the format work
+
+- **RFC 3161 response buffering.** The TSA reply was read with
+  `ReadAsByteArrayAsync`, so an interposed server could make Cinder allocate
+  without limit before the DER parser saw a byte. Headers are read first, a
+  declared length over 1 MiB is refused, and the body is streamed under a
+  running cap.
+- **AFF4 reader.** Bevy allocation cap lowered to 512 MiB; chunk arithmetic is
+  64-bit throughout. New tests: a scrambled bevy reads to full length with the
+  chunks reported damaged and the neighbouring bevy intact; hostile geometry
+  and an unterminated turtle literal fail with `InvalidDataException`.
+- **Verify tool on VHD / VHDX** hashed the container file while the imager's
+  companion digest is over the media — every virtual disk failed verification.
+  Verify now hashes the disk contents and says so.
+- **`EvidenceOpener` detects VHD / VHDX by magic** (`conectix`, `vhdxfile`) and
+  returns the disk contents, so hex, strings, carving, filesystem, USN,
+  `$LogFile` and hashing all see the same media a mount would, whatever the
+  extension.
+- **`$LogFile` in the super-timeline.** One `ntfs.logfile` event per record
+  that initialises a file record or adds / removes a directory entry, at the
+  `$FILE_NAME` creation time the payload carries, labelled with operation, MFT
+  record, LSN and stale-slack status.
+- Imager tool's unreachable sidecar branch removed; README updated (imaging
+  shipped, journals row, Python no longer a build prerequisite).
+
 ### Added — $LogFile, AFF4, VHD/VHDX
 
 - **`$LogFile` parser and tool.** `NtfsLogFile` reads the NTFS transaction

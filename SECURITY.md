@@ -144,6 +144,30 @@ Still open from this audit, tracked below: the OAuth loopback flow carries no `s
 parameter, and the Dropbox connector discards its PKCE verifier. Both sit in scaffolding whose
 token exchange is not yet wired, and both are fixed before the cloud connectors ship.
 
+## Review of the format and journal work (September 2026, post-audit)
+
+The EWF writer, AFF4 reader / writer, `$LogFile` parser, RFC 3161 client and in-process
+imager landed after the pre-release audit. They were reviewed against the same threat model —
+evidence files are attacker-controlled bytes; network peers are hostile — with these results:
+
+- **Fixed — `Rfc3161Timestamper` unbounded response buffering** (Medium). Headers-first read,
+  1 MiB declared-length ceiling, streamed body under a running cap.
+- **Fixed — `Aff4Reader` bevy ceiling** (Low). 2 GiB → 512 MiB; a container can no longer ask
+  for a 2 GiB allocation per stream. Chunk indices are 64-bit so a multi-TiB image with small
+  chunks cannot wrap into the wrong chunk.
+- **Fixed — Verify tool false negatives on VHD / VHDX** (correctness, not security, but a
+  false "verification failed" against evidence is a finding in its own right).
+- **Reviewed, no change:** `NtfsLogFile` (1 MiB client-data ceiling, continuation bounded by
+  page count, attribute walk capped, every payload decoder length-checked, torn pages left
+  unfixed rather than guessed); snappy and LZ4 block decoders (every copy bounds-checked
+  against both buffers; negative tests for literal and match overruns); `EwfWriter` (no
+  untrusted input; metadata sanitised before the tab-separated header); `InProcessImager`
+  (devices opened read-only and shared; VHD / VHDX refuse an unknown-length source instead of
+  guessing a capacity); `EvidenceOpener` magic detection (fixed-size reads at two offsets, no
+  parsing before the reader's own bounds checks).
+- **Tested adversarially:** scrambled AFF4 bevy, implausible AFF4 geometry, unterminated turtle,
+  torn `$LogFile` page, random bytes as `$LogFile`, hostile snappy / LZ4 streams.
+
 ## Known limitations (tracked, fix planned)
 
 These items came out of the audit and are tracked but not yet fixed. We documented them in
