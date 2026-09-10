@@ -592,6 +592,23 @@ public sealed partial class CustodyTool
             var a = await signer.SignTipAsync(caseId, Environment.UserName, ct);
             KeyFingerprint = a.KeyFingerprint;
             StatusLine = $"Signed tip: sequence {a.Sequence}, hash {a.EntryHash[..16]}…, key {a.KeyFingerprint}. Export it to anchor the chain outside this file.";
+
+            // Countersign with a Time-Stamp Authority when one is configured: the examiner
+            // key says who, the TSA says no later than when, from a clock that is not ours.
+            var tsaUrl = new SettingsStore().Load().TimestampAuthorityUrl;
+            if (!string.IsNullOrWhiteSpace(tsaUrl))
+            {
+                try
+                {
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+                    var stamped = await signer.TimestampAsync(a.Id, new Uri(tsaUrl), http, ct);
+                    StatusLine += $" Timestamped by {tsaUrl} at {stamped.TsaTime:u}.";
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    StatusLine += $" Timestamp request to {tsaUrl} failed ({ex.Message}); the attestation is signed but not timestamped.";
+                }
+            }
             await ReloadAttestationsAsync(signer, caseId, ct);
         }
         catch (Exception ex)
@@ -635,8 +652,12 @@ public sealed partial class CustodyTool
             return;
         }
         var bad = Attestations.Where(a => !a.Ok).ToList();
+        var stamped = Attestations.Count(a => a.Timestamp is { SignatureValid: true });
+        var untrusted = Attestations.Count(a => a.Timestamp is { SignatureValid: true, ChainTrusted: false });
         AttestationVerdict = bad.Count == 0
             ? $"✓ {Attestations.Count} attestation(s) verify; latest covers sequence {Attestations[^1].Attestation.Sequence}"
+              + (stamped > 0 ? $"; {stamped} carry an RFC 3161 timestamp" : "")
+              + (untrusted > 0 ? $" ({untrusted} from a TSA whose root this machine does not trust — check the issuer)" : "")
             : $"✗ attestation at sequence {bad[0].Attestation.Sequence} fails: {bad[0].Reason}";
     }
 
@@ -1312,19 +1333,20 @@ public sealed partial class ImagerTool
         {
             var progress = new Progress<ImageJobProgress>(p => BytesRead = p.BytesRead);
             ImageJobResult result;
-            if (fmt == ImageFormat.Raw)
+            if (InProcessImager.Supports(fmt))
             {
                 // In-process: file, block device (\\.\PhysicalDriveN, /dev/sdX) or an E01 chain
                 // decoded on the fly. Hash-on-read, retry then sector-level fallback on read
-                // errors, .sha256 companion the Verify tool reads, and a JSON acquisition log.
-                StatusLine = RawImager.IsDevicePath(Source)
+                // errors, a JSON acquisition log, and for raw a .sha256 companion the Verify
+                // tool reads; E01 carries its digests and bad-sector list inside.
+                StatusLine = InProcessImager.IsDevicePath(Source)
                     ? "Imaging device — this needs Administrator / root and a write-blocker on the source…"
                     : "Imaging…";
-                var job = new ImageJob(Source, Output, ImageFormat.Raw,
+                var job = new ImageJob(Source, Output, fmt,
                     ExaminerName: Environment.UserName,
                     CaseNumber: ActiveCaseContext.Current?.Name,
                     Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : null);
-                result = await new RawImager().ImageAsync(job, progress, ct);
+                result = await new InProcessImager().ImageAsync(job, progress, ct);
             }
             else
             {
@@ -1334,8 +1356,8 @@ public sealed partial class ImagerTool
                 result = await imager.ImageAsync(new ImageJob(Source, Output, fmt), progress, ct);
             }
 
-            StatusLine = $"Done. {result.BytesWritten:N0} bytes → {Output} · SHA-256 {result.Sha256} · {result.BadSectors} bad sector(s)" +
-                         (result.BadSectors > 0 ? " — offsets in the .log.json beside the image" : "");
+            StatusLine = $"Done. {result.BytesWritten:N0} bytes → {Output} · MD5 {result.Md5} · SHA-256 {result.Sha256} · {result.BadSectors} bad sector(s)" +
+                         (result.BadSectors > 0 ? " — offsets in the .log.json beside the image" + (fmt == ImageFormat.Ewf ? " and in the container's error section" : "") : "");
             await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
             {
                 Source,
@@ -1359,7 +1381,7 @@ public sealed partial class ImagerTool
         }
         catch (Exception ex)
         {
-            StatusLine = fmt == ImageFormat.Raw
+            StatusLine = InProcessImager.Supports(fmt)
                 ? $"Imaging failed: {ex.Message}"
                 : $"Imaging failed: {ex.Message}. (Sidecar requires Python + libewf-python.)";
         }
@@ -1612,8 +1634,8 @@ public sealed partial class ConvertTool
     [ObservableProperty] private string _format = "raw";
     [ObservableProperty] private string? _statusLine;
 
-    /// <summary>Raw is the only in-process target; writing EWF needs the sidecar and stays out of the list until it works.</summary>
-    public IReadOnlyList<string> Formats { get; } = ["raw"];
+    /// <summary>Both directions are in-process: E01 → raw through the reader, raw → E01 through <see cref="Cinder.Imaging.Ewf.EwfWriter"/>.</summary>
+    public IReadOnlyList<string> Formats { get; } = ["raw", "E01"];
 
     [ObservableProperty] private long _bytesConverted;
 
@@ -1627,14 +1649,17 @@ public sealed partial class ConvertTool
     [RelayCommand]
     private async Task PickOutputAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.SaveFileAsync("Output", "out.dd", "dd");
+        var ewf = Format == "E01";
+        var p = await ToolDialog.SaveFileAsync("Output", ewf ? "out.E01" : "out.dd", ewf ? "E01" : "dd");
         if (!string.IsNullOrEmpty(p)) Output = p;
     }
 
     /// <summary>
-    /// E01 → raw in-process: every chunk decoded through <see cref="Cinder.Imaging.Ewf.EwfReader"/>,
-    /// hashed as it streams, written flat, and compared with the digests the container recorded —
-    /// the conversion doubles as a verification. A raw source is copied and hashed the same way.
+    /// E01 → raw: every chunk decoded through <see cref="Cinder.Imaging.Ewf.EwfReader"/>, hashed
+    /// as it streams, written flat, and compared with the digests the container recorded.
+    /// Raw → E01: chunked, compressed and hashed through <see cref="Cinder.Imaging.Ewf.EwfWriter"/>,
+    /// then the finished chain is re-read and must reproduce the digest. Either way the
+    /// conversion doubles as a verification.
     /// </summary>
     [RelayCommand]
     private async Task RunAsync(CancellationToken ct)
@@ -1649,7 +1674,33 @@ public sealed partial class ConvertTool
         try
         {
             var progress = new Progress<ImageJobProgress>(p => BytesConverted = p.BytesRead);
-            if (EvidenceOpener.IsEwf(Source))
+            if (Format == "E01")
+            {
+                if (EvidenceOpener.IsEwf(Source))
+                {
+                    StatusLine = "The source is already an EWF container; pick raw as the output format to unpack it.";
+                    return;
+                }
+                StatusLine = "Converting to E01 — compressing, hashing, then re-reading the chain to verify…";
+                var r = await ImageConverter.RawToEwfAsync(Source, Output, Environment.UserName, progress: progress, ct: ct);
+                var verdict = r.MatchesRecorded == true
+                    ? "✓ chain re-read and hashes back to the recorded digest"
+                    : $"✗ re-read of the written chain does not reproduce the digest ({r.DamagedChunks} damaged chunk(s)) — do not use it";
+                StatusLine = $"Done. {r.Image.BytesWritten:N0} bytes → {Output} · MD5 {r.Image.Md5} · SHA-1 {r.Image.Sha1} · {verdict}";
+                await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
+                {
+                    Operation = "convert-raw-to-ewf",
+                    Source,
+                    Output,
+                    r.Image.BytesWritten,
+                    r.Image.Md5,
+                    r.Image.Sha1,
+                    r.Image.Sha256,
+                    r.Image.BadSectors,
+                    Verified = r.MatchesRecorded,
+                }, ct);
+            }
+            else if (EvidenceOpener.IsEwf(Source))
             {
                 var r = await ImageConverter.EwfToRawAsync(Source, Output, Environment.UserName, progress, ct);
                 var verdict = r.MatchesRecorded switch
@@ -1678,7 +1729,7 @@ public sealed partial class ConvertTool
             else
             {
                 var job = new ImageJob(Source, Output, ImageFormat.Raw, ExaminerName: Environment.UserName, Description: "Raw copy");
-                var r = await new RawImager().ImageAsync(job, progress, ct);
+                var r = await new InProcessImager().ImageAsync(job, progress, ct);
                 StatusLine = $"Done. {r.BytesWritten:N0} bytes → {Output} · SHA-256 {r.Sha256} · {r.BadSectors} bad sector(s)";
                 await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
                 {

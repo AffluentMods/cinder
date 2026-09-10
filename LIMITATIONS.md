@@ -127,9 +127,10 @@ fixture-vs-reference diff is in CI.
   an existing log, not tamper-proof against a deliberate rewrite.
 - **Now:** the Custody tool signs the chain tip with an examiner key (`CustodySigner`,
   ECDSA P-256) and stores the attestation in the case file; a rewrite after signing fails
-  attestation even though the chain re-verifies. What remains: the key is the examiner's, so
-  the examiner is not bound by it — export the attestation and publish it out of their reach.
-  RFC 3161 timestamping is the tracked next step. Full reasoning in [SECURITY.md](SECURITY.md).
+  attestation even though the chain re-verifies. With a Time-Stamp Authority configured the
+  attestation is also RFC 3161 countersigned, so the examiner cannot backdate it either. What
+  remains is a process step: export the attestation and publish it out of the examiner's
+  reach. Full reasoning in [SECURITY.md](SECURITY.md).
 
 ## <a id="trademark-domains"></a> Trademark and domains
 

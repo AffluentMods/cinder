@@ -3,6 +3,9 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Cinder.Imaging.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
     <ProjectReference Include="..\Cinder.Sidecar\Cinder.Sidecar.csproj" />
     <ProjectReference Include="..\Cinder.Native\Cinder.Native.csproj" />

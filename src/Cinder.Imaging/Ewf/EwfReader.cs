@@ -404,7 +404,9 @@ public sealed class EwfReader : IDisposable
         var chunkCount = BitConverter.ToUInt32(v, 4);
         var sectorsPerChunk = BitConverter.ToUInt32(v, 8);
         var bytesPerSector = BitConverter.ToUInt32(v, 12);
-        var sectorCount = BitConverter.ToUInt32(v, 16);
+        // EnCase 5 and later store the sector count as 64 bits; earlier writers left the upper
+        // half zero, so reading 64 is right for both and lets a > 2 TiB image size correctly.
+        var sectorCount = BitConverter.ToUInt64(v, 16);
 
         // Geometry drives every subsequent allocation and offset computation, so it has to be
         // plausible before we adopt it. A zero or absurd value here would otherwise surface as
@@ -427,8 +429,7 @@ public sealed class EwfReader : IDisposable
                 $"EWF: segment #{segIx} declares a {chunkBytes:N0}-byte chunk, above the {MaxChunkSizeBytes:N0}-byte ceiling.");
         }
 
-        var mediaBytes = (long)sectorCount * bytesPerSector;
-        if (mediaBytes < 0)
+        if (sectorCount > (ulong)(long.MaxValue / bytesPerSector))
         {
             throw new InvalidDataException($"EWF: segment #{segIx} declares an overflowing media size.");
         }

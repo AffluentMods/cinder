@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using Cinder.Core.Cases;
@@ -16,15 +17,23 @@ public sealed record CustodyAttestation(
     string Examiner,
     string PublicKeySpkiBase64,
     string SignatureBase64,
-    string KeyFingerprint);
+    string KeyFingerprint,
+    byte[]? TsaToken = null,
+    string? TsaUrl = null,
+    DateTimeOffset? TsaTime = null)
+{
+    public bool HasTimestamp => TsaToken is { Length: > 0 };
+}
 
 public sealed record AttestationVerification(
     CustodyAttestation Attestation,
     bool SignatureValid,
     bool ChainMatches,
-    string? Reason)
+    string? Reason,
+    TimestampVerification? Timestamp = null)
 {
-    public bool Ok => SignatureValid && ChainMatches;
+    /// <summary>Signature, chain and — when a timestamp is present — the timestamp all hold.</summary>
+    public bool Ok => SignatureValid && ChainMatches && (Timestamp is null || Timestamp.SignatureValid);
 }
 
 /// <summary>
@@ -131,15 +140,49 @@ public sealed class CustodySigner
             Convert.ToBase64String(spki), Convert.ToBase64String(signature), Fingerprint(spki));
     }
 
+    /// <summary>
+    /// Asks an RFC 3161 Time-Stamp Authority to timestamp the attestation's signature and stores
+    /// the token beside it. The examiner key says <em>who</em>; the TSA says <em>no later than
+    /// when</em>, from a clock the examiner does not control. Public TSAs: DigiCert, Sectigo,
+    /// freetsa.org; an organisation can run its own.
+    /// </summary>
+    public async Task<CustodyAttestation> TimestampAsync(long attestationId, Uri tsaUrl, HttpClient http, CancellationToken ct = default)
+    {
+        await using var conn = _store.Open();
+        var row = await conn.QuerySingleOrDefaultAsync<Row>(new CommandDefinition(
+            SelectColumns + " WHERE id = @Id;", new { Id = attestationId }, cancellationToken: ct)).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"No attestation with id {attestationId}.");
+        var a = row.ToAttestation();
+
+        var stamp = await Rfc3161Timestamper.TimestampAsync(Convert.FromBase64String(a.SignatureBase64), tsaUrl, http, ct).ConfigureAwait(false);
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            "UPDATE custody_attestations SET tsa_token = @Token, tsa_url = @Url, tsa_time = @Time WHERE id = @Id;",
+            new
+            {
+                Token = stamp.Token,
+                Url = tsaUrl.ToString(),
+                Time = stamp.Time.ToString("O", CultureInfo.InvariantCulture),
+                Id = attestationId,
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        return a with { TsaToken = stamp.Token, TsaUrl = tsaUrl.ToString(), TsaTime = stamp.Time };
+    }
+
+    private const string SelectColumns =
+        """
+        SELECT id AS Id, case_id AS CaseId, sequence AS Sequence, entry_hash AS EntryHash, signed_utc AS SignedUtc,
+               examiner AS Examiner, public_key_spki AS Spki, signature AS Signature,
+               tsa_token AS TsaToken, tsa_url AS TsaUrl, tsa_time AS TsaTime
+        FROM custody_attestations
+        """;
+
     public async Task<IReadOnlyList<CustodyAttestation>> ListAsync(Guid caseId, CancellationToken ct = default)
     {
         await using var conn = _store.Open();
         var rows = await conn.QueryAsync<Row>(new CommandDefinition(
-            """
-            SELECT id AS Id, case_id AS CaseId, sequence AS Sequence, entry_hash AS EntryHash, signed_utc AS SignedUtc,
-                   examiner AS Examiner, public_key_spki AS Spki, signature AS Signature
-            FROM custody_attestations WHERE case_id = @CaseId ORDER BY sequence ASC, id ASC;
-            """,
+            SelectColumns + " WHERE case_id = @CaseId ORDER BY sequence ASC, id ASC;",
             new { CaseId = caseId.ToString("D") },
             cancellationToken: ct)).ConfigureAwait(false);
         return [.. rows.Select(r => r.ToAttestation())];
@@ -162,14 +205,20 @@ public sealed class CustodySigner
             ct.ThrowIfCancellationRequested();
             var sigOk = VerifySignature(a);
             var chainOk = bySequence.TryGetValue(a.Sequence, out var hash) && string.Equals(hash, a.EntryHash, StringComparison.Ordinal);
+            TimestampVerification? ts = null;
+            if (a.HasTimestamp)
+            {
+                ts = Rfc3161Timestamper.Verify(a.TsaToken!, Convert.FromBase64String(a.SignatureBase64));
+            }
             var reason = (sigOk, chainOk) switch
             {
                 (false, _) => "signature does not verify under the embedded public key",
                 (true, false) when !bySequence.ContainsKey(a.Sequence) => $"chain no longer has an entry at sequence {a.Sequence}",
                 (true, false) => $"entry {a.Sequence} now hashes differently from what was attested — the log was altered after signing",
+                _ when ts is { SignatureValid: false } => ts.Reason,
                 _ => null,
             };
-            results.Add(new AttestationVerification(a, sigOk, chainOk, reason));
+            results.Add(new AttestationVerification(a, sigOk, chainOk, reason, ts));
         }
         return results;
     }
@@ -205,7 +254,16 @@ public sealed class CustodySigner
         key_fingerprint = a.KeyFingerprint,
         signature = a.SignatureBase64,
         signed_payload = "case_id|sequence|entry_hash|signed_utc (UTF-8, ISO 8601 round-trip)",
-    }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        rfc3161_timestamp = a.HasTimestamp
+            ? new
+            {
+                tsa_url = a.TsaUrl,
+                time = a.TsaTime?.ToString("O", CultureInfo.InvariantCulture),
+                token_der = Convert.ToBase64String(a.TsaToken!),
+                covers = "SHA-256 of the signature bytes",
+            }
+            : null,
+    }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
 
     internal static byte[] Payload(Guid caseId, long sequence, string entryHash, DateTimeOffset signedUtc) =>
         Encoding.UTF8.GetBytes(string.Join('|',
@@ -226,10 +284,15 @@ public sealed class CustodySigner
         public string Examiner { get; set; } = "";
         public string Spki { get; set; } = "";
         public string Signature { get; set; } = "";
+        public byte[]? TsaToken { get; set; }
+        public string? TsaUrl { get; set; }
+        public string? TsaTime { get; set; }
 
         public CustodyAttestation ToAttestation() => new(
             Id, Guid.Parse(CaseId), Sequence, EntryHash,
             DateTimeOffset.Parse(SignedUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-            Examiner, Spki, Signature, Fingerprint(Convert.FromBase64String(Spki)));
+            Examiner, Spki, Signature, Fingerprint(Convert.FromBase64String(Spki)),
+            TsaToken, TsaUrl,
+            TsaTime is null ? null : DateTimeOffset.Parse(TsaTime, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
     }
 }

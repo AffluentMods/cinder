@@ -76,6 +76,18 @@
                 </StackPanel>
 
                 <StackPanel Spacing="8">
+                    <TextBlock Text="Chain of custody" FontWeight="600" />
+                    <TextBlock TextWrapping="Wrap"
+                               FontSize="{DynamicResource CinderFontSizeXs}"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               Text="When set, signing the chain tip in the Custody tool also asks this RFC 3161 Time-Stamp Authority to countersign the attestation, so the time comes from a clock you do not control. Only a SHA-256 of the signature is sent. Public TSAs include DigiCert (http://timestamp.digicert.com — use its https endpoint), Sectigo and freetsa.org; organisations can run their own." />
+                    <Grid ColumnDefinitions="160,*">
+                        <TextBlock Grid.Column="0" Text="Timestamp authority" VerticalAlignment="Center" />
+                        <TextBox  Grid.Column="1" Text="{Binding TimestampAuthorityUrl}" Watermark="https://freetsa.org/tsr  (empty = off)" />
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Spacing="8">
                     <TextBlock Text="Cloud connectors" FontWeight="600" />
                     <TextBlock TextWrapping="Wrap"
                                FontSize="{DynamicResource CinderFontSizeXs}"

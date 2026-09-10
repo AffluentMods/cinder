@@ -207,11 +207,21 @@ carries the attested hash, and re-signing needs the private key. So the guarante
 showing.** `CustodySignerTests` demonstrates exactly this: full rewrite, chain re-verifies,
 attestation fails.
 
-What it still does not do: protect against the examiner themself, whose key it is. That is
-what exporting the attestation and sending it somewhere the examiner cannot edit — a
-supervisor's inbox, a ticket, a WORM share — is for, and it is a process step, not code.
-RFC 3161 timestamping over the attestation remains the tracked next step for binding the
-signing time to an external clock.
+What it still does not do on its own: protect against the examiner themself, whose key it
+is. Two things close that, one in code and one in process:
+
+- **RFC 3161 trusted timestamps** (`Rfc3161Timestamper`). With a Time-Stamp Authority
+  configured, signing also sends the SHA-256 of the attestation signature to the TSA and
+  stores its countersigned token (DER, self-contained) beside the attestation. The examiner
+  can still sign a rewritten log, but cannot make the new attestation look older than it is —
+  the time comes from the TSA's clock and signature. Verification checks the token's imprint
+  against the signature and the token's CMS signature under the certificate it carries; whether
+  that certificate chains to a root the machine trusts is reported separately, because many
+  TSAs run roots that are not in system stores. `Rfc3161TimestamperTests` runs the exchange
+  against a BouncyCastle TSA rather than a mock, and includes grafting a token onto a different
+  signature (rejected).
+- **Publishing the export** somewhere the examiner cannot edit — a supervisor's inbox, a
+  ticket, a WORM share — which remains a process step, not code.
 
 Present a Cinder custody log with attestations as: a self-checking activity record whose
 state at each attested point is signed by the examiner's key. Without attestations, present

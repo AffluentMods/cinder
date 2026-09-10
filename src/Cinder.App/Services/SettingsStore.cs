@@ -29,6 +29,13 @@ public sealed record CinderSettings
 
     /// <summary>Files larger than this are skipped by the enumeration hasher.</summary>
     public int HashSizeLimitMb { get; init; } = 64;
+
+    /// <summary>
+    /// RFC 3161 Time-Stamp Authority the Custody tool sends attestation signatures to after
+    /// signing (https). Empty disables timestamping. Only a SHA-256 of the signature leaves
+    /// the machine.
+    /// </summary>
+    public string? TimestampAuthorityUrl { get; init; }
 }
 
 public sealed class SettingsStore

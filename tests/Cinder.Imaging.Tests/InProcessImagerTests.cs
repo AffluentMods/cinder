@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Cinder.Imaging.Tests;
 
-public sealed class RawImagerTests : IDisposable
+public sealed class InProcessImagerTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("cinder-rawimg").FullName;
 
@@ -24,7 +24,7 @@ public sealed class RawImagerTests : IDisposable
         var outPath = Path.Combine(_dir, "out", "image.dd");
 
         var progress = new List<ImageJobProgress>();
-        var result = await new RawImager().ImageAsync(
+        var result = await new InProcessImager().ImageAsync(
             new ImageJob(src, outPath, ImageFormat.Raw, ExaminerName: "alice", CaseNumber: "C-1"),
             new Progress<ImageJobProgress>(progress.Add));
 
@@ -53,7 +53,7 @@ public sealed class RawImagerTests : IDisposable
         var source = new FaultyStream(data, badStart, badLength);
         var outPath = Path.Combine(_dir, "bad.dd");
 
-        var result = await new RawImager().ImageStreamAsync(source,
+        var result = await new InProcessImager().ImageStreamAsync(source,
             new ImageJob("faulty", outPath, ImageFormat.Raw, ReadErrorRetries: 1));
 
         result.BadSectors.Should().Be(3);
@@ -102,52 +102,52 @@ public sealed class RawImagerTests : IDisposable
     [Fact]
     public void Device_paths_are_recognised_on_both_platforms()
     {
-        RawImager.IsDevicePath(@"\\.\PhysicalDrive0").Should().BeTrue();
-        RawImager.IsDevicePath("/dev/sda").Should().BeTrue();
-        RawImager.IsDevicePath(@"C:\images\disk.dd").Should().BeFalse();
+        InProcessImager.IsDevicePath(@"\\.\PhysicalDrive0").Should().BeTrue();
+        InProcessImager.IsDevicePath("/dev/sda").Should().BeTrue();
+        InProcessImager.IsDevicePath(@"C:\images\disk.dd").Should().BeFalse();
     }
 
     [Fact]
-    public async Task Refuses_non_raw_formats()
+    public async Task Refuses_formats_it_cannot_write()
     {
-        var act = async () => await new RawImager().ImageAsync(new ImageJob("x", Path.Combine(_dir, "y"), ImageFormat.Ewf));
+        var act = async () => await new InProcessImager().ImageAsync(new ImageJob("x", Path.Combine(_dir, "y"), ImageFormat.Aff4));
         await act.Should().ThrowAsync<NotSupportedException>();
     }
+}
 
-    /// <summary>A seekable stream that throws IOException for any read touching [badStart, badStart+badLength).</summary>
-    private sealed class FaultyStream(byte[] data, long badStart, long badLength) : Stream
+/// <summary>A seekable stream that throws IOException for any read touching [badStart, badStart+badLength).</summary>
+internal sealed class FaultyStream(byte[] data, long badStart, long badLength) : Stream
+{
+    private long _pos;
+    public override bool CanRead => true;
+    public override bool CanSeek => true;
+    public override bool CanWrite => false;
+    public override long Length => data.Length;
+    public override long Position { get => _pos; set => _pos = value; }
+
+    public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+    public override int Read(Span<byte> buffer)
     {
-        private long _pos;
-        public override bool CanRead => true;
-        public override bool CanSeek => true;
-        public override bool CanWrite => false;
-        public override long Length => data.Length;
-        public override long Position { get => _pos; set => _pos = value; }
-
-        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
-
-        public override int Read(Span<byte> buffer)
+        var n = (int)Math.Min(buffer.Length, data.Length - _pos);
+        if (n <= 0) return 0;
+        var end = _pos + n;
+        if (_pos < badStart + badLength && end > badStart)
         {
-            var n = (int)Math.Min(buffer.Length, data.Length - _pos);
-            if (n <= 0) return 0;
-            var end = _pos + n;
-            if (_pos < badStart + badLength && end > badStart)
-            {
-                throw new IOException("simulated unreadable sector");
-            }
-            data.AsSpan((int)_pos, n).CopyTo(buffer);
-            _pos += n;
-            return n;
+            throw new IOException("simulated unreadable sector");
         }
-
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            _pos = origin switch { SeekOrigin.Begin => offset, SeekOrigin.Current => _pos + offset, _ => Length + offset };
-            return _pos;
-        }
-
-        public override void Flush() { }
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        data.AsSpan((int)_pos, n).CopyTo(buffer);
+        _pos += n;
+        return n;
     }
+
+    public override long Seek(long offset, SeekOrigin origin)
+    {
+        _pos = origin switch { SeekOrigin.Begin => offset, SeekOrigin.Current => _pos + offset, _ => Length + offset };
+        return _pos;
+    }
+
+    public override void Flush() { }
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }
