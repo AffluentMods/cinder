@@ -107,32 +107,44 @@ public sealed class HexViewer : Control, ILogicalScrollable
         set => SetValue(BookmarksProperty, value);
     }
 
-    private readonly Typeface _typeface = new("Cascadia Mono, Consolas, monospace");
+    private readonly Typeface _typeface = new("JetBrains Mono, Cascadia Mono, Consolas, monospace");
     private double _glyphAdvance;
     private double _rowHeight;
     private Size _viewport;
+    private long _hoverOffset = -1;
 
     // Brushes cached once, reused every frame. Render is on the hot path of every wheel tick
     // and scrollbar drag; allocating SolidColorBrush per-paint produces GC churn that's
-    // perceptible as scroll jank on multi-MB files.
-    private static readonly IBrush BrushFg = Brushes.Gainsboro;
-    private static readonly IBrush BrushMuted = new SolidColorBrush(Color.FromRgb(0x9C, 0xA0, 0xAB));
-    private static readonly IBrush BrushAccent = new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1A));
-    private static readonly IBrush BrushHitBg = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0x7A, 0x1A));
-    private static readonly IBrush BrushCaret = new SolidColorBrush(Color.FromRgb(0xFF, 0xB3, 0x47));
-    private static readonly IBrush BrushStripe = new SolidColorBrush(Color.FromArgb(0x14, 0x9C, 0xA0, 0xAB));
-    private static readonly IBrush BrushCaretRow = new SolidColorBrush(Color.FromArgb(0x28, 0xFF, 0x7A, 0x1A));
-    private static readonly IBrush BrushSelection = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0x7A, 0x1A));
-    private static readonly IBrush BrushBookmark = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xB3, 0x47));
+    // perceptible as scroll jank on multi-MB files. Colours track Cinder.Tokens.axaml.
+    private static readonly IBrush BrushFg = new SolidColorBrush(Color.FromRgb(0xE7, 0xE9, 0xEE));        // printable
+    private static readonly IBrush BrushMuted = new SolidColorBrush(Color.FromRgb(0x9A, 0xA2, 0xAE));
+    private static readonly IBrush BrushOffset = new SolidColorBrush(Color.FromRgb(0x5F, 0x66, 0x72));    // offset gutter
+    private static readonly IBrush BrushWs = new SolidColorBrush(Color.FromRgb(0x5E, 0x7C, 0x9E));        // whitespace
+    private static readonly IBrush BrushCtl = new SolidColorBrush(Color.FromRgb(0xC2, 0x7C, 0x8F));       // control
+    private static readonly IBrush BrushHigh = new SolidColorBrush(Color.FromRgb(0x9B, 0x8E, 0xE0));      // high / >0x7F
+    private static readonly IBrush BrushNull = new SolidColorBrush(Color.FromRgb(0x3A, 0x3F, 0x49));      // null
+    private static readonly IBrush BrushAccent = new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1B));
+    private static readonly IBrush BrushOnAccent = new SolidColorBrush(Color.FromRgb(0x1C, 0x0E, 0x03));  // text on caret cell
+    private static readonly IBrush BrushHitBg = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0x7A, 0x1B));
+    private static readonly IBrush BrushHover = new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF));
+    private static readonly IBrush BrushCaretRow = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF));
+    private static readonly IBrush BrushSelection = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x7A, 0x1B));
+    private static readonly IBrush BrushBookmark = new SolidColorBrush(Color.FromRgb(0x8A, 0x93, 0xA2));
 
     static HexViewer()
     {
         // Brushes constructed off the UI thread above need to be frozen for cross-thread reuse.
+        ((SolidColorBrush)BrushFg).ToImmutable();
         ((SolidColorBrush)BrushMuted).ToImmutable();
+        ((SolidColorBrush)BrushOffset).ToImmutable();
+        ((SolidColorBrush)BrushWs).ToImmutable();
+        ((SolidColorBrush)BrushCtl).ToImmutable();
+        ((SolidColorBrush)BrushHigh).ToImmutable();
+        ((SolidColorBrush)BrushNull).ToImmutable();
         ((SolidColorBrush)BrushAccent).ToImmutable();
+        ((SolidColorBrush)BrushOnAccent).ToImmutable();
         ((SolidColorBrush)BrushHitBg).ToImmutable();
-        ((SolidColorBrush)BrushCaret).ToImmutable();
-        ((SolidColorBrush)BrushStripe).ToImmutable();
+        ((SolidColorBrush)BrushHover).ToImmutable();
         ((SolidColorBrush)BrushCaretRow).ToImmutable();
         ((SolidColorBrush)BrushSelection).ToImmutable();
         ((SolidColorBrush)BrushBookmark).ToImmutable();
@@ -158,7 +170,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
     {
         MeasureGlyph();
         var contentWidth = OffsetColumnChars * _glyphAdvance + 12 +
-                           BytesPerRow * 3 * _glyphAdvance + 12 +
+                           BytesPerRow * 3 * _glyphAdvance + HexGroupGapsTotal + 12 +
                            BytesPerRow * _glyphAdvance + 12 +
                            BytesPerRow * _glyphAdvance + 12;
         // Avalonia rejects ∞ from MeasureOverride. Logical scrolling means the wrapping
@@ -226,16 +238,10 @@ public sealed class HexViewer : Control, ILogicalScrollable
                 var y = row * _rowHeight;
                 var absoluteRow = firstVisibleRow + row;
 
-                // Row band — alternate stripes for readability + accent band on caret row.
+                // Caret row gets a faint wash across its full width; no zebra striping.
                 if (absoluteRow == caretRow)
                 {
                     context.FillRectangle(BrushCaretRow, new Rect(0, y, bounds.Width, _rowHeight));
-                    // 2px left border — caret-row affordance per the design system.
-                    context.FillRectangle(BrushAccent, new Rect(0, y, 2, _rowHeight));
-                }
-                else if ((absoluteRow & 1) == 1)
-                {
-                    context.FillRectangle(BrushStripe, new Rect(0, y, bounds.Width, _rowHeight));
                 }
 
                 DrawRow(context, rowOffset, read.AsSpan(row * bytesPerRow, Math.Min(bytesPerRow, Math.Max(0, bytesRead - row * bytesPerRow))),
@@ -253,37 +259,53 @@ public sealed class HexViewer : Control, ILogicalScrollable
         var x = 6.0;
 
         // Offset column
-        var offsetText = rowOffset.ToString("X16", CultureInfo.InvariantCulture);
-        DrawText(context, offsetText, new Point(x, y), BrushMuted);
+        var offsetText = rowOffset.ToString("X" + OffsetColumnChars, CultureInfo.InvariantCulture);
+        DrawText(context, offsetText, new Point(x, y), BrushOffset);
         x += OffsetColumnChars * _glyphAdvance + 12;
 
-        // Highlight any search hits intersecting this row
+        // Highlight any search hits / selection intersecting this row
         DrawRowHighlights(context, rowOffset, bytesPerRow, x, y);
 
-        // Hex column
         var hexX = x;
+        var asciiX = x + bytesPerRow * 3 * _glyphAdvance + HexGroupGapsTotal + 12;
+
         for (int i = 0; i < bytesPerRow; i++)
         {
             if (i >= row.Length)
             {
                 break;
             }
-            var byteText = row[i].ToString("X2", CultureInfo.InvariantCulture);
-            var byteOffset = rowOffset + i;
-            var brush = byteOffset == CaretOffset ? BrushCaret : (IsBookmarked(byteOffset) ? BrushAccent : BrushFg);
-            DrawText(context, byteText, new Point(hexX + i * 3 * _glyphAdvance, y), brush);
-        }
-        x += bytesPerRow * 3 * _glyphAdvance + 12;
-
-        // ASCII column
-        var asciiX = x;
-        for (int i = 0; i < row.Length; i++)
-        {
             var b = row[i];
-            var c = b is >= 0x20 and < 0x7F ? (char)b : '.';
-            DrawText(context, c.ToString(), new Point(asciiX + i * _glyphAdvance, y), BrushMuted);
+            var byteOffset = rowOffset + i;
+            var isCaret = byteOffset == CaretOffset;
+            var isHover = byteOffset == _hoverOffset && !isCaret;
+            var hxPos = HexByteX(hexX, i);
+            var acPos = asciiX + i * _glyphAdvance;
+
+            // Cell backgrounds: caret is an accent chip; hover is a faint wash across both panes.
+            if (isCaret)
+            {
+                context.FillRectangle(BrushAccent, new Rect(hxPos - 2, y, 2 * _glyphAdvance + 4, _rowHeight), 3);
+                context.FillRectangle(BrushAccent, new Rect(acPos - 1, y, _glyphAdvance + 2, _rowHeight), 3);
+            }
+            else if (isHover)
+            {
+                context.FillRectangle(BrushHover, new Rect(hxPos - 2, y, 2 * _glyphAdvance + 4, _rowHeight), 3);
+                context.FillRectangle(BrushHover, new Rect(acPos - 1, y, _glyphAdvance + 2, _rowHeight), 3);
+            }
+
+            var textBrush = isCaret ? BrushOnAccent : (IsBookmarked(byteOffset) ? BrushAccent : ClassBrush(b));
+
+            // Hex digits
+            DrawText(context, b.ToString("X2", CultureInfo.InvariantCulture), new Point(hxPos, y), textBrush);
+
+            // ASCII glyph, coloured by the same class
+            var c = b is >= 0x20 and < 0x7F ? (char)b : '·';
+            DrawText(context, c.ToString(), new Point(acPos, y), textBrush);
         }
-        x += bytesPerRow * _glyphAdvance + 12;
+
+        var x2 = asciiX + bytesPerRow * _glyphAdvance + 12;
+        x = x2;
 
         // UTF-16LE column (one glyph per 2 bytes). Random binary will land all over CJK; only
         // emit characters that are actually informative for a forensic examiner — basic Latin
@@ -330,7 +352,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
             {
                 if (item is Bookmark bm && bm.Offset >= rowOffset && bm.Offset < rowEnd)
                 {
-                    context.FillRectangle(BrushBookmark, new Rect(0, y, 4, _rowHeight));
+                    context.FillRectangle(BrushBookmark, new Rect(0, y, 2, _rowHeight));
                     break;
                 }
             }
@@ -346,12 +368,9 @@ public sealed class HexViewer : Control, ILogicalScrollable
         {
             return;
         }
-        var rect = new Rect(
-            hexStartX + localStart * 3 * _glyphAdvance,
-            y,
-            (localEnd - localStart) * 3 * _glyphAdvance,
-            _rowHeight);
-        context.FillRectangle(brush, rect);
+        var left = HexByteX(hexStartX, localStart);
+        var right = HexByteX(hexStartX, localEnd - 1) + 2 * _glyphAdvance;
+        context.FillRectangle(brush, new Rect(left - 1, y, right - left + 2, _rowHeight), 3);
     }
 
     private static bool IsUsefulUtf16Char(char c) =>
@@ -399,7 +418,24 @@ public sealed class HexViewer : Control, ILogicalScrollable
         _rowHeight = ft.Height + 2;
     }
 
-    private const int OffsetColumnChars = 16;
+    /// <summary>Offset gutter width in hex digits: 8 for images up to 4 GiB, 16 beyond.</summary>
+    private int OffsetColumnChars => Buffer is { Length: > 0xFFFFFFFFL } ? 16 : 8;
+
+    // Extra spacing after every 8-byte group in the hex column (the 8-byte split).
+    private double GroupGap => _glyphAdvance * 1.6;
+    private double HexGroupGapsTotal => Math.Max(0, (BytesPerRow - 1) / 8) * GroupGap;
+
+    /// <summary>X of hex byte i within the hex column, including 8-byte group gaps.</summary>
+    private double HexByteX(double hexBaseX, int i) => hexBaseX + i * 3 * _glyphAdvance + (i / 8) * GroupGap;
+
+    private static IBrush ClassBrush(byte b) => b switch
+    {
+        0 => BrushNull,
+        9 or 10 or 13 or 32 => BrushWs,
+        < 32 or 127 => BrushCtl,
+        > 127 => BrushHigh,
+        _ => BrushFg,
+    };
 
     /// <summary>Compute total row count for the current buffer + bytes-per-row.</summary>
     public long RowCount => Buffer is null ? 0 : (Buffer.Length + BytesPerRow - 1) / BytesPerRow;
@@ -544,16 +580,35 @@ public sealed class HexViewer : Control, ILogicalScrollable
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        if (!_dragging || Buffer is null)
+        if (Buffer is null)
         {
             return;
         }
         var hit = HitTestByteOffset(e.GetPosition(this));
-        if (hit < 0)
+
+        // Track the hovered byte so the render can wash it across both panes. Invalidate only
+        // when it actually changes — pointer-move fires far faster than we need to repaint.
+        if (!_dragging && hit != _hoverOffset)
+        {
+            _hoverOffset = hit;
+            InvalidateVisual();
+        }
+
+        if (!_dragging || hit < 0)
         {
             return;
         }
         ExtendSelection(hit);
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        if (_hoverOffset != -1)
+        {
+            _hoverOffset = -1;
+            InvalidateVisual();
+        }
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -577,13 +632,38 @@ public sealed class HexViewer : Control, ILogicalScrollable
             return Buffer.Length - 1;
         }
 
-        // Hex column starts after offset gutter + padding.
+        // Column origins mirror DrawRow.
         var hexStart = 6.0 + OffsetColumnChars * _glyphAdvance + 12;
-        var hexLocal = (p.X - hexStart) / (3 * _glyphAdvance);
-        var byteInRow = (int)Math.Floor(hexLocal);
-        if (byteInRow < 0)
+        var asciiStart = hexStart + BytesPerRow * 3 * _glyphAdvance + HexGroupGapsTotal + 12;
+
+        int byteInRow;
+        if (p.X >= asciiStart)
+        {
+            // Clicks in the ASCII pane select the same byte.
+            byteInRow = (int)Math.Floor((p.X - asciiStart) / _glyphAdvance);
+        }
+        else if (p.X < hexStart)
         {
             return rowStart;
+        }
+        else
+        {
+            // Walk the hex cells so the 8-byte group gap maps correctly.
+            byteInRow = 0;
+            for (int i = 0; i < BytesPerRow; i++)
+            {
+                if (p.X < HexByteX(hexStart, i) + 3 * _glyphAdvance)
+                {
+                    byteInRow = i;
+                    break;
+                }
+                byteInRow = i;
+            }
+        }
+
+        if (byteInRow < 0)
+        {
+            byteInRow = 0;
         }
         if (byteInRow >= BytesPerRow)
         {
@@ -643,7 +723,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
                 return new Size(_glyphAdvance * 32, 0);
             }
             var contentWidth = OffsetColumnChars * _glyphAdvance + 12 +
-                               BytesPerRow * 3 * _glyphAdvance + 12 +
+                               BytesPerRow * 3 * _glyphAdvance + HexGroupGapsTotal + 12 +
                                BytesPerRow * _glyphAdvance + 12 +
                                BytesPerRow * _glyphAdvance + 12;
             return new Size(contentWidth, RowCount * _rowHeight);

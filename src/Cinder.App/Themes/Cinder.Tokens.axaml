@@ -2,48 +2,61 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!--
-        Cinder design tokens — see docs/plan.md §5.
+        Cinder design tokens.
         Theme variants: Dark (default), Light. Tokens are exposed under semantic keys
         so views never reference raw hex values.
 
-        Surface scale: Surface0 (deepest — title bar / status bar)
+        Surface scale: Surface0 (deepest — chrome: title bar / rail / inspector / status bar)
                      → Surface4 (highest — popovers / dropdowns).
-        The legacy Background0/1/2 keys map onto the scale and stay for back-compat.
+        Background0 is the tool-content ground the center pane sits on.
+
+        Dark palette follows the redesign mockup:
+          c0 #0A0B0E chrome · c1 #111318 content · c2 #171A21 chips/inputs · c3 #1F232B hover
+          line #1E222A · line2 #2A2F39 · text e7e9ee / 9aa2ae / 5f6672 · accent #FF7A1B
     -->
 
     <ResourceDictionary.ThemeDictionaries>
 
         <!-- ============================ DARK ============================ -->
         <ResourceDictionary x:Key="Dark">
-            <Color x:Key="CinderBackground0Color">#0E0F12</Color>
-            <Color x:Key="CinderBackground1Color">#16181D</Color>
-            <Color x:Key="CinderBackground2Color">#1E2128</Color>
+            <Color x:Key="CinderBackground0Color">#111318</Color>
+            <Color x:Key="CinderBackground1Color">#14171D</Color>
+            <Color x:Key="CinderBackground2Color">#1B1F27</Color>
 
-            <!-- Five-step elevation. 0 deepest, 4 highest. -->
-            <Color x:Key="CinderSurface0Color">#0B0C0F</Color>
-            <Color x:Key="CinderSurface1Color">#101216</Color>
-            <Color x:Key="CinderSurface2Color">#16181D</Color>
-            <Color x:Key="CinderSurface3Color">#1C1F25</Color>
-            <Color x:Key="CinderSurface4Color">#23262E</Color>
+            <!-- Five-step elevation. 0 deepest (chrome), 4 highest. -->
+            <Color x:Key="CinderSurface0Color">#0A0B0E</Color>
+            <Color x:Key="CinderSurface1Color">#111318</Color>
+            <Color x:Key="CinderSurface2Color">#171A21</Color>
+            <Color x:Key="CinderSurface3Color">#1F232B</Color>
+            <Color x:Key="CinderSurface4Color">#262A33</Color>
 
-            <Color x:Key="CinderRailHoverColor">#1A1D23</Color>
-            <Color x:Key="CinderRailSelectedColor">#23262E</Color>
+            <Color x:Key="CinderRailHoverColor">#171A21</Color>
+            <Color x:Key="CinderRailSelectedColor">#1F232B</Color>
 
-            <Color x:Key="CinderBorderColor">#2F323B</Color>
-            <Color x:Key="CinderBorderStrongColor">#3A3D47</Color>
+            <Color x:Key="CinderBorderColor">#1E222A</Color>
+            <Color x:Key="CinderBorderStrongColor">#2A2F39</Color>
 
-            <Color x:Key="CinderForegroundColor">#ECEDEE</Color>
-            <Color x:Key="CinderForegroundMutedColor">#9CA0AB</Color>
-            <Color x:Key="CinderForegroundDisabledColor">#5A5E6A</Color>
+            <Color x:Key="CinderForegroundColor">#E7E9EE</Color>
+            <Color x:Key="CinderForegroundMutedColor">#9AA2AE</Color>
+            <Color x:Key="CinderForegroundDisabledColor">#5F6672</Color>
 
-            <Color x:Key="CinderAccentColor">#FF7A1A</Color>
-            <Color x:Key="CinderAccentHoverColor">#FF8E3D</Color>
+            <Color x:Key="CinderAccentColor">#FF7A1B</Color>
+            <Color x:Key="CinderAccentHoverColor">#FF8A35</Color>
             <Color x:Key="CinderAccentDimColor">#B4540F</Color>
+            <!-- Accent tint: the fill behind selected bytes / accent chips. -->
+            <Color x:Key="CinderAccentSoftColor">#33220F</Color>
 
-            <Color x:Key="CinderOkColor">#3DD68C</Color>
-            <Color x:Key="CinderWarnColor">#FFB347</Color>
+            <Color x:Key="CinderOkColor">#3FB27F</Color>
+            <Color x:Key="CinderWarnColor">#E3AE4A</Color>
             <Color x:Key="CinderDangerColor">#E5484D</Color>
             <Color x:Key="CinderInfoColor">#5EAEFF</Color>
+
+            <!-- Hex byte classes — mirrored in Cinder.Hex.HexViewer render. -->
+            <Color x:Key="CinderBytePrintableColor">#E7E9EE</Color>
+            <Color x:Key="CinderByteWhitespaceColor">#5E7C9E</Color>
+            <Color x:Key="CinderByteControlColor">#C27C8F</Color>
+            <Color x:Key="CinderByteHighColor">#9B8EE0</Color>
+            <Color x:Key="CinderByteNullColor">#3A3F49</Color>
         </ResourceDictionary>
 
         <!-- ============================ LIGHT =========================== -->
@@ -71,11 +84,18 @@
             <Color x:Key="CinderAccentColor">#D45A00</Color>
             <Color x:Key="CinderAccentHoverColor">#FF7A1A</Color>
             <Color x:Key="CinderAccentDimColor">#8A3A00</Color>
+            <Color x:Key="CinderAccentSoftColor">#FFE6D2</Color>
 
             <Color x:Key="CinderOkColor">#118A55</Color>
             <Color x:Key="CinderWarnColor">#9C5A00</Color>
             <Color x:Key="CinderDangerColor">#C8323A</Color>
             <Color x:Key="CinderInfoColor">#1F6FCB</Color>
+
+            <Color x:Key="CinderBytePrintableColor">#16181D</Color>
+            <Color x:Key="CinderByteWhitespaceColor">#3F6690</Color>
+            <Color x:Key="CinderByteControlColor">#9C4A5E</Color>
+            <Color x:Key="CinderByteHighColor">#6A5EC0</Color>
+            <Color x:Key="CinderByteNullColor">#B6BAC4</Color>
         </ResourceDictionary>
 
     </ResourceDictionary.ThemeDictionaries>
@@ -102,14 +122,21 @@
     <SolidColorBrush x:Key="CinderAccentBrush" Color="{DynamicResource CinderAccentColor}" />
     <SolidColorBrush x:Key="CinderAccentHoverBrush" Color="{DynamicResource CinderAccentHoverColor}" />
     <SolidColorBrush x:Key="CinderAccentDimBrush" Color="{DynamicResource CinderAccentDimColor}" />
+    <SolidColorBrush x:Key="CinderAccentSoftBrush" Color="{DynamicResource CinderAccentSoftColor}" />
     <SolidColorBrush x:Key="CinderOkBrush" Color="{DynamicResource CinderOkColor}" />
     <SolidColorBrush x:Key="CinderWarnBrush" Color="{DynamicResource CinderWarnColor}" />
     <SolidColorBrush x:Key="CinderDangerBrush" Color="{DynamicResource CinderDangerColor}" />
     <SolidColorBrush x:Key="CinderInfoBrush" Color="{DynamicResource CinderInfoColor}" />
 
+    <SolidColorBrush x:Key="CinderBytePrintableBrush" Color="{DynamicResource CinderBytePrintableColor}" />
+    <SolidColorBrush x:Key="CinderByteWhitespaceBrush" Color="{DynamicResource CinderByteWhitespaceColor}" />
+    <SolidColorBrush x:Key="CinderByteControlBrush" Color="{DynamicResource CinderByteControlColor}" />
+    <SolidColorBrush x:Key="CinderByteHighBrush" Color="{DynamicResource CinderByteHighColor}" />
+    <SolidColorBrush x:Key="CinderByteNullBrush" Color="{DynamicResource CinderByteNullColor}" />
+
     <!-- ===================== Typography ===================== -->
     <FontFamily x:Key="CinderFontFamily">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
-    <FontFamily x:Key="CinderFontFamilyMono">Cascadia Mono, Consolas, JetBrains Mono, monospace</FontFamily>
+    <FontFamily x:Key="CinderFontFamilyMono">JetBrains Mono, Cascadia Mono, Consolas, monospace</FontFamily>
 
     <x:Double x:Key="CinderFontSizeXs">11</x:Double>
     <x:Double x:Key="CinderFontSizeSm">13</x:Double>

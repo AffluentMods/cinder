@@ -29,11 +29,11 @@
         <KeyBinding Gesture="F1" Command="{Binding OpenHelpCommand}" />
     </Window.KeyBindings>
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
 
         <!-- ============================ TITLE BAR ============================ -->
         <Border Grid.Row="0"
-                Background="#CC0B0C0F"
+                Background="{DynamicResource CinderSurface0Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="18,12">
@@ -130,11 +130,47 @@
             </Grid>
         </Border>
 
+        <!-- ============================ NO-CASE BANNER ============================ -->
+        <!-- Work on evidence without a case is allowed, but nothing is written to a custody
+             log. Say so plainly, and offer the two ways out. Hidden once a case is open. -->
+        <Border Grid.Row="1"
+                BorderBrush="{DynamicResource CinderBorderBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="18,8"
+                IsVisible="{Binding ActiveCaseName, Converter={x:Static ObjectConverters.IsNull}}">
+            <Border.Background>
+                <SolidColorBrush Color="{DynamicResource CinderWarnColor}" Opacity="0.09" />
+            </Border.Background>
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <Ellipse Grid.Column="0" Classes="status-dot warn" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap"
+                           FontSize="{DynamicResource CinderFontSizeSm}"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}">
+                    <Run Text="No case open."
+                         FontWeight="600"
+                         Foreground="{DynamicResource CinderForegroundBrush}" />
+                    <Run Text="Parsing, bookmarks, and exports on this evidence won't be recorded in a custody log." />
+                </TextBlock>
+                <Button Grid.Column="2" Classes="banner-ghost" Margin="0,0,8,0"
+                        Content="Open case"
+                        Command="{Binding OpenCaseFromPickerCommand}" />
+                <Button Grid.Column="3" Classes="accent"
+                        Padding="12,5"
+                        Command="{Binding CreateCaseCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <TextBlock Text="+" FontFamily="{DynamicResource CinderFontFamilyMono}"
+                                   FontSize="{DynamicResource CinderFontSizeMd}" VerticalAlignment="Center" />
+                        <TextBlock Text="Create case" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+
         <!-- ============================ CASE TABS ============================ -->
         <!-- Shown only when at least one case is open. Lets the user juggle multiple
              cases at once, like browser tabs for investigations. -->
-        <Border Grid.Row="1"
-                Background="{DynamicResource CinderSurface1Brush}"
+        <Border Grid.Row="2"
+                Background="{DynamicResource CinderSurface0Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="14,0"
@@ -207,11 +243,11 @@
         </Border>
 
         <!-- ============================ BODY ============================ -->
-        <Grid Grid.Row="2" ColumnDefinitions="240,4,*,4,300">
+        <Grid Grid.Row="3" ColumnDefinitions="240,4,*,4,300">
 
             <!-- ===== Left activity rail ===== -->
-            <Border Grid.Column="0" Background="{DynamicResource CinderSurface1Brush}"
-                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,0">
+            <Border Grid.Column="0" Background="{DynamicResource CinderSurface0Brush}"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,1,0">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding Workspace.Sections}">
                         <ItemsControl.ItemTemplate>
@@ -321,7 +357,8 @@
             <GridSplitter Grid.Column="3" Background="{DynamicResource CinderBorderBrush}" />
 
             <!-- ===== Right: properties pane ===== -->
-            <Border Grid.Column="4" Background="{DynamicResource CinderSurface1Brush}">
+            <Border Grid.Column="4" Background="{DynamicResource CinderSurface0Brush}"
+                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1,0,0,0">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="14" Spacing="18">
 
@@ -419,12 +456,12 @@
         </Grid>
 
         <!-- ============================ STATUS BAR ============================ -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Background="{DynamicResource CinderSurface0Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="18,8">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                     <Ellipse Classes="status-dot ok" />
                     <TextBlock Text="{Binding ActivityHeadline}"
@@ -433,7 +470,37 @@
                                VerticalAlignment="Center" />
                 </StackPanel>
 
-                <Border Grid.Column="1" Padding="8,3" CornerRadius="3"
+                <!-- Byte-class legend — reads the hex pane's colour code. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Border Width="8" Height="8" CornerRadius="2" VerticalAlignment="Center"
+                                Background="{DynamicResource CinderBytePrintableBrush}" />
+                        <TextBlock Text="printable" Classes="legend" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Border Width="8" Height="8" CornerRadius="2" VerticalAlignment="Center"
+                                Background="{DynamicResource CinderByteWhitespaceBrush}" />
+                        <TextBlock Text="whitespace" Classes="legend" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Border Width="8" Height="8" CornerRadius="2" VerticalAlignment="Center"
+                                Background="{DynamicResource CinderByteControlBrush}" />
+                        <TextBlock Text="control" Classes="legend" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Border Width="8" Height="8" CornerRadius="2" VerticalAlignment="Center"
+                                Background="{DynamicResource CinderByteHighBrush}" />
+                        <TextBlock Text="high" Classes="legend" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="5">
+                        <Border Width="8" Height="8" CornerRadius="2" VerticalAlignment="Center"
+                                Background="{DynamicResource CinderByteNullBrush}" />
+                        <TextBlock Text="null" Classes="legend" />
+                    </StackPanel>
+                </StackPanel>
+
+                <Border Grid.Column="2" Padding="8,3" CornerRadius="3"
                         Background="{DynamicResource CinderSurface3Brush}"
                         BorderBrush="{DynamicResource CinderAccentDimBrush}" BorderThickness="1"
                         Margin="0,0,12,0"
@@ -444,10 +511,10 @@
                                FontSize="{DynamicResource CinderFontSizeXs}" />
                 </Border>
 
-                <Border Grid.Column="2" Width="1" Height="14" Margin="0,0,12,0"
+                <Border Grid.Column="3" Width="1" Height="14" Margin="0,0,12,0"
                         Background="{DynamicResource CinderBorderBrush}" />
 
-                <TextBlock Grid.Column="3"
+                <TextBlock Grid.Column="4"
                            Text="{Binding Hex.CaretOffsetHex, FallbackValue=''}"
                            Classes="mono"
                            FontSize="{DynamicResource CinderFontSizeXs}"
@@ -456,7 +523,7 @@
                            Margin="0,0,12,0"
                            IsVisible="{Binding Hex.Buffer, Converter={x:Static ObjectConverters.IsNotNull}}" />
 
-                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Border Classes="kbd"><TextBlock Text="F1" Classes="mono" FontSize="10"
                                                      Foreground="{DynamicResource CinderForegroundDisabledBrush}" /></Border>
                     <TextBlock Text="help"
@@ -477,13 +544,13 @@
         </Border>
 
         <views:CommandPaletteView Grid.Row="0"
-                                  Grid.RowSpan="4"
+                                  Grid.RowSpan="5"
                                   DataContext="{Binding Palette}"
                                   IsVisible="{Binding IsOpen}" />
 
         <!-- Contextual help flyout. Bound directly to the MainWindowViewModel. -->
         <views:HelpFlyoutView Grid.Row="0"
-                              Grid.RowSpan="4"
+                              Grid.RowSpan="5"
                               IsVisible="{Binding IsHelpOpen}" />
     </Grid>
 </Window>
