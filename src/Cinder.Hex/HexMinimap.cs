@@ -47,10 +47,37 @@ public sealed class HexMinimap : Control
     private CancellationTokenSource? _cts;
     private bool _dragging;
 
-    private static readonly IBrush Track = new SolidColorBrush(Color.FromRgb(0x0A, 0x0B, 0x0E));
-    private static readonly IBrush ViewportFill = new SolidColorBrush(Color.FromArgb(0x16, 0xFF, 0xFF, 0xFF));
-    private static readonly IPen ViewportPen = new Pen(new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), 1);
-    private static readonly IPen EdgePen = new Pen(new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x2A)), 1);
+    // Theme-resolved (see RefreshTheme); defaults are the dark palette.
+    private IBrush Track = new ImmutableSolidColorBrush(Color.FromRgb(0x0A, 0x0B, 0x0E));
+    private IBrush ViewportFill = new ImmutableSolidColorBrush(Color.FromArgb(0x16, 0xFF, 0xFF, 0xFF));
+    private IPen ViewportPen = new Pen(new ImmutableSolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), 1);
+    private IPen EdgePen = new Pen(new ImmutableSolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x2A)), 1);
+    private Color _dense = Color.FromRgb(0xE7, 0xE9, 0xEE);
+    private Color _high = Color.FromRgb(0x9B, 0x8E, 0xE0);
+
+    private void RefreshTheme()
+    {
+        Color C(string key, Color fallback) =>
+            this.TryFindResource(key, ActualThemeVariant, out var v) && v is ISolidColorBrush b ? b.Color : fallback;
+        var fg = C("CinderForegroundBrush", Color.FromRgb(0xE7, 0xE9, 0xEE));
+        Track = new ImmutableSolidColorBrush(C("CinderSurface0Brush", Color.FromRgb(0x0A, 0x0B, 0x0E)));
+        ViewportFill = new ImmutableSolidColorBrush(Color.FromArgb(0x16, fg.R, fg.G, fg.B));
+        ViewportPen = new Pen(new ImmutableSolidColorBrush(Color.FromArgb(0x40, fg.R, fg.G, fg.B)), 1);
+        EdgePen = new Pen(new ImmutableSolidColorBrush(C("CinderBorderBrush", Color.FromRgb(0x1E, 0x22, 0x2A))), 1);
+        _dense = fg;
+        _high = C("CinderByteHighBrush", Color.FromRgb(0x9B, 0x8E, 0xE0));
+        if (_entropy is { } e)
+        {
+            _bandBrushes = e.Select(BandBrush).ToArray();
+        }
+        InvalidateVisual();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        RefreshTheme();
+    }
 
     static HexMinimap()
     {
@@ -67,6 +94,7 @@ public sealed class HexMinimap : Control
 
     public HexMinimap()
     {
+        ActualThemeVariantChanged += (_, _) => RefreshTheme();
         Width = 14;
         Cursor = new Cursor(StandardCursorType.Hand);
         ToolTip.SetTip(this, "Entropy map — brighter is denser data; violet (≥ 7.2 bits/byte) is typically compressed or encrypted; dark is zeros. Click or drag to jump.");
@@ -149,15 +177,15 @@ public sealed class HexMinimap : Control
         return (float)h;
     }
 
-    private static IBrush? BandBrush(float h)
+    private IBrush? BandBrush(float h)
     {
         if (h < 0)
         {
-            return null;   // zeros: leave the track dark
+            return null;   // zeros: leave the track empty
         }
         var c = h >= 7.2f
-            ? Color.FromArgb((byte)Math.Min(230, 120 + (h - 7.2f) / 0.8f * 110), 0x9B, 0x8E, 0xE0)
-            : Color.FromArgb((byte)(24 + h / 7.2f * 120), 0xE7, 0xE9, 0xEE);
+            ? Color.FromArgb((byte)Math.Min(230, 120 + (h - 7.2f) / 0.8f * 110), _high.R, _high.G, _high.B)
+            : Color.FromArgb((byte)(24 + h / 7.2f * 120), _dense.R, _dense.G, _dense.B);
         return new ImmutableSolidColorBrush(c);
     }
 

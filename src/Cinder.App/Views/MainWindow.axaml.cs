@@ -16,6 +16,10 @@ public partial class MainWindow : Window
     private double _railWidth = DefaultRailWidth;
     private double _inspectorWidth = DefaultInspectorWidth;
     private MainWindowViewModel? _vm;
+    private readonly Services.WindowLayoutStore _layoutStore = new();
+
+    /// <summary>Set by the screenshot harness so a dev run never overwrites the examiner's layout.</summary>
+    public bool PersistLayout { get; set; } = true;
 
     public MainWindow()
     {
@@ -32,6 +36,9 @@ public partial class MainWindow : Window
                 WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
             }
         };
+
+        Opened += (_, _) => RestoreLayout();
+        Closing += (_, _) => SaveLayout();
 
         // Leave room for the OS caption buttons drawn over the extended title area.
         var grid = this.FindControl<Grid>("TitleGrid")!;
@@ -102,6 +109,56 @@ public partial class MainWindow : Window
         this.FindControl<Control>("RailSplitter")!.IsVisible = _vm.IsRailOpen;
         this.FindControl<Control>("Inspector")!.IsVisible = _vm.ShowInspector;
         this.FindControl<Control>("InspectorSplitter")!.IsVisible = _vm.ShowInspector;
+    }
+
+    private void RestoreLayout()
+    {
+        if (!PersistLayout || _layoutStore.Load() is not { } l || _vm is null)
+        {
+            return;
+        }
+        _railWidth = Math.Clamp(l.RailWidth, 160, 480);
+        _inspectorWidth = Math.Clamp(l.InspectorWidth, 240, 560);
+
+        // Only restore a position that is still on a connected screen.
+        var onScreen = Screens.All.Any(sc => sc.WorkingArea.Contains(new PixelPoint((int)l.X + 40, (int)l.Y + 20)));
+        if (onScreen)
+        {
+            Position = new PixelPoint((int)l.X, (int)l.Y);
+        }
+        Width = l.Width;
+        Height = l.Height;
+        if (l.Maximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+        if (this.FindControl<Grid>("BodyGrid") is { } body)
+        {
+            body.ColumnDefinitions[0].Width = new GridLength(_railWidth);
+            body.ColumnDefinitions[4].Width = new GridLength(_inspectorWidth);
+        }
+        _vm.IsRailOpen = l.RailOpen;
+        _vm.IsInspectorOpen = l.InspectorOpen;
+        ApplyPaneLayout();
+    }
+
+    private void SaveLayout()
+    {
+        if (!PersistLayout || _vm is null)
+        {
+            return;
+        }
+        if (this.FindControl<Grid>("BodyGrid") is { } body)
+        {
+            if (body.ColumnDefinitions[0].Width.Value > 0) _railWidth = body.ColumnDefinitions[0].Width.Value;
+            if (body.ColumnDefinitions[4].Width.Value > 0) _inspectorWidth = body.ColumnDefinitions[4].Width.Value;
+        }
+        var maximized = WindowState == WindowState.Maximized;
+        _layoutStore.Save(new Services.WindowLayout(
+            Position.X, Position.Y,
+            maximized ? Math.Max(Width, 1080) : Width,
+            maximized ? Math.Max(Height, 640) : Height,
+            maximized, _railWidth, _inspectorWidth, _vm.IsRailOpen, _vm.IsInspectorOpen));
     }
 
     private void OnTitlePointerPressed(object? sender, PointerPressedEventArgs e)

@@ -1,32 +1,41 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.ConvertView"
              x:DataType="tools:ConvertTool">
-    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
-        <StackPanel Spacing="14" MaxWidth="720">
-            <Grid ColumnDefinitions="120,*,Auto">
-                <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBox Grid.Column="1" Text="{Binding Source}" />
-                <Button Grid.Column="2" Margin="6,0,0,0" Content="Pick…" Command="{Binding PickSourceCommand}" />
-            </Grid>
-            <Grid ColumnDefinitions="120,*,Auto">
-                <TextBlock Grid.Column="0" Text="Output" VerticalAlignment="Center"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBox Grid.Column="1" Text="{Binding Output}" />
-                <Button Grid.Column="2" Margin="6,0,0,0" Content="Save as…" Command="{Binding PickOutputCommand}" />
+    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
+            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
+                       Text="Converts between raw, E01, AFF4, VHD and VHDX in any direction. The output is re-read after writing and must hash back to what was written; a container source is also checked against its recorded acquisition hash." />
+            <Grid ColumnDefinitions="120,*">
+                <TextBlock Text="Source" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
+                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding Source}" FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    <Button Grid.Column="1" Classes="tb" Margin="6,0,0,0" Height="28" Content="Pick…" Command="{Binding PickSourceCommand}" />
+                </Grid>
             </Grid>
             <Grid ColumnDefinitions="120,*">
-                <TextBlock Grid.Column="0" Text="Target format" VerticalAlignment="Center"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" />
+                <TextBlock Text="Output" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
+                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding Output}" FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    <Button Grid.Column="1" Classes="tb" Margin="6,0,0,0" Height="28" Content="Save as…" Command="{Binding PickOutputCommand}" />
+                </Grid>
             </Grid>
-            <Button Classes="accent" Content="Convert" Command="{Binding RunCommand}" HorizontalAlignment="Left" />
-            <TextBlock Text="{Binding StatusLine}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <Grid ColumnDefinitions="120,*">
+                <TextBlock Text="Target format" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" MinWidth="160" />
+            </Grid>
+            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Content="Convert"
+                    Command="{Binding RunCommand}" Margin="120,0,0,0" />
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding !!BytesConverted}" Margin="120,0,0,0" />
+            <TextBlock Text="{Binding BytesConverted, StringFormat='{}{0:N0} bytes converted'}" Classes="mono dim" FontSize="12"
+                       IsVisible="{Binding !!BytesConverted}" Margin="120,0,0,0" />
+            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
+                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

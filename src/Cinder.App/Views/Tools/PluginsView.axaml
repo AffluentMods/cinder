@@ -9,7 +9,7 @@
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <Button Classes="accent" Content="Pick plugins folder…" Command="{Binding PickFolderCommand}" />
-                <TextBlock VerticalAlignment="Center" Text="{Binding Folder, FallbackValue='No folder selected'}"
+                <TextBlock VerticalAlignment="Center" Text="{Binding Folder, TargetNullValue='No folder selected'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                 <TextBlock VerticalAlignment="Center" Margin="14,0"
                            Text="{Binding StatusLine}"

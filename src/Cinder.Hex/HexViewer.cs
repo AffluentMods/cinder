@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 
 namespace Cinder.Hex;
@@ -145,44 +146,58 @@ public sealed class HexViewer : Control, ILogicalScrollable
     private Size _viewport;
     private long _hoverOffset = -1;
 
-    // Brushes cached once, reused every frame. Render is on the hot path of every wheel tick
-    // and scrollbar drag; allocating SolidColorBrush per-paint produces GC churn that's
-    // perceptible as scroll jank on multi-MB files. Colours track Cinder.Tokens.axaml.
-    private static readonly IBrush BrushFg = new SolidColorBrush(Color.FromRgb(0xE7, 0xE9, 0xEE));        // printable
-    private static readonly IBrush BrushMuted = new SolidColorBrush(Color.FromRgb(0x9A, 0xA2, 0xAE));
-    private static readonly IBrush BrushOffset = new SolidColorBrush(Color.FromRgb(0x5F, 0x66, 0x72));    // offset gutter
-    private static readonly IBrush BrushWs = new SolidColorBrush(Color.FromRgb(0x5E, 0x7C, 0x9E));        // whitespace
-    private static readonly IBrush BrushCtl = new SolidColorBrush(Color.FromRgb(0xC2, 0x7C, 0x8F));       // control
-    private static readonly IBrush BrushHigh = new SolidColorBrush(Color.FromRgb(0x9B, 0x8E, 0xE0));      // high / >0x7F
-    private static readonly IBrush BrushNull = new SolidColorBrush(Color.FromRgb(0x3A, 0x3F, 0x49));      // null
-    private static readonly IBrush BrushAccent = new SolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1B));
-    private static readonly IBrush BrushOnAccent = new SolidColorBrush(Color.FromRgb(0x1C, 0x0E, 0x03));  // text on caret cell
-    private static readonly IBrush BrushHitBg = new SolidColorBrush(Color.FromArgb(0x40, 0xE3, 0xAE, 0x4A));
-    private static readonly IBrush BrushHover = new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF));
-    private static readonly IBrush BrushCaretRow = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF));
-    private static readonly IBrush BrushSelection = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x7A, 0x1B));
-    private static readonly IBrush BrushBookmark = new SolidColorBrush(Color.FromRgb(0x8A, 0x93, 0xA2));
-    private static readonly IBrush BrushSector = new SolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x2A));
+    // Brushes are resolved from the app's theme tokens (Cinder.Tokens.axaml) and re-resolved
+    // when the theme variant changes; Render reuses them every frame, so no per-paint
+    // allocation. The defaults are the dark palette, used until the control joins a tree.
+    private IBrush BrushFg = new ImmutableSolidColorBrush(Color.FromRgb(0xE7, 0xE9, 0xEE));      // printable
+    private IBrush BrushOffset = new ImmutableSolidColorBrush(Color.FromRgb(0x5F, 0x66, 0x72));  // offset gutter
+    private IBrush BrushWs = new ImmutableSolidColorBrush(Color.FromRgb(0x5E, 0x7C, 0x9E));      // whitespace
+    private IBrush BrushCtl = new ImmutableSolidColorBrush(Color.FromRgb(0xC2, 0x7C, 0x8F));     // control
+    private IBrush BrushHigh = new ImmutableSolidColorBrush(Color.FromRgb(0x9B, 0x8E, 0xE0));    // high / >0x7F
+    private IBrush BrushNull = new ImmutableSolidColorBrush(Color.FromRgb(0x3A, 0x3F, 0x49));    // null
+    private IBrush BrushAccent = new ImmutableSolidColorBrush(Color.FromRgb(0xFF, 0x7A, 0x1B));
+    private IBrush BrushOnAccent = new ImmutableSolidColorBrush(Color.FromRgb(0x1C, 0x0E, 0x03)); // text on caret cell
+    private IBrush BrushHitBg = new ImmutableSolidColorBrush(Color.FromArgb(0x40, 0xE3, 0xAE, 0x4A));
+    private IBrush BrushHover = new ImmutableSolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF));
+    private IBrush BrushCaretRow = new ImmutableSolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF));
+    private IBrush BrushSelection = new ImmutableSolidColorBrush(Color.FromArgb(0x33, 0xFF, 0x7A, 0x1B));
+    private IBrush BrushBookmark = new ImmutableSolidColorBrush(Color.FromRgb(0x8A, 0x93, 0xA2));
+    private IBrush BrushSector = new ImmutableSolidColorBrush(Color.FromRgb(0x1E, 0x22, 0x2A));
+
+    private void RefreshThemeBrushes()
+    {
+        Color C(string key, Color fallback) =>
+            this.TryFindResource(key, ActualThemeVariant, out var v) && v is ISolidColorBrush b ? b.Color : fallback;
+        static IBrush B(Color c) => new ImmutableSolidColorBrush(c);
+        static Color A(Color c, byte alpha) => Color.FromArgb(alpha, c.R, c.G, c.B);
+
+        var fg = C("CinderForegroundBrush", Color.FromRgb(0xE7, 0xE9, 0xEE));
+        var accent = C("CinderAccentBrush", Color.FromRgb(0xFF, 0x7A, 0x1B));
+        BrushFg = B(C("CinderBytePrintableBrush", fg));
+        BrushOffset = B(C("CinderForegroundDisabledBrush", Color.FromRgb(0x5F, 0x66, 0x72)));
+        BrushWs = B(C("CinderByteWhitespaceBrush", Color.FromRgb(0x5E, 0x7C, 0x9E)));
+        BrushCtl = B(C("CinderByteControlBrush", Color.FromRgb(0xC2, 0x7C, 0x8F)));
+        BrushHigh = B(C("CinderByteHighBrush", Color.FromRgb(0x9B, 0x8E, 0xE0)));
+        BrushNull = B(C("CinderByteNullBrush", Color.FromRgb(0x3A, 0x3F, 0x49)));
+        BrushAccent = B(accent);
+        BrushOnAccent = B(C("CinderOnAccentBrush", Color.FromRgb(0x1C, 0x0E, 0x03)));
+        BrushHitBg = B(A(C("CinderWarnBrush", Color.FromRgb(0xE3, 0xAE, 0x4A)), 0x40));
+        BrushHover = B(A(fg, 0x1F));
+        BrushCaretRow = B(A(fg, 0x0A));
+        BrushSelection = B(A(accent, 0x33));
+        BrushBookmark = B(C("CinderForegroundMutedBrush", Color.FromRgb(0x8A, 0x93, 0xA2)));
+        BrushSector = B(C("CinderBorderBrush", Color.FromRgb(0x1E, 0x22, 0x2A)));
+        InvalidateVisual();
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        RefreshThemeBrushes();
+    }
 
     static HexViewer()
     {
-        // Brushes constructed off the UI thread above need to be frozen for cross-thread reuse.
-        ((SolidColorBrush)BrushFg).ToImmutable();
-        ((SolidColorBrush)BrushMuted).ToImmutable();
-        ((SolidColorBrush)BrushOffset).ToImmutable();
-        ((SolidColorBrush)BrushWs).ToImmutable();
-        ((SolidColorBrush)BrushCtl).ToImmutable();
-        ((SolidColorBrush)BrushHigh).ToImmutable();
-        ((SolidColorBrush)BrushNull).ToImmutable();
-        ((SolidColorBrush)BrushAccent).ToImmutable();
-        ((SolidColorBrush)BrushOnAccent).ToImmutable();
-        ((SolidColorBrush)BrushHitBg).ToImmutable();
-        ((SolidColorBrush)BrushHover).ToImmutable();
-        ((SolidColorBrush)BrushCaretRow).ToImmutable();
-        ((SolidColorBrush)BrushSelection).ToImmutable();
-        ((SolidColorBrush)BrushBookmark).ToImmutable();
-        ((SolidColorBrush)BrushSector).ToImmutable();
-
         // Tell the wrapping ScrollViewer to re-read scroll info when EXTENT changes (buffer
         // swap, BPR change). NOT when ScrollOffset changes — that creates a feedback loop where
         // the ScrollViewer's own thumb-drag setter triggers an invalidation that makes the
@@ -214,6 +229,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
 
     public HexViewer()
     {
+        ActualThemeVariantChanged += (_, _) => RefreshThemeBrushes();
         Focusable = true;
         ClipToBounds = true;
         AffectsRender<HexViewer>(BufferProperty, ScrollOffsetProperty, BytesPerRowProperty,
@@ -543,7 +559,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
     /// <summary>X of hex byte i within the hex column, including 8-byte group gaps.</summary>
     private double HexByteX(double hexBaseX, int i) => hexBaseX + i * 3 * _glyphAdvance + (i / 8) * GroupGap;
 
-    private static IBrush ClassBrush(byte b) => b switch
+    private IBrush ClassBrush(byte b) => b switch
     {
         0 => BrushNull,
         9 or 10 or 13 or 32 => BrushWs,

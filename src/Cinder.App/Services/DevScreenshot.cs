@@ -28,6 +28,10 @@ public static class DevScreenshot
         {
             return false;
         }
+        if (window is Cinder.App.Views.MainWindow mw)
+        {
+            mw.PersistLayout = false;
+        }
 
         if (Arg(args, "--size") is { } size && size.Split('x') is [var w, var h]
             && double.TryParse(w, NumberStyles.Float, CultureInfo.InvariantCulture, out var ww)

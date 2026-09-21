@@ -11,7 +11,7 @@
                 <Button Grid.Column="0" Content="Open + verify…" Classes="accent"
                         Command="{Binding PickAndVerifyCommand}" />
                 <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
-                           Text="{Binding CasePath, FallbackValue='No case loaded'}"
+                           Text="{Binding CasePath, TargetNullValue='No case loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                 <TextBlock Grid.Column="2" Text="{Binding Verdict}"
                            Foreground="{DynamicResource CinderAccentBrush}"
