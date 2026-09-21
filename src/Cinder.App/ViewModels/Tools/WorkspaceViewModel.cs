@@ -120,6 +120,16 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
             SortByPhase(section.Tools);
         }
 
+        // Rail: Home is a lone item at the top and Settings is pinned at the foot, so neither
+        // gets a group header. Examine (where almost every session starts) opens by default.
+        RailSections = new ObservableCollection<ToolSection>(Sections.Where(s => s.Title != "Home"));
+        SettingsEntry = Sections.SelectMany(s => s.Tools).First(t => t.Kind == "settings");
+        foreach (var s in RailSections)
+        {
+            s.IsExpanded = s.Title == "Examine";
+        }
+        ApplyRailFilter();
+
         // Home / Dashboard is selected by default — beginners never land on a blank parser.
         SelectedTool = Dashboard;
         ApplySelection(SelectedTool);
@@ -150,7 +160,17 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
             ? n
             : int.MaxValue;
 
-    partial void OnSelectedToolChanged(ToolViewModel? value) => ApplySelection(value);
+    partial void OnSelectedToolChanged(ToolViewModel? value)
+    {
+        ApplySelection(value);
+        OnPropertyChanged(nameof(IsHexSelected));
+        OnPropertyChanged(nameof(ShowToolHeader));
+    }
+
+    /// <summary>The hex viewer brings its own tab strip and toolbar, so the shell hides its header for it.</summary>
+    public bool IsHexSelected => SelectedTool?.Kind == "hex";
+
+    public bool ShowToolHeader => SelectedTool is not null && SelectedTool.Kind is not ("hex" or "dashboard");
 
     private void ApplySelection(ToolViewModel? value)
     {
@@ -160,6 +180,62 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
             {
                 t.IsSelected = ReferenceEquals(t, value);
             }
+            // Reveal the selection: a tool picked from the palette must not hide in a collapsed group.
+            if (value is not null && s.Tools.Contains(value))
+            {
+                s.IsExpanded = true;
+            }
+        }
+    }
+
+    // ============================ Rail ============================
+
+    /// <summary>The collapsible groups (Examine / Analyze / Acquire / Case).</summary>
+    public ObservableCollection<ToolSection> RailSections { get; }
+
+    /// <summary>Settings, pinned at the foot of the rail.</summary>
+    public ToolViewModel SettingsEntry { get; }
+
+    [ObservableProperty]
+    private string? _railFilter;
+
+    /// <summary>False when the filter hides every tool — the rail shows "No tools match".</summary>
+    [ObservableProperty]
+    private bool _hasRailMatches = true;
+
+    partial void OnRailFilterChanged(string? value) => ApplyRailFilter();
+
+    private void ApplyRailFilter()
+    {
+        var filtering = !string.IsNullOrWhiteSpace(RailFilter);
+        foreach (var s in RailSections)
+        {
+            s.ApplyFilter(RailFilter);
+            if (filtering)
+            {
+                s.IsExpanded = true;
+            }
+        }
+        HasRailMatches = RailSections.Any(s => !s.IsEmpty);
+    }
+
+    [RelayCommand]
+    private void ToggleSection(ToolSection? section)
+    {
+        if (section is not null)
+        {
+            section.IsExpanded = !section.IsExpanded;
+        }
+    }
+
+    /// <summary>Enter in the rail filter opens the first match.</summary>
+    [RelayCommand]
+    private void SelectFirstMatch()
+    {
+        var first = RailSections.SelectMany(s => s.VisibleTools).FirstOrDefault();
+        if (first is not null)
+        {
+            SelectedTool = first;
         }
     }
 

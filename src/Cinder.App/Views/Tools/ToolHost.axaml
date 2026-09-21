@@ -3,39 +3,57 @@
                     xmlns:vm="using:Cinder.App.ViewModels"
                     xmlns:tools="using:Cinder.App.ViewModels.Tools"
                     xmlns:views="using:Cinder.App.Views"
-                    xmlns:tv="using:Cinder.App.Views.Tools">
+                    xmlns:tv="using:Cinder.App.Views.Tools"
+                    xmlns:c="using:Cinder.App.Controls">
 
     <DataTemplate x:Key="ToolContentTemplate" DataType="tools:ToolViewModel">
         <Panel>
             <Grid IsVisible="{Binding Kind, Converter={x:Static ObjectConverters.Equal}, ConverterParameter='hex'}"
-                  RowDefinitions="Auto,*">
+                  RowDefinitions="38,*">
+                <!-- Open files as browser-style tabs: active one raised with an ember top edge,
+                     close on hover, full path on hover, + opens another file. -->
                 <Border Grid.Row="0"
-                        Background="{DynamicResource CinderBackground1Brush}"
+                        Background="{DynamicResource CinderSurface0Brush}"
                         BorderBrush="{DynamicResource CinderBorderBrush}"
                         BorderThickness="0,0,0,1"
-                        Padding="6,3">
-                    <ItemsControl ItemsSource="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenBuffers}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2" /></ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="vm:HexViewModel">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Background="Transparent" BorderThickness="0" Padding="10,4"
-                                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SetActiveBufferCommand}"
-                                            CommandParameter="{Binding}">
-                                        <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='(empty)'}"
-                                                   Foreground="{DynamicResource CinderForegroundBrush}" />
-                                    </Button>
-                                    <Button Background="Transparent" BorderThickness="0" Padding="4,0"
-                                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                                            Content="×"
-                                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CloseBufferCommand}"
-                                            CommandParameter="{Binding}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        Padding="8,0">
+                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Bottom">
+                        <ItemsControl ItemsSource="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenBuffers}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2" /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:HexViewModel">
+                                    <Border Classes="tab" Classes.on="{Binding IsActiveTab}"
+                                            ToolTip.Tip="{Binding SourcePath}">
+                                        <StackPanel Orientation="Horizontal" Spacing="2" Margin="4,0,6,0">
+                                            <Button Classes="ghost" Background="Transparent" Height="30" Padding="8,0"
+                                                    Foreground="{DynamicResource CinderForegroundBrush}"
+                                                    Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SetActiveBufferCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <c:CinderIcon Data="{x:Static c:Icons.Hex}" Width="14" Height="14" />
+                                                    <TextBlock Text="{Binding TabTitle}" FontSize="12.5" VerticalAlignment="Center"
+                                                               MaxWidth="220" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Classes="ghost icon tabclose" Width="20" Height="20" VerticalAlignment="Center"
+                                                    ToolTip.Tip="Close (Ctrl+W)"
+                                                    Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).CloseBufferCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <c:CinderIcon Data="{x:Static c:Icons.Close}" Width="12" Height="12" />
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="ghost icon" Width="28" Height="28" Margin="2,0,0,3" VerticalAlignment="Bottom"
+                                ToolTip.Tip="Open file (Ctrl+O)"
+                                Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenFileCommand}">
+                            <c:CinderIcon Data="{x:Static c:Icons.Plus}" Width="14" Height="14" />
+                        </Button>
+                    </StackPanel>
                 </Border>
                 <ContentControl Grid.Row="1"
                                 Content="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).Hex}">

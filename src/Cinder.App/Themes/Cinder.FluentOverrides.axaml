@@ -1,0 +1,79 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Re-skins FluentAvalonia's WinUI base palette onto Cinder's tokens, so stock controls
+        (buttons, text boxes, combo boxes, check boxes, list items, the DataGrid) in every tool
+        view pick up the same surfaces and strokes as the hand-built chrome. Application
+        resources are consulted before theme styles, so these keys win.
+
+        Brushes are overridden as well as colours: FluentAvalonia binds several of its brushes
+        to colours statically, and those would ignore a colour-only override.
+    -->
+
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+            <Color x:Key="ControlFillColorDefault">#171A21</Color>
+            <Color x:Key="ControlFillColorSecondary">#1F232B</Color>
+            <Color x:Key="ControlFillColorTertiary">#14171D</Color>
+            <Color x:Key="ControlFillColorDisabled">#121418</Color>
+            <Color x:Key="ControlFillColorInputActive">#14171D</Color>
+            <Color x:Key="ControlStrokeColorDefault">#2A2F39</Color>
+            <Color x:Key="ControlStrokeColorSecondary">#2A2F39</Color>
+            <Color x:Key="SubtleFillColorSecondary">#171A21</Color>
+            <Color x:Key="SubtleFillColorTertiary">#1F232B</Color>
+            <Color x:Key="CardBackgroundFillColorDefault">#111318</Color>
+            <Color x:Key="SolidBackgroundFillColorBase">#111318</Color>
+            <Color x:Key="LayerFillColorDefault">#111318</Color>
+            <Color x:Key="TextFillColorPrimary">#E7E9EE</Color>
+            <Color x:Key="TextFillColorSecondary">#9AA2AE</Color>
+            <Color x:Key="TextFillColorTertiary">#5F6672</Color>
+            <Color x:Key="TextFillColorDisabled">#5F6672</Color>
+            <Color x:Key="TextOnAccentFillColorPrimary">#1C0E03</Color>
+
+            <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#171A21" />
+            <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#1F232B" />
+            <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#14171D" />
+            <SolidColorBrush x:Key="ControlFillColorDisabledBrush" Color="#121418" />
+            <SolidColorBrush x:Key="ControlFillColorInputActiveBrush" Color="#14171D" />
+            <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="ControlStrokeColorSecondaryBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="ControlElevationBorderBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="CircleElevationBorderBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="TextControlElevationBorderBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="TextControlElevationBorderFocusedBrush" Color="#FF7A1B" />
+            <SolidColorBrush x:Key="SubtleFillColorSecondaryBrush" Color="#171A21" />
+            <SolidColorBrush x:Key="SubtleFillColorTertiaryBrush" Color="#1F232B" />
+            <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#111318" />
+            <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#111318" />
+            <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="#111318" />
+            <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#E7E9EE" />
+            <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#9AA2AE" />
+            <SolidColorBrush x:Key="TextFillColorTertiaryBrush" Color="#5F6672" />
+            <SolidColorBrush x:Key="TextFillColorDisabledBrush" Color="#5F6672" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#1C0E03" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorSecondaryBrush" Color="#3A1F08" />
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="#1C0E03" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#1C0E03" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#1C0E03" />
+
+            <!-- Flyouts / menus / tooltips -->
+            <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#171A21" />
+            <SolidColorBrush x:Key="FlyoutBorderThemeBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#171A21" />
+            <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="ToolTipBackground" Color="#1F232B" />
+            <SolidColorBrush x:Key="ToolTipBorderBrush" Color="#2A2F39" />
+            <SolidColorBrush x:Key="ToolTipForeground" Color="#E7E9EE" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Light">
+            <Color x:Key="TextOnAccentFillColorPrimary">#FFFFFF</Color>
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFF" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+</ResourceDictionary>

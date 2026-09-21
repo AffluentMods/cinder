@@ -4,10 +4,41 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Cinder.App.ViewModels.Tools;
 
 /// <summary>One section in the left activity rail (e.g. "Examine", "Analyze").</summary>
-public sealed class ToolSection
+public sealed partial class ToolSection : ObservableObject
 {
     public string Title { get; init; } = "";
     public ObservableCollection<ToolViewModel> Tools { get; init; } = new();
+
+    /// <summary>Tools after the rail filter is applied. The rail binds to this, not <see cref="Tools"/>.</summary>
+    public ObservableCollection<ToolViewModel> VisibleTools { get; } = new();
+
+    [ObservableProperty]
+    private bool _isExpanded = true;
+
+    /// <summary>True when the filter hides every tool in the section, so the whole group can collapse away.</summary>
+    [ObservableProperty]
+    private bool _isEmpty;
+
+    public int VisibleCount => VisibleTools.Count;
+
+    /// <summary>Re-applies <paramref name="filter"/>. Settings is pinned at the rail foot, so it is skipped here.</summary>
+    public void ApplyFilter(string? filter)
+    {
+        VisibleTools.Clear();
+        foreach (var t in Tools)
+        {
+            if (t.Kind == "settings")
+            {
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(filter) || t.Matches(filter))
+            {
+                VisibleTools.Add(t);
+            }
+        }
+        IsEmpty = VisibleTools.Count == 0;
+        OnPropertyChanged(nameof(VisibleCount));
+    }
 }
 
 /// <summary>
@@ -25,6 +56,45 @@ public abstract partial class ToolViewModel : ViewModelBase
 
     /// <summary>"hex" | "filesystem" | "registry" | … — drives the content selector in the shell.</summary>
     public abstract string Kind { get; }
+
+    /// <summary>Stroke icon for the rail, header and empty state (replaces the emoji <see cref="Icon"/>).</summary>
+    public Avalonia.Media.Geometry IconGeometry => Controls.Icons.ForTool(Id);
+
+    /// <summary>
+    /// Honest maturity label shown as a badge in the rail: empty when the tool works end to end,
+    /// otherwise one word that tells the examiner what to expect before they click. Kept in one
+    /// table so it can be audited against docs/FEATURES.md at a glance.
+    /// </summary>
+    public string Maturity => MaturityById.TryGetValue(Id, out var m) ? m : "";
+
+    public bool HasMaturity => Maturity.Length > 0;
+
+    public string MaturityTip => Maturity switch
+    {
+        "partial" => "Works, with gaps — see the ? help for what is not covered yet.",
+        "subset" => "Implements a subset of the full format or rule language.",
+        "external" => "Needs an external component (for example Volatility 3) to run.",
+        "shell" => "Interface only — the back end is not wired up yet.",
+        _ => "",
+    };
+
+    private static readonly Dictionary<string, string> MaturityById = new(StringComparer.Ordinal)
+    {
+        ["email"] = "partial",
+        ["memory"] = "external",
+        ["yara"] = "subset",
+        ["virustotal"] = "shell",
+        ["mount"] = "partial",
+        ["ramcapture"] = "shell",
+        ["cloud"] = "shell",
+        ["plugins"] = "partial",
+    };
+
+    /// <summary>Rail filter match: title, subtitle or kind, case-insensitive.</summary>
+    public bool Matches(string filter) =>
+        Title.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+        Subtitle.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+        Kind.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Hint shown in the generic placeholder for tools that need evidence loaded.</summary>
     public virtual string? EmptyStateHint => null;
@@ -157,6 +227,18 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
     /// <summary>Rebuilds <see cref="VisibleRows"/> from <see cref="Rows"/> under the current filter.</summary>
     protected void Reproject()
     {
+        try
+        {
+            ReprojectCore();
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(RowCountDisplay));
+        }
+    }
+
+    private void ReprojectCore()
+    {
         VisibleRows.Clear();
         var needle = (RowFilter ?? "").Trim();
         if (needle.Length == 0)
@@ -231,6 +313,16 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
 
     [ObservableProperty]
     private string? _evidencePath;
+
+    /// <summary>File name of the loaded evidence, for the toolbar chip (full path in its tooltip).</summary>
+    public string? EvidenceName => string.IsNullOrEmpty(EvidencePath) ? null : System.IO.Path.GetFileName(EvidencePath);
+
+    partial void OnEvidencePathChanged(string? value) => OnPropertyChanged(nameof(EvidenceName));
+
+    /// <summary>"1,204 rows" or "38 of 1,204 rows" when the filter is narrowing.</summary>
+    public string RowCountDisplay => VisibleRows.Count == Rows.Count
+        ? $"{Rows.Count:N0} row{(Rows.Count == 1 ? "" : "s")}"
+        : $"{VisibleRows.Count:N0} of {Rows.Count:N0} rows";
 
     [ObservableProperty]
     private string? _statusLine;
@@ -357,7 +449,7 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
             await LoadAsync(path, ct);
             Reproject();
             StatusLine = IsTruncated
-                ? $"⚠ {Rows.Count:N0} entries shown — TRUNCATED at the display limit" +
+                ? $"{Rows.Count:N0} entries shown — truncated at the display limit" +
                   (AvailableRowCount is { } total ? $" of {total:N0} present" : "") +
                   ". This is not the whole artifact; narrow the input or export to see the rest."
                 : $"{Rows.Count:N0} entries";

@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.IocMatchView"
              x:DataType="tools:IocMatchTool">
@@ -47,16 +48,18 @@
                                  FontSize="{DynamicResource CinderFontSizeXs}" />
         </Border>
 
-        <Border Grid.Row="2" IsVisible="{Binding IsTruncated}"
-                Background="{DynamicResource CinderDangerBrush}" Padding="14,7">
-            <TextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontWeight="SemiBold"
-                       FontSize="{DynamicResource CinderFontSizeSm}"
-                       Foreground="{DynamicResource CinderBackground0Brush}" />
+        <Border Grid.Row="2" IsVisible="{Binding IsTruncated}" Padding="14,8"
+                Background="{DynamicResource CinderWarnSoftBrush}"
+                BorderBrush="{DynamicResource CinderWarnBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="Auto,*">
+                <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
+                              Foreground="{DynamicResource CinderWarnBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" TextWrapping="Wrap" FontWeight="500" />
+            </Grid>
         </Border>
 
         <DataGrid Grid.Row="3" ItemsSource="{Binding VisibleRows}" SelectedItem="{Binding SelectedRow}"
-                  AutoGenerateColumns="True" IsReadOnly="True"
-                  Background="{DynamicResource CinderBackground0Brush}" />
+                  c:AutoColumns.FromFirstItem="True" IsReadOnly="True" />
 
         <Border Grid.Row="4" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
             <Grid ColumnDefinitions="*,Auto">

@@ -18,12 +18,21 @@ public partial class App : Avalonia.Application
             var registry = new CommandRegistry();
             var vm = new MainWindowViewModel(registry);
             CommandRegistration.RegisterBuiltIns(registry, vm);
+            CommandRegistration.RegisterNavigation(registry, vm);
 
             // Hydrate persisted "recent cases" + "recent evidence" so the Home dashboard
             // shows the user's last few sessions across app restarts.
-            vm.Workspace.Dashboard.AttachStore(new RecentsStore());
+            // The dev screenshot harness must never touch the examiner's real recents.
+            var args = desktop.Args ?? [];
+            vm.Workspace.Dashboard.AttachStore(args.Contains("--shot")
+                ? new RecentsStore(Path.Combine(Path.GetTempPath(), "cinder-shot-recents.json"))
+                : new RecentsStore());
 
-            desktop.MainWindow = new MainWindow { DataContext = vm };
+            var window = new MainWindow { DataContext = vm };
+            desktop.MainWindow = window;
+
+            // Dev-only: `--shot out.png` renders the window to a PNG and exits (visual review).
+            DevScreenshot.TryAttach(args, window, vm);
         }
 
         base.OnFrameworkInitializationCompleted();

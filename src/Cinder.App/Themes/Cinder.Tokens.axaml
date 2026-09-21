@@ -45,6 +45,8 @@
             <Color x:Key="CinderAccentDimColor">#B4540F</Color>
             <!-- Accent tint: the fill behind selected bytes / accent chips. -->
             <Color x:Key="CinderAccentSoftColor">#33220F</Color>
+            <Color x:Key="CinderOnAccentColor">#1C0E03</Color>
+            <Color x:Key="CinderWarnSoftColor">#1D1A13</Color>
 
             <Color x:Key="CinderOkColor">#3FB27F</Color>
             <Color x:Key="CinderWarnColor">#E3AE4A</Color>
@@ -85,6 +87,8 @@
             <Color x:Key="CinderAccentHoverColor">#FF7A1A</Color>
             <Color x:Key="CinderAccentDimColor">#8A3A00</Color>
             <Color x:Key="CinderAccentSoftColor">#FFE6D2</Color>
+            <Color x:Key="CinderOnAccentColor">#FFFFFF</Color>
+            <Color x:Key="CinderWarnSoftColor">#FFF4DC</Color>
 
             <Color x:Key="CinderOkColor">#118A55</Color>
             <Color x:Key="CinderWarnColor">#9C5A00</Color>
@@ -123,6 +127,8 @@
     <SolidColorBrush x:Key="CinderAccentHoverBrush" Color="{DynamicResource CinderAccentHoverColor}" />
     <SolidColorBrush x:Key="CinderAccentDimBrush" Color="{DynamicResource CinderAccentDimColor}" />
     <SolidColorBrush x:Key="CinderAccentSoftBrush" Color="{DynamicResource CinderAccentSoftColor}" />
+    <SolidColorBrush x:Key="CinderOnAccentBrush" Color="{DynamicResource CinderOnAccentColor}" />
+    <SolidColorBrush x:Key="CinderWarnSoftBrush" Color="{DynamicResource CinderWarnSoftColor}" />
     <SolidColorBrush x:Key="CinderOkBrush" Color="{DynamicResource CinderOkColor}" />
     <SolidColorBrush x:Key="CinderWarnBrush" Color="{DynamicResource CinderWarnColor}" />
     <SolidColorBrush x:Key="CinderDangerBrush" Color="{DynamicResource CinderDangerColor}" />
@@ -138,7 +144,9 @@
     <FontFamily x:Key="CinderFontFamily">avares://Avalonia.Fonts.Inter/Assets#Inter</FontFamily>
     <FontFamily x:Key="CinderFontFamilyMono">JetBrains Mono, Cascadia Mono, Consolas, monospace</FontFamily>
 
-    <x:Double x:Key="CinderFontSizeXs">11</x:Double>
+    <x:Double x:Key="CinderFontSize2xs">10.5</x:Double>
+    <x:Double x:Key="CinderFontSizeXs">11.5</x:Double>
+    <x:Double x:Key="CinderFontSizeBase">12.5</x:Double>
     <x:Double x:Key="CinderFontSizeSm">13</x:Double>
     <x:Double x:Key="CinderFontSizeMd">15</x:Double>
     <x:Double x:Key="CinderFontSizeLg">18</x:Double>

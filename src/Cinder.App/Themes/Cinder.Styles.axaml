@@ -1,17 +1,32 @@
 <Styles xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="using:Cinder.App.Controls">
 
     <!--
-        Cinder control styles. Override FluentAvalonia / native Avalonia defaults to make
-        scrollbars, tabs, buttons, and textboxes wear the Cinder palette.
+        Cinder control styles. FluentAvalonia supplies templates; Cinder.FluentOverrides.axaml maps
+        its palette onto our tokens; this file adds the handful of shapes the design uses.
+
+        Class vocabulary (use these, don't hand-style):
+          Button.tb      toolbar button — 26 px, raised surface, 1 px stroke
+          Button.ghost   borderless, muted until hovered
+          Button.icon    square 26 px icon button (combine with .ghost or .tb)
+          Button.accent  primary action (one per surface)
+          Button.seg     segment inside Border.seg; add .on for the active one
+          Button.rail    rail item; .selected for the active tool
+          Button.gh      rail group header
+          Button.tab     editor tab; .on for the active one
+          Border.chip    read-only metadata pill
+          Border.badge   maturity / count badge
+          Border.kbd     keyboard shortcut
+          TextBlock.section  small-caps section label
     -->
 
-    <!-- ===================== Section labels (small caps + tracking) ===================== -->
+    <!-- ===================== Text ===================== -->
     <Style Selector="TextBlock.section">
-        <Setter Property="FontSize" Value="{DynamicResource CinderFontSizeXs}" />
-        <Setter Property="FontWeight" Value="600" />
-        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
-        <Setter Property="LetterSpacing" Value="{DynamicResource CinderLetterSpacingTracked}" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="500" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundDisabledBrush}" />
+        <Setter Property="LetterSpacing" Value="0.9" />
     </Style>
     <Style Selector="Border.section-rule">
         <Setter Property="Height" Value="1" />
@@ -19,32 +34,237 @@
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="Margin" Value="0,4,0,8" />
     </Style>
+    <Style Selector="TextBlock.mono">
+        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+    </Style>
+    <Style Selector="SelectableTextBlock.mono">
+        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <Style Selector="TextBlock.dim">
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundDisabledBrush}" />
+    </Style>
+    <Style Selector="TextBlock.legend">
+        <Setter Property="FontSize" Value="{DynamicResource CinderFontSizeXs}" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundDisabledBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
 
-    <!-- ===================== Activity rail item ===================== -->
+    <!-- ===================== Focus ring ===================== -->
+    <!-- One designed ring for everything keyboard-reachable: 2 px accent, following the control's corner. -->
+    <Style Selector="Button, ToggleButton, TextBox, ComboBox, CheckBox, ListBoxItem, DataGrid, RadioButton">
+        <Setter Property="FocusAdorner">
+            <FocusAdornerTemplate>
+                <Border BorderThickness="2" BorderBrush="{DynamicResource CinderAccentBrush}"
+                        CornerRadius="7" Margin="-2" />
+            </FocusAdornerTemplate>
+        </Setter>
+    </Style>
+
+    <!-- ===================== Buttons ===================== -->
+    <Style Selector="Button">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="FontSize" Value="{DynamicResource CinderFontSizeBase}" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button /template/ ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.12" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Button.tb">
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderStrongBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="Button.tb:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface3Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderStrongBrush}" />
+    </Style>
+
+    <Style Selector="Button.ghost">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
+    </Style>
+    <Style Selector="Button.ghost:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface3Brush}" />
+    </Style>
+
+    <Style Selector="Button.icon">
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="Button.accent">
+        <Setter Property="FontWeight" Value="500" />
+    </Style>
+
+    <!-- Legacy class used by the no-case banner. -->
+    <Style Selector="Button.banner-ghost">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+        <Setter Property="Height" Value="26" />
+    </Style>
+    <Style Selector="Button.banner-ghost:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
+    </Style>
+
+    <!-- ===================== Segmented control ===================== -->
+    <Style Selector="Border.seg">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface0Brush}" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Padding" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.seg">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="MinHeight" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Padding" Value="7,0" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="500" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundDisabledBrush}" />
+    </Style>
+    <Style Selector="Button.seg:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
+    </Style>
+    <Style Selector="Button.seg.on">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface3Brush}" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
+    </Style>
+    <Style Selector="Button.seg.on:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface3Brush}" />
+    </Style>
+
+    <!-- ===================== Rail ===================== -->
     <Style Selector="Button.rail">
         <Setter Property="HorizontalAlignment" Value="Stretch" />
-        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="3,0,0,0" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="CornerRadius" Value="0" />
-        <Setter Property="Padding" Value="11,7" />
-        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="MinHeight" Value="28" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+        <Setter Property="FontSize" Value="12.5" />
     </Style>
     <Style Selector="Button.rail:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource CinderRailHoverBrush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
     </Style>
     <Style Selector="Button.rail.selected">
-        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
     </Style>
     <Style Selector="Button.rail.selected /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource CinderRailSelectedBrush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface3Brush}" />
+    </Style>
+    <Style Selector="Button.rail c|CinderIcon">
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <Style Selector="Button.rail.selected c|CinderIcon">
+        <Setter Property="Foreground" Value="{DynamicResource CinderAccentBrush}" />
+    </Style>
+
+    <Style Selector="Button.gh">
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="Margin" Value="0,10,0,0" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundDisabledBrush}" />
+    </Style>
+    <Style Selector="Button.gh:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+
+    <!-- ===================== Editor tabs ===================== -->
+    <Style Selector="Border.tab">
+        <Setter Property="Height" Value="32" />
+        <Setter Property="CornerRadius" Value="6,6,0,0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="VerticalAlignment" Value="Bottom" />
+    </Style>
+    <Style Selector="Border.tab.on">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="BoxShadow" Value="inset 0 2 0 0 #FF7A1B" />
+    </Style>
+    <Style Selector="Border.tab Button.tabclose">
+        <Setter Property="Opacity" Value="0" />
+    </Style>
+    <Style Selector="Border.tab:pointerover Button.tabclose, Border.tab.on Button.tabclose">
+        <Setter Property="Opacity" Value="1" />
+    </Style>
+
+    <!-- ===================== Chips / badges / kbd ===================== -->
+    <Style Selector="Border.chip">
+        <Setter Property="Height" Value="24" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.chip.warn">
+        <Setter Property="Background" Value="{DynamicResource CinderWarnSoftBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderWarnBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.badge">
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="5,0" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderStrongBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.badge > TextBlock">
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="LineHeight" Value="15" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundDisabledBrush}" />
+    </Style>
+    <Style Selector="Border.kbd">
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="5,1" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderStrongBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.kbd > TextBlock">
+        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundDisabledBrush}" />
     </Style>
 
     <!-- ===================== Status dot ===================== -->
     <Style Selector="Ellipse.status-dot">
-        <Setter Property="Width" Value="8" />
-        <Setter Property="Height" Value="8" />
+        <Setter Property="Width" Value="7" />
+        <Setter Property="Height" Value="7" />
     </Style>
     <Style Selector="Ellipse.status-dot.ok">     <Setter Property="Fill" Value="{DynamicResource CinderOkBrush}" />    </Style>
     <Style Selector="Ellipse.status-dot.warn">   <Setter Property="Fill" Value="{DynamicResource CinderWarnBrush}" />  </Style>
@@ -52,144 +272,159 @@
     <Style Selector="Ellipse.status-dot.muted">  <Setter Property="Fill" Value="{DynamicResource CinderForegroundDisabledBrush}" /></Style>
     <Style Selector="Ellipse.status-dot.accent"> <Setter Property="Fill" Value="{DynamicResource CinderAccentBrush}" /></Style>
 
-    <!-- ===================== Mono content ===================== -->
-    <!-- FontFeatures isn't reliably stylable in Avalonia 11.2 across all text inlines; tabular
-         numerics rely on the chosen monospace font's defaults. -->
-    <Style Selector="TextBlock.mono">
-        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
-    </Style>
-    <Style Selector="SelectableTextBlock.mono">
-        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+    <!-- ===================== Text inputs ===================== -->
+    <Style Selector="TextBox">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="9,5" />
+        <Setter Property="MinHeight" Value="28" />
+        <Setter Property="FontSize" Value="{DynamicResource CinderFontSizeBase}" />
     </Style>
 
-    <!-- ===================== ScrollBar ===================== -->
+    <!-- Borderless input that lives inside a custom container (rail filter, find box, palette). -->
+    <Style Selector="TextBox.bare">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="FocusAdorner" Value="{x:Null}" />
+    </Style>
+    <Style Selector="TextBox.bare:pointerover /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare:focus /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.bare /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- Container that behaves like a focused input when its bare TextBox has focus. -->
+    <Style Selector="Border.field">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.field:focus-within">
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentBrush}" />
+    </Style>
+
+    <!-- ===================== ScrollBar (thin, quiet until hovered) ===================== -->
     <Style Selector="ScrollBar:vertical">
-        <Setter Property="Width" Value="10" />
-        <Setter Property="MinWidth" Value="10" />
-        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="Width" Value="8" />
+        <Setter Property="MinWidth" Value="8" />
+        <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ScrollBar:horizontal">
-        <Setter Property="Height" Value="10" />
-        <Setter Property="MinHeight" Value="10" />
-        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="Height" Value="8" />
+        <Setter Property="MinHeight" Value="8" />
+        <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ScrollBar /template/ Thumb">
         <Setter Property="Background" Value="{DynamicResource CinderBorderStrongBrush}" />
-        <Setter Property="CornerRadius" Value="5" />
-        <Setter Property="MinHeight" Value="20" />
-        <Setter Property="MinWidth" Value="20" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="MinHeight" Value="24" />
+        <Setter Property="MinWidth" Value="24" />
     </Style>
     <Style Selector="ScrollBar /template/ Thumb:pointerover">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentDimBrush}" />
-    </Style>
-    <Style Selector="ScrollBar /template/ Thumb:pressed">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderForegroundDisabledBrush}" />
     </Style>
     <Style Selector="ScrollBar /template/ RepeatButton">
         <Setter Property="Opacity" Value="0" />
     </Style>
 
-    <!-- ===================== TabControl / TabItem ===================== -->
+    <!-- ===================== TabControl ===================== -->
     <Style Selector="TabControl">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Padding" Value="0" />
     </Style>
     <Style Selector="TabControl > TabItem">
-        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="Padding" Value="12,6" />
         <Setter Property="MinHeight" Value="32" />
+        <Setter Property="FontSize" Value="12.5" />
         <Setter Property="FontWeight" Value="500" />
         <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
     </Style>
-    <Style Selector="TabControl > TabItem:pointerover /template/ Border#PART_LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource CinderRailHoverBrush}" />
-    </Style>
     <Style Selector="TabControl > TabItem:selected">
         <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
-    </Style>
-    <Style Selector="TabControl > TabItem /template/ Border#PART_SelectedPipe">
-        <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.18" />
-            </Transitions>
-        </Setter>
     </Style>
     <Style Selector="TabControl > TabItem:selected /template/ Border#PART_SelectedPipe">
         <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
         <Setter Property="Height" Value="2" />
     </Style>
 
-    <!-- ===================== Button ===================== -->
-    <Style Selector="Button">
-        <Setter Property="CornerRadius" Value="4" />
-        <Setter Property="Padding" Value="12,6" />
-    </Style>
-    <Style Selector="Button.accent">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
-        <Setter Property="Foreground" Value="White" />
-        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentBrush}" />
-    </Style>
-    <Style Selector="Button.accent:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentHoverBrush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentHoverBrush}" />
-        <Setter Property="Foreground" Value="White" />
-    </Style>
-
-    <!-- ===================== Status-bar legend ===================== -->
-    <Style Selector="TextBlock.legend">
-        <Setter Property="FontSize" Value="{DynamicResource CinderFontSizeXs}" />
-        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
-        <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
-
-    <!-- ===================== Banner ghost button ===================== -->
-    <Style Selector="Button.banner-ghost">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderStrongBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
-        <Setter Property="Padding" Value="12,5" />
-    </Style>
-    <Style Selector="Button.banner-ghost:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
-    </Style>
-
-    <!-- ===================== Kbd chip ===================== -->
-    <Style Selector="Border.kbd">
-        <Setter Property="CornerRadius" Value="3" />
-        <Setter Property="Padding" Value="5,1" />
-        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-    </Style>
-
-    <!-- ===================== TextBox ===================== -->
-    <Style Selector="TextBox">
-        <Setter Property="CornerRadius" Value="4" />
-        <Setter Property="Padding" Value="10,6" />
-    </Style>
-    <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
-        <Setter Property="BorderBrush" Value="{DynamicResource CinderAccentBrush}" />
-    </Style>
-
-    <!-- ===================== ListBox / ListBoxItem ===================== -->
+    <!-- ===================== ListBox ===================== -->
     <Style Selector="ListBox">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style Selector="ListBoxItem">
         <Setter Property="Padding" Value="10,6" />
-        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="CornerRadius" Value="6" />
     </Style>
     <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentDimBrush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface3Brush}" />
+    </Style>
+    <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface3Brush}" />
     </Style>
 
     <!-- ===================== GridSplitter ===================== -->
+    <!-- 4 px hit zone, invisible until hovered; the panes carry their own 1 px rules. -->
     <Style Selector="GridSplitter">
-        <Setter Property="Background" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="MinWidth" Value="4" />
     </Style>
     <Style Selector="GridSplitter:pointerover">
-        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="Background" Value="{DynamicResource CinderAccentDimBrush}" />
+    </Style>
+
+    <!-- ===================== DataGrid (shared by ~20 parser tools) ===================== -->
+    <Style Selector="DataGrid">
+        <Setter Property="Background" Value="{DynamicResource CinderBackground0Brush}" />
+        <Setter Property="RowBackground" Value="Transparent" />
+        <Setter Property="GridLinesVisibility" Value="Horizontal" />
+        <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="RowHeight" Value="28" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CanUserResizeColumns" Value="True" />
+        <Setter Property="CanUserReorderColumns" Value="True" />
+    </Style>
+    <Style Selector="DataGridColumnHeader">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface0Brush}" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="FontWeight" Value="500" />
+        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="SeparatorBrush" Value="{DynamicResource CinderBorderBrush}" />
+    </Style>
+    <Style Selector="DataGridColumnHeader:pointerover /template/ Grid#PART_ColumnHeaderRoot">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+    </Style>
+    <Style Selector="DataGridCell">
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundBrush}" />
+    </Style>
+    <Style Selector="DataGridRow:pointerover /template/ Rectangle#BackgroundRectangle">
+        <Setter Property="Fill" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="DataGridRow:selected /template/ Rectangle#BackgroundRectangle">
+        <Setter Property="Fill" Value="{DynamicResource CinderAccentSoftBrush}" />
+        <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="DataGridRow:selected:focus /template/ Rectangle#BackgroundRectangle">
+        <Setter Property="Fill" Value="{DynamicResource CinderAccentSoftBrush}" />
+        <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="DataGridCell:current /template/ Grid#FocusVisual">
+        <Setter Property="IsVisible" Value="False" />
     </Style>
 
 </Styles>

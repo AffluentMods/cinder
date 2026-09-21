@@ -1,0 +1,177 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Cinder.App.ViewModels"
+             xmlns:hx="using:Cinder.Hex"
+             xmlns:c="using:Cinder.App.Controls"
+             x:Class="Cinder.App.Views.HexInspectorView"
+             x:DataType="vm:HexViewModel">
+    <!--
+        Hex inspector: what the caret is on, what is selected, and what the bytes at the caret
+        decode to. Labels muted, values in mono, copy on hover (desktop track D7).
+    -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="True">
+        <StackPanel>
+
+            <!-- Nothing open -->
+            <StackPanel Margin="16,18" Spacing="6" IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNull}}">
+                <TextBlock Text="INSPECTOR" Classes="section" />
+                <TextBlock Classes="dim" TextWrapping="Wrap"
+                           Text="Open a file and click any byte. Its offset, value and decoded forms show here." />
+            </StackPanel>
+
+            <!-- ===== Caret ===== -->
+            <Border Padding="16,14,16,16" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+                    IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="CARET" Classes="section" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <SelectableTextBlock Text="{Binding CaretOffsetPadded}" Classes="mono" FontSize="17"
+                                             VerticalAlignment="Bottom" />
+                        <TextBlock Text="{Binding CaretOffsetDec}" Classes="mono dim" FontSize="12"
+                                   VerticalAlignment="Bottom" Margin="0,0,0,2" />
+                        <Button Classes="ghost icon" Width="22" Height="22" VerticalAlignment="Bottom"
+                                ToolTip.Tip="Copy offset" Command="{Binding CopyCaretOffsetCommand}">
+                            <c:CinderIcon Data="{x:Static c:Icons.Copy}" Width="13" Height="13" />
+                        </Button>
+                    </StackPanel>
+                    <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="6">
+                        <Grid ColumnDefinitions="*,*,*,2*">
+                            <StackPanel Grid.Column="0" Margin="8,7,8,6" Spacing="2">
+                                <TextBlock Text="{Binding CaretByteHexShort}" Classes="mono" FontSize="13" />
+                                <TextBlock Text="hex" Classes="dim" FontSize="10.5" />
+                            </StackPanel>
+                            <Border Grid.Column="1" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1,0,0,0">
+                                <StackPanel Margin="8,7,8,6" Spacing="2">
+                                    <TextBlock Text="{Binding CaretByteDec}" Classes="mono" FontSize="13" />
+                                    <TextBlock Text="dec" Classes="dim" FontSize="10.5" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1,0,0,0">
+                                <StackPanel Margin="8,7,8,6" Spacing="2">
+                                    <TextBlock Text="{Binding CaretByteChar}" Classes="mono" FontSize="13" />
+                                    <TextBlock Text="char" Classes="dim" FontSize="10.5" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="3" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1,0,0,0">
+                                <StackPanel Margin="8,7,8,6" Spacing="2">
+                                    <TextBlock Text="{Binding CaretByteBinarySpaced}" Classes="mono" FontSize="13" />
+                                    <TextBlock Text="binary" Classes="dim" FontSize="10.5" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== Selection ===== -->
+            <Border Padding="16,14,16,16" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+                    IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="SELECTION" Classes="section" />
+                        <TextBlock Grid.Column="1" Text="{Binding SelectionLengthDisplay}" Classes="mono muted" FontSize="12" />
+                    </Grid>
+                    <SelectableTextBlock Text="{Binding SelectionRangeDisplay}" Classes="mono" FontSize="12.5"
+                                         Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button Classes="tb" Content="Copy hex" Command="{Binding CopySelectionHexCommand}"
+                                ToolTip.Tip="Bytes as contiguous hex (max 1 MiB)" />
+                        <Button Classes="tb" Content="Copy text" Command="{Binding CopySelectionAsTextCommand}"
+                                ToolTip.Tip="Printable bytes as text, others as '.'" />
+                        <Button Classes="tb icon" Command="{Binding AddBookmarkCommand}"
+                                ToolTip.Tip="Bookmark the caret offset (Ctrl+D)">
+                            <c:CinderIcon Data="{x:Static c:Icons.Bookmark}" Width="14" Height="14" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== Data inspector ===== -->
+            <Border Padding="16,14,16,16" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+                    IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="DATA INSPECTOR" Classes="section" VerticalAlignment="Center" />
+                            <TextBlock Text="times in UTC" Classes="dim" FontSize="10.5" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Border Grid.Column="1" Classes="seg">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Classes="seg" Classes.on="{Binding IsLittleEndian}" Content="LE"
+                                        ToolTip.Tip="Little-endian (Windows, x86, most file formats)"
+                                        Command="{Binding SetEndianCommand}" CommandParameter="le" />
+                                <Button Classes="seg" Classes.on="{Binding IsBigEndian}" Content="BE"
+                                        ToolTip.Tip="Big-endian (network order, HFS+, Java class files)"
+                                        Command="{Binding SetEndianCommand}" CommandParameter="be" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding InspectorRows}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:InspectorRow">
+                                <Panel>
+                                    <Border Height="1" Margin="0,5" Background="{DynamicResource CinderBorderBrush}"
+                                            IsVisible="{Binding IsDivider}" />
+                                    <Grid Classes="irow" ColumnDefinitions="78,*,Auto" MinHeight="24" Background="Transparent"
+                                          IsVisible="{Binding !IsDivider}">
+                                        <TextBlock Text="{Binding Label}" Classes="muted" FontSize="12" VerticalAlignment="Top"
+                                                   Margin="0,3,0,0" />
+                                        <WrapPanel Grid.Column="1" Margin="0,3,0,3">
+                                            <SelectableTextBlock Text="{Binding Value}" Classes="mono" FontSize="12"
+                                                                 Classes.dim="{Binding IsDim}" TextWrapping="Wrap" />
+                                            <Border Classes="badge" Margin="6,0,0,0" IsVisible="{Binding HasNote}">
+                                                <TextBlock Text="{Binding Note}" />
+                                            </Border>
+                                        </WrapPanel>
+                                        <Button Grid.Column="2" Classes="ghost icon copy" Width="22" Height="20"
+                                                VerticalAlignment="Top" Margin="0,2,0,0"
+                                                ToolTip.Tip="Copy value"
+                                                Command="{Binding $parent[UserControl].((vm:HexViewModel)DataContext).CopyInspectorValueCommand}"
+                                                CommandParameter="{Binding}">
+                                            <c:CinderIcon Data="{x:Static c:Icons.Copy}" Width="12" Height="12" />
+                                        </Button>
+                                    </Grid>
+                                </Panel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== Bookmarks ===== -->
+            <Border Padding="16,14,16,16" IsVisible="{Binding Bookmarks.Count}">
+                <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="BOOKMARKS" Classes="section" />
+                        <Border Grid.Column="1" Classes="kbd"><TextBlock Text="Ctrl D" /></Border>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Bookmarks}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="hx:Bookmark">
+                                <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                        Height="26" Padding="6,0"
+                                        Command="{Binding $parent[UserControl].((vm:HexViewModel)DataContext).GotoBookmarkCommand}"
+                                        CommandParameter="{Binding}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <c:CinderIcon Data="{x:Static c:Icons.Bookmark}" Width="12" Height="12" />
+                                        <TextBlock Text="{Binding Label}" Classes="mono" FontSize="12" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+
+    <UserControl.Styles>
+        <!-- Copy buttons appear on row hover, so the column of icons doesn't compete with values. -->
+        <Style Selector="Grid.irow Button.copy">
+            <Setter Property="Opacity" Value="0" />
+        </Style>
+        <Style Selector="Grid.irow:pointerover Button.copy">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+    </UserControl.Styles>
+</UserControl>
