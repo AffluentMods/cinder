@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Redesign — shell and Hex Viewer
+
+The UI was rebuilt to the hex-viewer mockup: a custom title bar with case and
+evidence crumbs, a no-case banner, a filterable rail with collapsible groups
+and maturity badges, file tabs, a dense byte-class hex grid with an entropy
+minimap, an LE / BE data inspector with timestamp plausibility notes, and a
+status bar with the legend. Every tool view was restyled to one token set
+(`Cinder.Tokens.axaml`, `Cinder.FluentOverrides.axaml`, `Cinder.Styles.axaml`);
+emoji were replaced by stroke icons. Details in `docs/FEATURES.md` §12.
+
+- **Hex Viewer.** Inline find (ASCII / UTF-16 / Hex / Regex, *n of m*, `F3`),
+  ASCII / UTF-16LE text column, whole-file SHA-256 in the background (was a
+  4 MiB sample), format-mismatch warning, Open in Strings, copy buttons, tabs
+  de-duplicated by full path. The control resolves brushes from the theme, so
+  light mode is readable.
+- **Command palette.** Ranked fuzzy search, recents first, shortcuts shown,
+  arrow-key navigation.
+- **Layout persistence.** Window position, size, maximised state and pane
+  widths are remembered in `%LOCALAPPDATA%\Cinder\window.json`.
+- **Dev screenshot harness.** `Cinder.exe --shot out.png …` renders the window
+  to a PNG with an isolated recents file.
+
+Fixed along the way:
+
+- Every parser tool's `DataGrid` was empty: `AutoGenerateColumns` saw the
+  collection's element type (`object`). Columns are now generated from the
+  first row's runtime type.
+- "Nothing here yet" states never showed (`FallbackValue` on a null value;
+  `ObjectConverters.Equal` comparing an `int` to the string `"0"`), and the
+  Imager progress bar was always visible for the same reason.
+- Two files with the same name in different folders shared one hex tab.
+
 Correctness and evidence-integrity pass, followed by the features a competitive
 gap analysis showed every established tool has and Cinder lacked.
 

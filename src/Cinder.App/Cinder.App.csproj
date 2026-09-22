@@ -115,4 +115,7 @@
     <ProjectReference Include="..\Cinder.Native.Windows\Cinder.Native.Windows.csproj" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     <ProjectReference Include="..\Cinder.Native.Linux\Cinder.Native.Linux.csproj" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cinder.App.Tests" />
+  </ItemGroup>
 </Project>
