@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.DocumentsView"
              x:DataType="tools:DocumentsTool">
@@ -9,7 +10,7 @@
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <Button Grid.Column="0" Content="Pick document…" Classes="accent" Command="{Binding PickCommand}" />
                 <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
-                           Text="{Binding Path, FallbackValue='No document loaded'}"
+                           Text="{Binding Path, TargetNullValue='No document loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                 <TextBlock Grid.Column="2" VerticalAlignment="Center"
                            Text="{Binding StatusLine}"
@@ -25,8 +26,8 @@
                         Background="{DynamicResource CinderSurface3Brush}"
                         BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                         HorizontalAlignment="Center">
-                    <TextBlock Text="📄" FontSize="32"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="28" Height="28"
+                                  Foreground="{DynamicResource CinderAccentBrush}" />
                 </Border>
                 <TextBlock Text="No document loaded"
                            FontSize="{DynamicResource CinderFontSizeXl}" FontWeight="600"

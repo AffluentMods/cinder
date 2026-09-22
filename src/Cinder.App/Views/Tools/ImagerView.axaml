@@ -1,38 +1,46 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.ImagerView"
              x:DataType="tools:ImagerTool">
-    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
-        <StackPanel Spacing="14" MaxWidth="720">
-            <Grid ColumnDefinitions="120,*,Auto">
-                <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBox Grid.Column="1" Text="{Binding Source}" Watermark="\\.\PhysicalDrive0  /  /dev/sda  /  path to .img" />
-                <Button Grid.Column="2" Margin="6,0,0,0" Content="Pick…" Command="{Binding PickSourceCommand}" />
-            </Grid>
-            <Grid ColumnDefinitions="120,*,Auto">
-                <TextBlock Grid.Column="0" Text="Output" VerticalAlignment="Center"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBox Grid.Column="1" Text="{Binding Output}" />
-                <Button Grid.Column="2" Margin="6,0,0,0" Content="Save as…" Command="{Binding PickOutputCommand}" />
+    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
+            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
+                       Text="Copies a disk, partition or image into a forensic image, hashing every byte as it reads (MD5, SHA-1, SHA-256). Unreadable sectors are retried, then zero-filled and listed in the acquisition log beside the image. Devices need Administrator (Windows) or root (Linux); attach source media through a hardware write-blocker." />
+            <Grid ColumnDefinitions="120,*">
+                <TextBlock Text="Source" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
+                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding Source}" Watermark="\\.\PhysicalDrive1  ·  /dev/sdb  ·  image file" FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    <Button Grid.Column="1" Classes="tb" Margin="6,0,0,0" Height="28" Content="Pick…" Command="{Binding PickSourceCommand}" />
+                </Grid>
             </Grid>
             <Grid ColumnDefinitions="120,*">
-                <TextBlock Grid.Column="0" Text="Format" VerticalAlignment="Center"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" />
+                <TextBlock Text="Output" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
+                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding Output}" FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    <Button Grid.Column="1" Classes="tb" Margin="6,0,0,0" Height="28" Content="Save as…" Command="{Binding PickOutputCommand}" />
+                </Grid>
             </Grid>
-            <Button Classes="accent" Content="Start imaging" Command="{Binding StartCommand}"
-                    HorizontalAlignment="Left" />
-            <ProgressBar Minimum="0" Maximum="0" IsIndeterminate="True"
-                         IsVisible="{Binding BytesRead, Converter={x:Static ObjectConverters.NotEqual}, ConverterParameter=0}" />
-            <TextBlock Text="{Binding BytesRead, StringFormat='{}{0:N0} bytes read'}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       IsVisible="{Binding BytesRead, Converter={x:Static ObjectConverters.NotEqual}, ConverterParameter=0}" />
-            <TextBlock Text="{Binding StatusLine}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <Grid ColumnDefinitions="120,*">
+                <TextBlock Text="Format" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" MinWidth="160" />
+            </Grid>
+            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Command="{Binding StartCommand}"
+                    Margin="120,0,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <c:CinderIcon Data="{x:Static c:Icons.Disk}" Width="15" Height="15" />
+                    <TextBlock Text="Start imaging" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />
+            <TextBlock Text="{Binding BytesRead, StringFormat='{}{0:N0} bytes read'}" Classes="mono dim" FontSize="12"
+                       IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />
+            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
+                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

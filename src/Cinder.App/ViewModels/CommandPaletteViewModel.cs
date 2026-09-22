@@ -20,6 +20,8 @@ public sealed partial class CommandPaletteViewModel : ViewModelBase
     [ObservableProperty]
     private CommandDescriptor? _selected;
 
+    public bool HasNoResults => Results.Count == 0;
+
     public CommandPaletteViewModel(CommandRegistry registry)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -46,11 +48,36 @@ public sealed partial class CommandPaletteViewModel : ViewModelBase
             return;
         }
         IsOpen = false;
+        _registry.NoteInvoked(sel);
         await sel.Invoke(ct);
     }
 
     [RelayCommand]
+    private async Task InvokeAsync(CommandDescriptor? command, CancellationToken ct)
+    {
+        if (command is null)
+        {
+            return;
+        }
+        Selected = command;
+        await InvokeSelectedAsync(ct);
+    }
+
+    [RelayCommand]
     private void Close() => IsOpen = false;
+
+    /// <summary>Arrow keys, wrapping at both ends.</summary>
+    [RelayCommand]
+    private void Move(string? delta)
+    {
+        if (Results.Count == 0)
+        {
+            return;
+        }
+        var step = delta == "-1" ? -1 : 1;
+        var i = Selected is null ? -1 : Results.IndexOf(Selected);
+        Selected = Results[((i + step) % Results.Count + Results.Count) % Results.Count];
+    }
 
     private void RebuildResults()
     {
@@ -60,5 +87,6 @@ public sealed partial class CommandPaletteViewModel : ViewModelBase
             Results.Add(c);
         }
         Selected = Results.Count > 0 ? Results[0] : null;
+        OnPropertyChanged(nameof(HasNoResults));
     }
 }

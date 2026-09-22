@@ -127,11 +127,20 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CaretByteDec));
         OnPropertyChanged(nameof(CaretByteAscii));
         OnPropertyChanged(nameof(CaretByteBinary));
+        RaiseCaretPanel();
         RefreshInspector();
     }
 
     partial void OnBufferChanged(IHexBuffer? value)
     {
+        OnPropertyChanged(nameof(TabTitle));
+        _hashCts?.Cancel();
+        _findCts?.Cancel();
+        HashStatus = null;
+        FindStatus = null;
+        OnPropertyChanged(nameof(SizeDisplay));
+        OnPropertyChanged(nameof(SizeTip));
+        OnPropertyChanged(nameof(CanStartHash));
         OnPropertyChanged(nameof(CaretOffsetHex));
         OnPropertyChanged(nameof(CaretOffsetDec));
         OnPropertyChanged(nameof(CaretByteHex));
@@ -146,6 +155,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         SelectionEnd = -1;
         OnPropertyChanged(nameof(CanNavigateBack));
         OnPropertyChanged(nameof(CanNavigateForward));
+        RaiseCaretPanel();
         RefreshInspector();
     }
 
@@ -154,6 +164,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(SelectionLength));
         OnPropertyChanged(nameof(SelectionSummary));
+        RaiseSelectionPanel();
     }
 
     partial void OnSelectionEndChanged(long value)
@@ -161,6 +172,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasSelection));
         OnPropertyChanged(nameof(SelectionLength));
         OnPropertyChanged(nameof(SelectionSummary));
+        RaiseSelectionPanel();
     }
 
     private void RefreshInspector()
@@ -172,11 +184,342 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         }
         Span<byte> bytes = stackalloc byte[16];
         var read = Buffer.Read(CaretOffset, bytes);
-        var rows = Inspector.Decode(bytes[..read]);
-        foreach (var r in rows)
+        foreach (var r in Inspector.Decode(bytes[..read], IsLittleEndian, DateTimeOffset.UtcNow))
         {
             InspectorRows.Add(r);
         }
+    }
+
+    // ============================ Inspector panel ============================
+
+    [ObservableProperty]
+    private bool _isLittleEndian = true;
+
+    partial void OnIsLittleEndianChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsBigEndian));
+        RefreshInspector();
+    }
+
+    public bool IsBigEndian => !IsLittleEndian;
+
+    [RelayCommand]
+    private void SetEndian(string? which) => IsLittleEndian = !string.Equals(which, "be", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Offset digits: 8 up to 4 GiB, 16 beyond — matches the grid gutter.</summary>
+    private string OffsetFormat => Buffer is { Length: > 0xFFFFFFFFL } ? "X16" : "X8";
+
+    public string CaretOffsetPadded => Buffer is null ? "—" : "0x" + CaretOffset.ToString(OffsetFormat, CultureInfo.InvariantCulture);
+
+    public string CaretByteHexShort
+    {
+        get
+        {
+            var b = ReadCaretByte();
+            return b is null ? "—" : b.Value.ToString("X2", CultureInfo.InvariantCulture);
+        }
+    }
+
+    public string CaretByteChar
+    {
+        get
+        {
+            var b = ReadCaretByte();
+            return b switch
+            {
+                null => "—",
+                0 => "NUL",
+                9 => "\\t",
+                10 => "\\n",
+                13 => "\\r",
+                32 => "space",
+                >= 0x21 and < 0x7F => "'" + (char)b.Value + "'",
+                _ => "·",
+            };
+        }
+    }
+
+    public string CaretByteBinarySpaced
+    {
+        get
+        {
+            var b = ReadCaretByte();
+            if (b is null)
+            {
+                return "—";
+            }
+            var s = Convert.ToString(b.Value, 2).PadLeft(8, '0');
+            return s[..4] + " " + s[4..];
+        }
+    }
+
+    /// <summary>Selection, or the single caret byte when nothing is selected.</summary>
+    public long EffectiveSelectionStart => HasSelection ? SelectionStart : CaretOffset;
+    public long EffectiveSelectionEnd => HasSelection ? SelectionEnd : CaretOffset;
+
+    public string SelectionRangeDisplay => Buffer is null
+        ? "—"
+        : $"0x{EffectiveSelectionStart.ToString(OffsetFormat, CultureInfo.InvariantCulture)}  →  0x{EffectiveSelectionEnd.ToString(OffsetFormat, CultureInfo.InvariantCulture)}";
+
+    public string SelectionLengthDisplay
+    {
+        get
+        {
+            if (Buffer is null)
+            {
+                return "";
+            }
+            var n = EffectiveSelectionEnd - EffectiveSelectionStart + 1;
+            return n == 1 ? "1 byte" : $"{n:N0} bytes";
+        }
+    }
+
+    private void RaiseSelectionPanel()
+    {
+        OnPropertyChanged(nameof(EffectiveSelectionStart));
+        OnPropertyChanged(nameof(EffectiveSelectionEnd));
+        OnPropertyChanged(nameof(SelectionRangeDisplay));
+        OnPropertyChanged(nameof(SelectionLengthDisplay));
+    }
+
+    private void RaiseCaretPanel()
+    {
+        OnPropertyChanged(nameof(CaretOffsetPadded));
+        OnPropertyChanged(nameof(CaretByteHexShort));
+        OnPropertyChanged(nameof(CaretByteChar));
+        OnPropertyChanged(nameof(CaretByteBinarySpaced));
+        RaiseSelectionPanel();
+    }
+
+    [RelayCommand]
+    private async Task CopyInspectorValueAsync(InspectorRow? row)
+    {
+        if (row is not null && !row.IsDivider)
+        {
+            await CopyToClipboardAsync(row.Value);
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyCaretOffsetAsync() => await CopyToClipboardAsync(CaretOffsetPadded);
+
+    [RelayCommand]
+    private async Task CopySelectionAsTextAsync()
+    {
+        if (Buffer is null)
+        {
+            return;
+        }
+        var start = EffectiveSelectionStart;
+        var len = (int)Math.Min(EffectiveSelectionEnd - start + 1, 1 << 20);
+        var bytes = new byte[len];
+        var read = Buffer.Read(start, bytes);
+        var sb = new StringBuilder(read);
+        for (int i = 0; i < read; i++)
+        {
+            var c = bytes[i];
+            sb.Append(c is >= 0x20 and < 0x7F or 9 or 10 or 13 ? (char)c : '.');
+        }
+        await CopyToClipboardAsync(sb.ToString());
+    }
+
+    [RelayCommand]
+    private async Task CopySelectionHexAsync()
+    {
+        if (Buffer is null)
+        {
+            return;
+        }
+        var start = EffectiveSelectionStart;
+        var len = (int)Math.Min(EffectiveSelectionEnd - start + 1, 1 << 20);
+        var bytes = new byte[len];
+        var read = Buffer.Read(start, bytes);
+        await CopyToClipboardAsync(Convert.ToHexString(bytes, 0, read));
+    }
+
+    // ============================ Toolbar ============================
+
+    public string SizeDisplay => Buffer is null ? "" : FormatSize(Buffer.Length);
+
+    public string SizeTip => Buffer is null ? "" : $"{Buffer.Length:N0} bytes";
+
+    internal static string FormatSize(long n)
+    {
+        string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
+        double v = n;
+        var u = 0;
+        while (v >= 1024 && u < units.Length - 1)
+        {
+            v /= 1024;
+            u++;
+        }
+        return u == 0 ? $"{n:N0} B" : $"{v.ToString(v >= 100 ? "0" : "0.0", CultureInfo.InvariantCulture)} {units[u]}";
+    }
+
+    /// <summary>Signature label for the file-type chip, e.g. "PNG image" / "Plain text".</summary>
+    [ObservableProperty]
+    private string? _formatChip;
+
+    /// <summary>Secondary, muted part of the chip: "no signature", "extension mismatch", "0x89504E47".</summary>
+    [ObservableProperty]
+    private string? _formatChipNote;
+
+    /// <summary>True when the file's content contradicts its extension — the chip turns amber.</summary>
+    [ObservableProperty]
+    private bool _formatMismatch;
+
+    /// <summary>Show the text pane as UTF-16LE instead of ASCII (Windows registry / LNK / EVTX strings).</summary>
+    [ObservableProperty]
+    private bool _textIsUtf16;
+
+    [RelayCommand]
+    private void SetTextEncoding(string? which) => TextIsUtf16 = string.Equals(which, "utf16", StringComparison.OrdinalIgnoreCase);
+
+    // ---------------------- SHA-256 of the whole file ----------------------
+
+    /// <summary>Files up to this size are hashed automatically when opened; larger ones on request.</summary>
+    private const long AutoHashLimit = 2L << 30;
+
+    private CancellationTokenSource? _hashCts;
+
+    /// <summary>"hashing 37 %" while running, null otherwise.</summary>
+    [ObservableProperty]
+    private string? _hashStatus;
+
+    public bool HashIsRunning => HashStatus is not null;
+
+    public bool CanStartHash => Buffer is not null && QuickHashSha256Full is null && HashStatus is null;
+
+    partial void OnHashStatusChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HashIsRunning));
+        OnPropertyChanged(nameof(CanStartHash));
+    }
+
+    partial void OnQuickHashSha256FullChanged(string? value) => OnPropertyChanged(nameof(CanStartHash));
+
+    [RelayCommand]
+    private void StartHash() => _ = HashWholeFileAsync();
+
+    // ---------------------- Inline find ----------------------
+
+    [ObservableProperty]
+    private string? _findQuery;
+
+    [ObservableProperty]
+    private HexSearchKind _findKind = HexSearchKind.Ascii;
+
+    [ObservableProperty]
+    private string? _findStatus;
+
+    private int _findIndex = -1;
+    private CancellationTokenSource? _findCts;
+
+    public bool FindIsAscii => FindKind == HexSearchKind.Ascii;
+    public bool FindIsUtf16 => FindKind == HexSearchKind.Utf16Le;
+    public bool FindIsHex => FindKind == HexSearchKind.Hex;
+    public bool FindIsRegex => FindKind == HexSearchKind.Regex;
+
+    partial void OnFindKindChanged(HexSearchKind value)
+    {
+        OnPropertyChanged(nameof(FindIsAscii));
+        OnPropertyChanged(nameof(FindIsUtf16));
+        OnPropertyChanged(nameof(FindIsHex));
+        OnPropertyChanged(nameof(FindIsRegex));
+        if (!string.IsNullOrEmpty(FindQuery))
+        {
+            _ = RunFindAsync();
+        }
+    }
+
+    [RelayCommand]
+    private void SetFindKind(string? kind) => FindKind = kind?.ToLowerInvariant() switch
+    {
+        "utf16" => HexSearchKind.Utf16Le,
+        "hex" => HexSearchKind.Hex,
+        "regex" => HexSearchKind.Regex,
+        _ => HexSearchKind.Ascii,
+    };
+
+    [RelayCommand]
+    private async Task RunFindAsync()
+    {
+        _findCts?.Cancel();
+        SearchResults.Clear();
+        _findIndex = -1;
+        if (Buffer is null || string.IsNullOrWhiteSpace(FindQuery))
+        {
+            FindStatus = null;
+            return;
+        }
+        var cts = _findCts = new CancellationTokenSource();
+        FindStatus = "searching…";
+        try
+        {
+            await SearchAsync(new HexSearchOptions(FindKind, FindQuery!, CaseSensitive: false, StartOffset: 0), cts.Token);
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+            if (SearchResults.Count == 0)
+            {
+                FindStatus = "no matches";
+                return;
+            }
+            // Land on the first hit at or after the caret, like every editor's Find.
+            var i = 0;
+            while (i < SearchResults.Count && SearchResults[i].Offset < CaretOffset)
+            {
+                i++;
+            }
+            ShowHit(i < SearchResults.Count ? i : 0);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            FindStatus = ex is ArgumentException or FormatException ? "invalid pattern" : "search failed";
+        }
+    }
+
+    [RelayCommand]
+    private void FindNext()
+    {
+        if (SearchResults.Count > 0)
+        {
+            ShowHit((_findIndex + 1) % SearchResults.Count);
+        }
+    }
+
+    [RelayCommand]
+    private void FindPrevious()
+    {
+        if (SearchResults.Count > 0)
+        {
+            ShowHit((_findIndex - 1 + SearchResults.Count) % SearchResults.Count);
+        }
+    }
+
+    private void ShowHit(int index)
+    {
+        _findIndex = index;
+        var hit = SearchResults[index];
+        JumpTo(hit.Offset);
+        SelectionStart = hit.Offset;
+        SelectionEnd = hit.Offset + Math.Max(1, hit.Length) - 1;
+        var capped = SearchResults.Count >= 1000 ? "1000+" : SearchResults.Count.ToString(CultureInfo.InvariantCulture);
+        FindStatus = $"{index + 1} of {capped}";
+    }
+
+    [RelayCommand]
+    private void ClearFind()
+    {
+        _findCts?.Cancel();
+        FindQuery = null;
+        FindStatus = null;
+        SearchResults.Clear();
+        _findIndex = -1;
     }
 
     partial void OnSelectedSearchResultChanged(HexSearchHit? value)
@@ -190,14 +533,29 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
 
     public HexViewModel() { }
 
+    /// <summary>True for the buffer whose tab is in front.</summary>
+    [ObservableProperty]
+    private bool _isActiveTab;
+
+    public string TabTitle => Buffer?.DisplayName ?? "Empty";
+
+    /// <summary>Full path of the open file; identity for de-duplicating tabs.</summary>
+    public string? SourcePath { get; private set; }
+
     public void OpenFile(string path)
     {
         Buffer?.Dispose();
+        SourcePath = Path.GetFullPath(path);
         Buffer = new MmapHexBuffer(path);
         ScrollOffset = 0;
         CaretOffset = 0;
+        QuickHashSha256 = null;
+        QuickHashSha256Full = null;
         AnalyzeHeader(path);
-        _ = QuickHashAsync();
+        if (Buffer.Length <= AutoHashLimit)
+        {
+            _ = HashWholeFileAsync();
+        }
     }
 
     private void AnalyzeHeader(string path)
@@ -219,6 +577,9 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
                 hits);
             if (heur.Looks)
             {
+                FormatChip = "High entropy";
+                FormatChipNote = $"entropy {heur.Entropy:F2} · likely encrypted";
+                FormatMismatch = true;
                 DetectedFormat = $"Probable encrypted container (entropy {heur.Entropy:F2})";
                 DetectedFormatBadge = "⚠ High-entropy data — likely TrueCrypt / VeraCrypt container or already-encrypted blob";
                 DetectedRouting = "→ Cannot parse without passphrase";
@@ -227,6 +588,9 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             DetectedFormat = "Unknown";
             DetectedFormatBadge = null;
             DetectedRouting = null;
+            FormatChip = LooksLikeText(header.AsSpan(0, read)) ? "Plain text" : "Binary data";
+            FormatChipNote = "no signature";
+            FormatMismatch = false;
             return;
         }
         var best = hits[0];
@@ -236,6 +600,31 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             ? $"⚠ Extension mismatch — content looks like .{best.Signature.Extension}"
             : null;
         DetectedRouting = RouteForExtension(best.Signature.Extension);
+        FormatChip = best.Signature.Label;
+        FormatMismatch = DetectedFormatBadge is not null;
+        FormatChipNote = FormatMismatch ? $"extension says otherwise · .{best.Signature.Extension}" : matchedBytes;
+    }
+
+    private static bool LooksLikeText(ReadOnlySpan<byte> head)
+    {
+        var sample = head[..Math.Min(head.Length, 8192)];
+        if (sample.Length == 0)
+        {
+            return false;
+        }
+        var printable = 0;
+        foreach (var b in sample)
+        {
+            if (b is >= 0x20 and < 0x7F or 9 or 10 or 13)
+            {
+                printable++;
+            }
+            else if (b == 0)
+            {
+                return false;
+            }
+        }
+        return printable >= sample.Length * 0.95;
     }
 
     [ObservableProperty]
@@ -282,26 +671,76 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         return sb.ToString();
     }
 
-    private async Task QuickHashAsync()
+    /// <summary>
+    /// SHA-256 over the whole file, streamed in the background with progress and cancelled if the
+    /// tab changes. The toolbar chip only ever shows a digest that covers every byte — a prefix
+    /// hash labelled "SHA-256" would be a false statement about the evidence.
+    /// </summary>
+    private async Task HashWholeFileAsync()
     {
-        if (Buffer is null)
+        var buffer = Buffer;
+        if (buffer is null)
         {
             return;
         }
+        _hashCts?.Cancel();
+        var cts = _hashCts = new CancellationTokenSource();
+        var ct = cts.Token;
+        HashStatus = "hashing 0 %";
         try
         {
-            // Hash up to 4 MiB for the "quick" badge — full hash is the dedicated dialog's job.
-            var sample = new byte[(int)Math.Min(Buffer.Length, 4L << 20)];
-            var read = Buffer.Read(0, sample);
-            using var ms = new MemoryStream(sample, 0, read, writable: false);
-            var result = await _hash.ComputeAsync(ms, [HashAlgorithmKind.Sha256]);
-            QuickHashSha256Full = result.Sha256;
-            QuickHashSha256 = result.Sha256?[..16] + "…";
+            var digest = await Task.Run(() =>
+            {
+                using var sha = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+                var chunk = new byte[4 << 20];
+                long pos = 0, len = buffer.Length;
+                var lastReport = Environment.TickCount64;
+                while (pos < len)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var n = buffer.Read(pos, chunk.AsSpan(0, (int)Math.Min(chunk.Length, len - pos)));
+                    if (n <= 0)
+                    {
+                        break;
+                    }
+                    sha.AppendData(chunk, 0, n);
+                    pos += n;
+                    if (Environment.TickCount64 - lastReport > 150)
+                    {
+                        lastReport = Environment.TickCount64;
+                        var pct = (int)(pos * 100 / Math.Max(1, len));
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            if (!ct.IsCancellationRequested)
+                            {
+                                HashStatus = $"hashing {pct} %";
+                            }
+                        });
+                    }
+                }
+                return Convert.ToHexStringLower(sha.GetHashAndReset());
+            }, ct);
+            if (ct.IsCancellationRequested || !ReferenceEquals(buffer, Buffer))
+            {
+                return;
+            }
+            QuickHashSha256Full = digest;
+            QuickHashSha256 = digest[..8] + "…";
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch
         {
             QuickHashSha256 = null;
             QuickHashSha256Full = null;
+        }
+        finally
+        {
+            if (ReferenceEquals(_hashCts, cts))
+            {
+                HashStatus = null;
+            }
         }
     }
 
@@ -500,7 +939,14 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _hashCts?.Cancel();
+        _findCts?.Cancel();
         Buffer?.Dispose();
         Buffer = null;
+        SourcePath = null;
+        QuickHashSha256 = null;
+        QuickHashSha256Full = null;
+        FormatChip = null;
+        FormatChipNote = null;
     }
 }

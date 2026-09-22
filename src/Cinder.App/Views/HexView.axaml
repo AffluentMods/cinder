@@ -2,113 +2,192 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Cinder.App.ViewModels"
              xmlns:hx="using:Cinder.Hex"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.HexView"
              x:DataType="vm:HexViewModel">
     <Grid RowDefinitions="Auto,*">
 
-        <!-- Header strip: filename + format chip + sig-mismatch badge / SHA on primary line,
-             DetectedRouting hint demoted to a smaller secondary line below. -->
-        <Border Grid.Row="0"
-                Background="{DynamicResource CinderBackground1Brush}"
-                BorderBrush="{DynamicResource CinderBorderBrush}"
-                BorderThickness="0,0,0,1"
-                Padding="14,8">
-            <StackPanel Spacing="3">
-                <!-- Primary line -->
-                <StackPanel Orientation="Horizontal" Spacing="14">
-                    <TextBlock Text="{Binding Buffer.DisplayName, FallbackValue='No file open'}"
-                               FontWeight="500"
-                               Foreground="{DynamicResource CinderForegroundBrush}"
-                               VerticalAlignment="Center" />
-                    <Border Padding="6,2"
-                            CornerRadius="3"
-                            Background="{DynamicResource CinderBackground2Brush}"
-                            VerticalAlignment="Center"
-                            IsVisible="{Binding DetectedFormat, Converter={x:Static ObjectConverters.IsNotNull}}">
-                        <TextBlock Text="{Binding DetectedFormat}"
-                                   FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+        <!-- ============================ Toolbar ============================ -->
+        <Border Grid.Row="0" Height="44" Padding="14,0,10,0"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+                IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Grid ColumnDefinitions="*,Auto">
+
+                <!-- What the file is: type, size, digest. -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" ClipToBounds="True" VerticalAlignment="Center">
+                    <Border Classes="chip" Classes.warn="{Binding FormatMismatch}"
+                            ToolTip.Tip="{Binding DetectedFormatBadge, FallbackValue='File type from its magic bytes, not its extension.'}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="13" Height="13"
+                                          Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                            <TextBlock Text="{Binding FormatChip}" FontSize="12" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding FormatChipNote}" FontSize="12" Classes="dim" VerticalAlignment="Center"
+                                       MaxWidth="150" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
                     </Border>
-                    <TextBlock Text="{Binding DetectedFormatBadge}"
-                               Foreground="{DynamicResource CinderWarnBrush}"
-                               VerticalAlignment="Center"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               IsVisible="{Binding DetectedFormatBadge, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                    <TextBlock Text="{Binding QuickHashSha256, StringFormat='SHA-256 {0}'}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               VerticalAlignment="Center"
-                               FontFamily="{DynamicResource CinderFontFamilyMono}"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               IsVisible="{Binding QuickHashSha256, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                </StackPanel>
-                <!-- Secondary line: routing hint, demoted -->
-                <TextBlock Text="{Binding DetectedRouting}"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
-                           FontSize="10"
-                           LetterSpacing="0.2"
-                           IsVisible="{Binding DetectedRouting, Converter={x:Static ObjectConverters.IsNotNull}}" />
-            </StackPanel>
-        </Border>
 
-        <!-- Body: hex pane OR empty-state placeholder -->
-        <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
-
-            <!-- Empty state — shown when no buffer is open -->
-            <Border Background="{DynamicResource CinderBackground0Brush}"
-                    IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNull}}">
-                <StackPanel HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Spacing="16"
-                            MaxWidth="460">
-                    <Border CornerRadius="8"
-                            Background="{DynamicResource CinderBackground1Brush}"
-                            BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
-                            Padding="22"
-                            HorizontalAlignment="Center">
-                        <TextBlock Text="🔥" FontSize="56"
-                                   Foreground="{DynamicResource CinderAccentBrush}" />
+                    <Border Classes="chip" ToolTip.Tip="{Binding SizeTip}">
+                        <TextBlock Text="{Binding SizeDisplay}" Classes="mono" FontSize="12" VerticalAlignment="Center" />
                     </Border>
-                    <TextBlock Text="No file open"
-                               FontSize="{DynamicResource CinderFontSizeXl}"
-                               FontWeight="600"
-                               LetterSpacing="-0.4"
-                               Foreground="{DynamicResource CinderForegroundBrush}"
-                               HorizontalAlignment="Center" />
-                    <TextBlock TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               FontSize="{DynamicResource CinderFontSizeSm}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               Text="Pick any file to inspect its raw bytes. Cinder reads memory-mapped, so even a 100 GB disk image opens instantly. Drop a file anywhere on this pane, or click below." />
 
-                    <!-- Primary CTA: opens the file picker via the MainWindowViewModel command. -->
-                    <Button Classes="accent"
-                            HorizontalAlignment="Center"
-                            Padding="20,10"
-                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenFileCommand}">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <TextBlock Text="📂" FontSize="{DynamicResource CinderFontSizeMd}" VerticalAlignment="Center" />
-                            <TextBlock Text="Open file…" VerticalAlignment="Center" />
-                            <Border Classes="kbd" Margin="6,0,0,0">
-                                <TextBlock Text="Ctrl+O" Classes="mono" FontSize="10"
-                                           Foreground="White" />
-                            </Border>
+                    <!-- SHA-256 of every byte: copyable when done, progress while running, on request above 2 GiB. -->
+                    <Button Classes="ghost" Height="24" Padding="8,0" Background="{DynamicResource CinderSurface2Brush}"
+                            CornerRadius="5"
+                            IsVisible="{Binding QuickHashSha256Full, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            ToolTip.Tip="{Binding QuickHashSha256Full, StringFormat='SHA-256 of the whole file — click to copy&#10;{0}'}"
+                            Command="{Binding CopyQuickHashCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="SHA-256" FontSize="12" Classes="dim" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding QuickHashSha256}" Classes="mono" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource CinderForegroundBrush}" />
+                            <c:CinderIcon Data="{x:Static c:Icons.Copy}" Width="12" Height="12" />
+                        </StackPanel>
+                    </Button>
+                    <Border Classes="chip" IsVisible="{Binding HashIsRunning}"
+                            ToolTip.Tip="Hashing the whole file in the background. Switching tabs cancels it.">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="SHA-256" FontSize="12" Classes="dim" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding HashStatus}" Classes="mono muted" FontSize="12" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <Button Classes="tb" Height="24" IsVisible="{Binding CanStartHash}" Command="{Binding StartHashCommand}"
+                            ToolTip.Tip="Files over 2 GiB are hashed on request — it reads every byte.">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Hash}" Width="13" Height="13" />
+                            <TextBlock Text="Hash SHA-256" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
-            </Border>
 
-            <!-- Real hex pane — only when there's a buffer -->
-            <ScrollViewer IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNotNull}}"
-                          HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Visible">
-                <hx:HexViewer Buffer="{Binding Buffer}"
-                              ScrollOffset="{Binding ScrollOffset, Mode=TwoWay}"
-                              CaretOffset="{Binding CaretOffset, Mode=TwoWay}"
-                              SelectionStart="{Binding SelectionStart, Mode=TwoWay}"
-                              SelectionEnd="{Binding SelectionEnd, Mode=TwoWay}"
-                              Bookmarks="{Binding Bookmarks}"
-                              BytesPerRow="{Binding BytesPerRow}" />
-            </ScrollViewer>
+                <!-- What you can do: find, jump, switch text encoding, bookmark, hand off. -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="12,0,0,0">
+                    <Border Classes="field" Width="300" Height="28" Padding="9,0,3,0">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                            <c:CinderIcon Data="{x:Static c:Icons.Search}" Width="14" Height="14"
+                                          Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                            <TextBox Grid.Column="1" x:Name="FindBox" Classes="bare" Margin="7,0,6,0" FontSize="12.5"
+                                     Watermark="Find…" Text="{Binding FindQuery}"
+                                     ToolTip.Tip="Find (Ctrl+F). Enter runs, F3 / Shift+F3 step, Esc clears.">
+                                <TextBox.KeyBindings>
+                                    <KeyBinding Gesture="Enter" Command="{Binding RunFindCommand}" />
+                                    <KeyBinding Gesture="Shift+Enter" Command="{Binding FindPreviousCommand}" />
+                                    <KeyBinding Gesture="Escape" Command="{Binding ClearFindCommand}" />
+                                </TextBox.KeyBindings>
+                            </TextBox>
+                            <TextBlock Grid.Column="2" Text="{Binding FindStatus}" Classes="mono dim" FontSize="11"
+                                       VerticalAlignment="Center" Margin="0,0,4,0" />
+                            <StackPanel Grid.Column="3" Orientation="Horizontal"
+                                        IsVisible="{Binding SearchResults.Count}">
+                                <Button Classes="ghost icon" Width="20" Height="20" ToolTip.Tip="Previous (Shift+F3)"
+                                        Command="{Binding FindPreviousCommand}">
+                                    <c:CinderIcon Data="{x:Static c:Icons.ChevronDown}" Width="12" Height="12">
+                                        <c:CinderIcon.RenderTransform><RotateTransform Angle="180" /></c:CinderIcon.RenderTransform>
+                                    </c:CinderIcon>
+                                </Button>
+                                <Button Classes="ghost icon" Width="20" Height="20" ToolTip.Tip="Next (F3)"
+                                        Command="{Binding FindNextCommand}">
+                                    <c:CinderIcon Data="{x:Static c:Icons.ChevronDown}" Width="12" Height="12" />
+                                </Button>
+                            </StackPanel>
+                            <Border Grid.Column="4" Classes="seg" Margin="4,0,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Classes="seg" Classes.on="{Binding FindIsAscii}" Content="ASCII"
+                                            Command="{Binding SetFindKindCommand}" CommandParameter="ascii"
+                                            ToolTip.Tip="Text, case-insensitive" />
+                                    <Button Classes="seg" Classes.on="{Binding FindIsUtf16}" Content="UTF-16"
+                                            Command="{Binding SetFindKindCommand}" CommandParameter="utf16"
+                                            ToolTip.Tip="UTF-16LE text — Windows registry, LNK, EVTX strings" />
+                                    <Button Classes="seg" Classes.on="{Binding FindIsHex}" Content="Hex"
+                                            Command="{Binding SetFindKindCommand}" CommandParameter="hex"
+                                            ToolTip.Tip="Byte pattern, e.g. 4D 5A 90 00" />
+                                    <Button Classes="seg" Classes.on="{Binding FindIsRegex}" Content="Regex"
+                                            Command="{Binding SetFindKindCommand}" CommandParameter="regex"
+                                            ToolTip.Tip=".NET regular expression over ASCII" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <Button Classes="tb icon" ToolTip.Tip="Go to offset (Ctrl+G) — hex with 0x, or decimal"
+                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenGotoCommand}">
+                        <c:CinderIcon Data="{x:Static c:Icons.Goto}" Width="14" Height="14" />
+                    </Button>
+
+                    <Border Width="1" Height="18" Background="{DynamicResource CinderBorderStrongBrush}" Margin="4,0" />
+
+                    <Border Classes="seg" ToolTip.Tip="How the right-hand text pane decodes bytes">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Classes="seg" Classes.on="{Binding !TextIsUtf16}" Content="ASCII"
+                                    Command="{Binding SetTextEncodingCommand}" CommandParameter="ascii" />
+                            <Button Classes="seg" Classes.on="{Binding TextIsUtf16}" Content="UTF-16"
+                                    Command="{Binding SetTextEncodingCommand}" CommandParameter="utf16" />
+                        </StackPanel>
+                    </Border>
+
+                    <Button Classes="tb icon" ToolTip.Tip="Bookmark caret (Ctrl+D)" Command="{Binding AddBookmarkCommand}">
+                        <c:CinderIcon Data="{x:Static c:Icons.Bookmark}" Width="14" Height="14" />
+                    </Button>
+                    <Button Classes="tb" ToolTip.Tip="Extract every printable string from this file in the Strings tool"
+                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenInStringsCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="Strings" VerticalAlignment="Center" />
+                            <c:CinderIcon Data="{x:Static c:Icons.Out}" Width="13" Height="13" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="ghost icon" ToolTip.Tip="How to use the hex viewer (F1)"
+                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenHelpCommand}">
+                        <c:CinderIcon Data="{x:Static c:Icons.Help}" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ============================ Body ============================ -->
+        <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
+
+            <!-- Empty state -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" MaxWidth="420"
+                        IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNull}}">
+                <Border Width="52" Height="52" CornerRadius="12" HorizontalAlignment="Center"
+                        Background="{DynamicResource CinderSurface2Brush}"
+                        BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
+                    <c:CinderIcon Data="{x:Static c:Icons.Hex}" Width="24" Height="24"
+                                  Foreground="{DynamicResource CinderAccentBrush}" />
+                </Border>
+                <TextBlock Text="No file open" FontSize="18" FontWeight="600" HorizontalAlignment="Center" />
+                <TextBlock TextAlignment="Center" TextWrapping="Wrap" Classes="muted" FontSize="13"
+                           Text="Open any file to read its raw bytes. Files are memory-mapped and opened read-only, so a 100 GB disk image opens as fast as a text file." />
+                <Button Classes="accent" HorizontalAlignment="Center" Height="30" Padding="14,0"
+                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenFileCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Open file…" VerticalAlignment="Center" />
+                        <Border Classes="kbd" BorderBrush="#40000000"><TextBlock Text="Ctrl O" Foreground="{DynamicResource CinderOnAccentBrush}" /></Border>
+                    </StackPanel>
+                </Button>
+                <TextBlock Text="or drop a file anywhere on this pane" Classes="dim" FontSize="12" HorizontalAlignment="Center" />
+            </StackPanel>
+
+            <!-- Grid + entropy minimap (which is also the scrollbar) -->
+            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding Buffer, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Hidden">
+                    <hx:HexViewer x:Name="Viewer"
+                                  Buffer="{Binding Buffer}"
+                                  ScrollOffset="{Binding ScrollOffset, Mode=TwoWay}"
+                                  CaretOffset="{Binding CaretOffset, Mode=TwoWay}"
+                                  SelectionStart="{Binding SelectionStart, Mode=TwoWay}"
+                                  SelectionEnd="{Binding SelectionEnd, Mode=TwoWay}"
+                                  Bookmarks="{Binding Bookmarks}"
+                                  SearchHits="{Binding SearchResults}"
+                                  TextIsUtf16="{Binding TextIsUtf16}"
+                                  BytesPerRow="{Binding BytesPerRow}"
+                                  CinderFontSize="13" />
+                </ScrollViewer>
+                <hx:HexMinimap Grid.Column="1"
+                               Buffer="{Binding Buffer}"
+                               ScrollOffset="{Binding ScrollOffset, Mode=TwoWay}"
+                               BytesPerRow="{Binding BytesPerRow}"
+                               VisibleRows="{Binding #Viewer.VisibleRowCount}" />
+            </Grid>
         </Panel>
     </Grid>
 </UserControl>

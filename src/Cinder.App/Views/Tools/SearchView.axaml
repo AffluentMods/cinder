@@ -8,7 +8,7 @@
         <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto">
-                <TextBlock Grid.Column="0" Text="{Binding IndexPath, FallbackValue='No index loaded'}"
+                <TextBlock Grid.Column="0" Text="{Binding IndexPath, TargetNullValue='No index loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            Classes="mono"
                            FontSize="{DynamicResource CinderFontSizeXs}"

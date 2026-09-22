@@ -24,6 +24,47 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private HexViewModel _hex;
 
+    partial void OnHexChanged(HexViewModel? oldValue, HexViewModel newValue)
+    {
+        if (oldValue is not null)
+        {
+            oldValue.IsActiveTab = false;
+        }
+        newValue.IsActiveTab = true;
+    }
+
+    /// <summary>Raised when Ctrl+F should put the caret in the hex viewer's find box.</summary>
+    public event EventHandler? FocusFindRequested;
+
+    [RelayCommand]
+    private void FocusFind()
+    {
+        ShowHex();
+        FocusFindRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    private void ShowHex()
+    {
+        if (Workspace.FindByKind("hex") is { } hex)
+        {
+            Workspace.SelectedTool = hex;
+        }
+    }
+
+    /// <summary>Hand the open file to the Strings tool and run it.</summary>
+    [RelayCommand]
+    private async Task OpenInStringsAsync(CancellationToken ct)
+    {
+        if (Hex.SourcePath is not { } path || Workspace.FindByKind("strings") is not StringsTool strings)
+        {
+            return;
+        }
+        Workspace.SelectedTool = strings;
+        strings.Path = path;
+        await strings.RunCommand.ExecuteAsync(null);
+    }
+
     public ObservableCollection<string> CaseTreeItems { get; } = ["No case open"];
 
     public ObservableCollection<string> ActivityLog { get; } = ["Cinder started."];
@@ -54,13 +95,49 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private CaseSession? _activeCase;
 
+    // ============================ Shell layout ============================
+
+    /// <summary>Left rail visible (Ctrl+B).</summary>
+    [ObservableProperty]
+    private bool _isRailOpen = true;
+
+    /// <summary>Inspector pane requested (Ctrl+Alt+B). It only ever shows for the hex viewer.</summary>
+    [ObservableProperty]
+    private bool _isInspectorOpen = true;
+
+    public bool ShowInspector => IsInspectorOpen && Workspace.IsHexSelected;
+
+    partial void OnIsInspectorOpenChanged(bool value) => OnPropertyChanged(nameof(ShowInspector));
+
+    [RelayCommand]
+    private void ToggleRail() => IsRailOpen = !IsRailOpen;
+
+    [RelayCommand]
+    private void ToggleInspector() => IsInspectorOpen = !IsInspectorOpen;
+
+    /// <summary>The case tab strip only earns its row when there is more than one case to switch between.</summary>
+    public bool HasMultipleCases => OpenCases.Count > 1;
+
+    public bool HasActiveCase => !string.IsNullOrEmpty(ActiveCaseName);
+
+    public string CaseCrumb => ActiveCaseName ?? "No case";
+
     public MainWindowViewModel(CommandRegistry commands)
     {
         Commands = commands ?? throw new ArgumentNullException(nameof(commands));
-        _hex = new HexViewModel();
+        _hex = new HexViewModel { IsActiveTab = true };
         OpenBuffers.Add(_hex);
         Palette = new CommandPaletteViewModel(commands);
         Reports = new ReportsToolViewModel(() => ActiveCaseName ?? "Untitled case");
+
+        OpenCases.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasMultipleCases));
+        Workspace.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(WorkspaceViewModel.SelectedTool))
+            {
+                OnPropertyChanged(nameof(ShowInspector));
+            }
+        };
 
         // Status-bar headline auto-fades to "Ready" after 3s if nothing else is happening.
         DispatcherTimer.RunOnce(() =>
@@ -79,8 +156,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// </summary>
     public void OpenFileInNewBuffer(string path)
     {
+        // Match on the full path, never the file name: two users' NTUSER.DAT, or the same hive
+        // from two snapshots, share a name and are different evidence.
+        var full = System.IO.Path.GetFullPath(path);
         var existing = OpenBuffers.FirstOrDefault(b =>
-            string.Equals(b.Buffer?.DisplayName, System.IO.Path.GetFileName(path), StringComparison.Ordinal));
+            b.SourcePath is not null && string.Equals(b.SourcePath, full,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
         if (existing is not null)
         {
             Hex = existing;
@@ -148,6 +229,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     partial void OnActiveCaseNameChanged(string? value)
     {
         HeaderSubtitle = string.IsNullOrEmpty(value) ? "Affluent Labs · pre-alpha" : value;
+        OnPropertyChanged(nameof(HasActiveCase));
+        OnPropertyChanged(nameof(CaseCrumb));
     }
 
     partial void OnActiveCaseChanged(CaseSession? value)

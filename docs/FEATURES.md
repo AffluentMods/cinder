@@ -258,14 +258,65 @@ output, any ↔ any conversion), #28 (post-audit hardening, Verify on virtual di
 code-signing, a signed kernel driver for the write-blocker and RAM capture, Arsenal for E01
 mounting on Windows.
 
-## 12. UI surface (for a redesign)
+## 12. UI surface
 
-Every tool is an Avalonia `UserControl` under `src/Cinder.App/Views/Tools/`, selected by
-`ToolHost.axaml` on the view-model's `Kind`. Grid tools (`SidecarToolViewModel`) share one
-generic view: a header strip (evidence picker, row filter, truncation banner), a `DataGrid`
-bound to `VisibleRows`, and a footer (status line, Export, Bookmark). Tools with their own
-views: Hex, Timeline, Map, Communication graph, Reports, Custody, Bookmarks, Imager, Verify,
-Convert, Mount, Settings dialog, Home dashboard, Command palette, Help (F1) flyout. Styling is
-token-based (`CinderBackground0Brush`, `CinderAccentBrush`, `CinderFontSizeSm`, …) in the
-`src/Cinder.App/Themes/Cinder.Tokens.axaml` (colours, type scale, spacing) and `Cinder.Styles.axaml` (control templates), so a restyle is mostly token and template
-work; view-models expose commands and observable properties and contain no visual logic.
+Redesigned on `redesign/hex-shell` to a dense, dark-first desktop shell. Everything below is
+how the app looks and behaves after that branch.
+
+**Shell.** A custom 40 px title bar (`ExtendClientAreaToDecorationsHint`) carries the brand,
+a case crumb (menu flyout: switch, open, close), the evidence crumb, the write-block state, a
+Pre-alpha badge and the command search button. A warn-tinted banner appears when no case is
+open. The body is a `232 | 4 | * | 4 | 300` grid: rail, splitter, tool, splitter, inspector.
+The rail has a filter box (`/` focuses it, Enter opens the first match, Esc clears),
+collapsible groups with counts, maturity badges (`partial`, `external`, `shell`, `subset`)
+on tools that are not complete, and a pinned Settings entry. `Ctrl+B` and `Ctrl+Alt+B`
+collapse the rail and inspector; the widths you drag them to are remembered. Window
+position, size, maximised state and pane widths persist in
+`%LOCALAPPDATA%\Cinder\window.json` (`WindowLayoutStore`), separate from `settings.json`
+because the Settings dialog rewrites that record wholesale. The 26 px status bar shows the
+last event, the hex caret and selection, the byte-class legend, and the three shortcuts
+worth knowing (F1, Ctrl+K, Ctrl+B).
+
+**Hex Viewer** (`Cinder.Hex.HexViewer` + `HexMinimap`, `HexView.axaml`,
+`HexInspectorView.axaml`). File tabs (de-duplicated by full path). Toolbar: format chip
+(warns when the extension disagrees with the magic), size chip, whole-file SHA-256 (runs in
+the background automatically up to 2 GiB, a button above that), inline find with
+ASCII / UTF-16 / Hex / Regex modes and an *n of m* count (`Ctrl+F`, `F3`, `Shift+F3`, Esc),
+Go to (`Ctrl+G`), ASCII / UTF-16LE text column, bookmark (`Ctrl+D`), Open in Strings, help.
+The grid colours bytes by class (printable, whitespace, control, high, null), leaves an
+8-byte gap, draws sector rules every 512 bytes on files ≥ 64 KiB, and widens the offset
+column to 16 digits above 4 GiB. The minimap is a Shannon-entropy strip sampled 4 KiB per
+band off the UI thread; ≥ 7.2 bits is drawn in the "high" hue, zeros are empty, and it is
+a scrollbar you can click and drag. The inspector shows the caret byte (hex / dec / char /
+binary), the selection with copy-as-hex and copy-as-text, a LE / BE data inspector (int8 –
+uint64, float32 / 64, GUID, Unix, FILETIME, DOS, WebKit, HFS+, OLE) with `future` /
+`unlikely` plausibility notes, and the bookmark list. Both controls resolve their brushes
+from the theme tokens and repaint on theme change, so light mode is readable.
+
+**Grid tools** (`SidecarToolViewModel`, `SidecarRunnerView.axaml`). One generic view:
+toolbar (evidence chip, Change…, run again, filter, Bookmark flyout with a note, Export
+menu), truncation and error banners, an empty state with the tool's icon, a `DataGrid` whose
+columns are generated from the first row's runtime type (`c:AutoColumns.FromFirstItem`;
+numbers, dates, hashes, offsets and paths get the mono face), and a footer row count.
+Picking a file or dropping one runs the parser immediately.
+
+**Everything else.** The command palette (`Ctrl+K`) ranks by prefix, word start, substring
+and subsequence, lists recents first on an empty query, shows shortcuts, and is keyboard-
+driven. Home lists New / Open case, Open evidence, recent cases and evidence. Acquisition
+forms (Imager, Verify, Convert, Mount, RAM capture) share one left-aligned layout: intro,
+inputs with a 120 px label column, one accent action, a status card. Timeline and IOC
+match have their own toolbars over the same grid pattern. Icons are stroke geometries drawn
+by `CinderIcon` (`Controls/Icons.cs`); there are no emoji.
+
+**Tokens and styles.** `Cinder.Tokens.axaml` holds the dark and light palettes (surfaces
+`#0A0B0E` → `#1F232B`, text `#E7E9EE` / `#9AA2AE` / `#5F6672`, accent `#FF7A1B`, byte
+classes, warn / danger, the type scale, the mono stack). `Cinder.FluentOverrides.axaml`
+re-points FluentAvalonia's WinUI palette at those tokens so stock controls match.
+`Cinder.Styles.axaml` is the class vocabulary: `Button.tb / .ghost / .icon / .accent / .seg
+/ .rail`, `Border.tab / .chip / .badge / .kbd / .field`, `TextBlock.section / .mono / .muted
+/ .dim`, `TextBox.bare`, plus the DataGrid, scrollbar and focus-ring templates.
+
+**Dev harness.** `Cinder.exe --shot out.png [--tool id] [--open file] [--caret 0x..]
+[--select a:b] [--size WxH] [--light] [--case] [--filter text] [--no-rail] [--diag]` renders
+the window off-screen to a PNG using a temporary recents file and without touching
+`window.json`. It exists so a redesign can be checked without clicking through the app.

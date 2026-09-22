@@ -10,7 +10,7 @@
                 <Button Content="Open / create DB…" Classes="accent" Command="{Binding PickDatabaseCommand}" />
                 <Button Content="Import NSRL minimal CSV…" Command="{Binding ImportNsrlCommand}" />
                 <TextBlock Margin="14,0" VerticalAlignment="Center"
-                           Text="{Binding DatabasePath, FallbackValue='No DB selected'}"
+                           Text="{Binding DatabasePath, TargetNullValue='No DB selected'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            FontFamily="{DynamicResource CinderFontFamilyMono}"
                            FontSize="{DynamicResource CinderFontSizeXs}" />
@@ -31,7 +31,7 @@
         </Border>
         <ScrollViewer Grid.Row="2" Background="{DynamicResource CinderBackground0Brush}" Padding="20">
             <StackPanel Spacing="14">
-                <SelectableTextBlock Text="{Binding VerdictLine, FallbackValue='Open a hash-set DB and run a lookup.'}"
+                <SelectableTextBlock Text="{Binding VerdictLine, TargetNullValue='Open a hash-set DB and run a lookup.'}"
                                      FontFamily="{DynamicResource CinderFontFamilyMono}"
                                      FontSize="{DynamicResource CinderFontSizeMd}"
                                      Foreground="{DynamicResource CinderForegroundBrush}" />
