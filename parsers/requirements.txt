@@ -41,4 +41,4 @@ libpff-python>=20231203
 iphone-backup-decrypt>=0.7
 
 # YARA via python-yara wheel
-yara-python>=4.5
+yara-python>=4.5.4
