@@ -31,7 +31,7 @@ libesedb-python>=20230824
 volatility3>=2.5
 
 # network sidecar (parsers/network)
-dpkt>=1.9
+dpkt>=1.9.8
 scapy>=2.5
 
 # email sidecar (parsers/email)
