@@ -24,7 +24,7 @@ pytsk3>=20230125
 # windows-artifact sidecar (parsers/windows)
 regipy>=4.0
 python-evtx>=0.7
-pylnk3>=0.4
+pylnk3>=0.4.3
 libesedb-python>=20230824
 
 # memory-forensics sidecar (parsers/memory)
