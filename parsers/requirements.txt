@@ -32,7 +32,7 @@ volatility3>=2.5
 
 # network sidecar (parsers/network)
 dpkt>=1.9
-scapy>=2.5
+scapy>=2.7.0
 
 # email sidecar (parsers/email)
 libpff-python>=20231203
