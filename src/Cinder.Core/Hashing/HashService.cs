@@ -34,7 +34,8 @@ public sealed class HashService : IHashService
         using var md5 = useMd5 ? MD5.Create() : null;
         using var sha1 = useSha1 ? SHA1.Create() : null;
         using var sha256 = useSha256 ? SHA256.Create() : null;
-        Hasher blake3 = useBlake3 ? Hasher.New() : default;
+        // Hasher is a reference type in this Blake3 release, so an unused one is simply null.
+        using var blake3 = useBlake3 ? Hasher.New() : null;
 
         var pool = ArrayPool<byte>.Shared;
         var buffer = pool.Rent(DefaultBufferSize);
@@ -53,10 +54,7 @@ public sealed class HashService : IHashService
                 md5?.TransformBlock(buffer, 0, read, null, 0);
                 sha1?.TransformBlock(buffer, 0, read, null, 0);
                 sha256?.TransformBlock(buffer, 0, read, null, 0);
-                if (useBlake3)
-                {
-                    blake3.UpdateWithJoin(buffer.AsSpan(0, read));
-                }
+                blake3?.UpdateWithJoin(buffer.AsSpan(0, read));
 
                 total += read;
                 progress?.Report(total);
@@ -71,15 +69,11 @@ public sealed class HashService : IHashService
                 Md5: md5 is null ? null : Convert.ToHexStringLower(md5.Hash!),
                 Sha1: sha1 is null ? null : Convert.ToHexStringLower(sha1.Hash!),
                 Sha256: sha256 is null ? null : Convert.ToHexStringLower(sha256.Hash!),
-                Blake3: useBlake3 ? Convert.ToHexStringLower(blake3.Finalize().AsSpan()) : null);
+                Blake3: blake3 is null ? null : Convert.ToHexStringLower(blake3.Finalize().AsSpan()));
         }
         finally
         {
             pool.Return(buffer);
-            if (useBlake3)
-            {
-                blake3.Dispose();
-            }
         }
     }
 
