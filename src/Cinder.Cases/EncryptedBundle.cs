@@ -420,7 +420,12 @@ public static class EncryptedBundle
             }
 
             var destination = Path.GetFullPath(Path.Combine(outputDirFull, entry.FullName));
-            if (!destination.StartsWith(prefix, StringComparison.Ordinal) && destination != outputDirFull)
+            if (destination == outputDirFull)
+            {
+                // The entry names the output directory itself ("./"), which already exists.
+                continue;
+            }
+            if (!destination.StartsWith(prefix, StringComparison.Ordinal))
             {
                 throw new InvalidDataException($"Bundle entry escapes destination directory: {entry.FullName}");
             }

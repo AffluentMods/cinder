@@ -29,12 +29,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
-import os
 import sqlite3
 import struct
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from shared.protocol import Sidecar, report_progress
 

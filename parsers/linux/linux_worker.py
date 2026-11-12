@@ -796,8 +796,8 @@ def trash(params: Any) -> dict[str, Any]:
                 txt = ev.read_text(f, 1 << 20)
                 if txt is None:
                     continue
-                orig = next((l[5:] for l in txt.splitlines() if l.startswith("Path=")), "")
-                deleted = next((l[13:] for l in txt.splitlines() if l.startswith("DeletionDate=")), "")
+                orig = next((line[5:] for line in txt.splitlines() if line.startswith("Path=")), "")
+                deleted = next((line[13:] for line in txt.splitlines() if line.startswith("DeletionDate=")), "")
                 try:
                     # lstat: the trashed item may itself be a symlink to anywhere.
                     size: int | None = os.lstat(files_root / f.stem).st_size

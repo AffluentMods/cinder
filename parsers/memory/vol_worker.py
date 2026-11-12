@@ -150,11 +150,9 @@ def _on_vol_progress(_progress: Any = None, _description: Any = None) -> None:
 
 def _run_plugin(image_path: str, plugin_id: str, options: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     volatility3, framework, _ = _import_vol()
-    from volatility3.framework import plugins, automagic, contexts
-    from volatility3.framework.configuration import requirements
+    from volatility3.framework import automagic
 
     ctx, automagics = _automagic_context(image_path)
-    plugin_cls = plugins.construct_plugin if False else None  # noqa: SIM108 — stub for type-checker
 
     # Resolve plugin class by id (e.g. "windows.pslist.PsList").
     target = plugin_id
@@ -168,7 +166,6 @@ def _run_plugin(image_path: str, plugin_id: str, options: dict[str, Any] | None 
         raise RuntimeError(f"Unknown vol3 plugin: {plugin_id} ({ex})") from ex
 
     # Build the actual plugin instance. The framework's `construct_plugin` handles automagic.
-    from volatility3.framework import constants
     from volatility3.framework.plugins import construct_plugin
     automagic.choose_automagic(automagics, plugin)
     constructed = construct_plugin(ctx, automagics, plugin, "plugins", _on_vol_progress, options or {})
