@@ -91,7 +91,7 @@
                         <TextBox Grid.Column="1" Text="{Binding AiApiKey}" PasswordChar="•" Watermark="Only for a hosted service" />
                     </Grid>
                     <TextBlock Margin="170,0,0,0" Classes="dim" FontSize="11.5" TextWrapping="Wrap"
-                               Text="The key is stored in your settings file on this computer, in plain text." />
+                               Text="The key is saved in your settings file, encrypted for your Windows account. On Linux and macOS it is only obscured, not securely encrypted." />
                 </StackPanel>
 
                 <StackPanel Spacing="10">

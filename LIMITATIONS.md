@@ -113,8 +113,9 @@ fixture-vs-reference diff is in CI.
 - **State:** PDF renders in-process via QuestPDF. DOCX ships for real through
   [`DocxReportWriter`](src/Cinder.Reports/DocxReportWriter.cs) on DocumentFormat.OpenXml —
   covered by `DocxReportWriterTests`.
-- **Blockers:** PDF/A-specific conformance (embedded font subsetting, XMP metadata, the
-  PDF/A-2b identifier) is not implemented — output is ordinary PDF, not archival PDF/A.
+- **Now:** the PDF export writes PDF/A-2b through QuestPDF (XMP `pdfaid` and output
+  intent present) and fails rather than falling back to a converter that cannot. It has
+  not been run through an independent validator such as veraPDF.
 
 ## AFF4
 
@@ -139,6 +140,35 @@ zero-filled in the stream and listed in the `.log.json` rather than as a separat
   attestation is also RFC 3161 countersigned, so the examiner cannot backdate it either. What
   remains is a process step: export the attestation and publish it out of the examiner's
   reach. Full reasoning in [SECURITY.md](SECURITY.md).
+
+## <a id="review-gaps"></a> Known gaps left by the full review pass
+
+Things the review found and did not fix, or fixed without being able to exercise them:
+
+- **`$LogFile`.** The corrected restart-area layout is tested against a synthetic log built
+  from the documented format, not against a real `$LogFile`.
+- **Hex Viewer control.** Selection, click mapping, scroll clamping and the empty-file caret
+  were fixed; the arithmetic is tested through helpers, the control itself only by build
+  and screenshot.
+- **Find.** Results are capped at 1,000 hits; with the caret past the 1,000th, "find next"
+  wraps to the first.
+- **Carver.** Format probes were written from specifications and tested on synthetic objects.
+  GIF and PDF still end at the first footer.
+- **Imaging on real devices.** The unbuffered device path, the Linux write blocker and
+  `Mount-DiskImage` were not run against hardware. Re-imaging to a name that already has a
+  longer E01 segment chain leaves the old higher-numbered segments behind.
+- **Volatility.** The Memory tool's process handling (probe, cancel, the `volatility3.cli`
+  entry point) is untested: Volatility was not installed where this was written.
+- **Python sidecar.** Most of it has no caller in the desktop app. The C# wrappers
+  (`PytskFilesystemParser`, `SidecarDiskImager`, the Linux / Windows / Volatility sidecar
+  classes) do not yet use the paging, progress and error fields the workers now return, and
+  the sidecar client has no permanent test project. Compressed (MAM) Prefetch is reported
+  but not decoded by the Python parser.
+- **Plugins.** Native-library loading and non-Windows behaviour of the new trust gate are
+  untested. Signatures are informational; revocation is not checked online.
+- **Crash handling.** An unexpected exception is logged and shown; on Linux and macOS the
+  fatal case reaches stderr only, with nothing on screen.
+- **Cloud pull and RAM capture** remain non-functional and say so on their screens.
 
 ## <a id="trademark-domains"></a> Trademark and domains
 

@@ -19,7 +19,7 @@ public static class CommandRegistration
         registry.Register(new CommandDescriptor(
             Id: "file.open",
             Title: "Open file…",
-            Subtitle: "Load a file into the hex viewer.",
+            Subtitle: "Open any file in the Hex Viewer.",
             Category: "File",
             Invoke: async ct =>
             {
@@ -57,8 +57,8 @@ public static class CommandRegistration
 
         registry.Register(new CommandDescriptor(
             Id: "hex.find",
-            Title: "Find in buffer (dialog)…",
-            Subtitle: "Search the open file: hex / ASCII / UTF-16 / regex.",
+            Title: "Find in file (list all matches)…",
+            Subtitle: "Search the open file for text, hex bytes or a regular expression and list every match.",
             Category: "Hex",
             Invoke: _ =>
             {
@@ -78,7 +78,7 @@ public static class CommandRegistration
         registry.Register(new CommandDescriptor(
             Id: "hex.goto",
             Title: "Go to offset…",
-            Subtitle: "Jump the caret to a specific offset (decimal or 0x… hex).",
+            Subtitle: "Jump to a position in the open file, in decimal or 0x hex.",
             Category: "Hex",
             Invoke: _ =>
             {
@@ -98,7 +98,7 @@ public static class CommandRegistration
         registry.Register(new CommandDescriptor(
             Id: "app.settings",
             Title: "Settings…",
-            Subtitle: "Theme, density, AI provider, cloud client_ids, parsers directory.",
+            Subtitle: "Theme, hash-set database, custody time-stamp service, AI model, cloud sign-in.",
             Category: "App",
             Invoke: _ =>
             {
@@ -118,7 +118,7 @@ public static class CommandRegistration
         registry.Register(new CommandDescriptor(
             Id: "case.open",
             Title: "Open case…",
-            Subtitle: "Open an existing .cinder case file from disk.",
+            Subtitle: "Open a .cinder case file.",
             Category: "Case",
             Invoke: async ct =>
             {
@@ -144,7 +144,7 @@ public static class CommandRegistration
         registry.Register(new CommandDescriptor(
             Id: "case.create",
             Title: "Create case…",
-            Subtitle: "Set up a new case file (.cinder) with chain-of-custody log.",
+            Subtitle: "Start a new case file (.cinder) with its own custody log.",
             Category: "Case",
             Invoke: async ct =>
             {
@@ -192,7 +192,7 @@ public static class CommandRegistration
         registry.Register(new CommandDescriptor(
             Id: "view.theme.toggle",
             Title: "Toggle theme (dark / light)",
-            Subtitle: "Switch between Cinder's dark and light variants.",
+            Subtitle: "Switch between dark and light. The choice is remembered.",
             Category: "View",
             Invoke: _ =>
             {

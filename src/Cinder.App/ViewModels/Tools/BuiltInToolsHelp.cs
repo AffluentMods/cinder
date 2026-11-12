@@ -1029,10 +1029,25 @@ the original.
    time so a bad sector costs 512 zero bytes rather than a megabyte. Every
    zero-filled sector is counted, and its offset is listed in the log.
 
+5. Stopping and failures: while it runs, the image is written under the output
+   name plus `.partial` and renamed when it finishes, so nothing unfinished
+   ever sits at the final name. **Stop** deletes the partial file. If the source
+   stops responding (a failing or unplugged disk), imaging ends, the partial
+   file is kept, and the log beside it is marked incomplete: it is real data
+   from a dying disk, but it is not a full image and must not be treated as one.
+
 ## What the hashes mean
 They are the hash of what was *written*, which — if there were bad sectors — is
 the hash of the zero-filled image, not of the original media. The log says how
 many sectors were substituted; put that number in your report.
+
+E01, VHD and VHDX store whole sectors. If the source is not a whole number of
+sectors (a single file, for example), zeros fill the last one, and the hashes
+cover the image as stored, padding included, so that Verify and other tools
+agree with them. The log also records the hashes of the source bytes alone.
+
+If the source is itself an E01 or AFF4 with damaged chunks, those regions are
+zeros in the new image and the result says how many chunks were affected.
 """;
 }
 
