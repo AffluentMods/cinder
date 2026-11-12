@@ -128,6 +128,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _hex = new HexViewModel { IsActiveTab = true };
         OpenBuffers.Add(_hex);
         Palette = new CommandPaletteViewModel(commands);
+        // Tools reach the hex viewer through this: "open this search hit / carved file / match".
+        AppNavigator.OpenInHex = (path, offset) =>
+        {
+            OpenFileInNewBuffer(path);
+            ShowHex();
+            if (offset is { } o && Hex.Buffer is not null)
+            {
+                Hex.JumpTo(o);
+            }
+        };
         Reports = new ReportsToolViewModel(() => ActiveCaseName ?? "Untitled case");
 
         OpenCases.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasMultipleCases));

@@ -383,6 +383,49 @@
         <Setter Property="Background" Value="{DynamicResource CinderAccentDimBrush}" />
     </Style>
 
+    <!-- ===================== Tool chrome: toolbar, secondary bar, footer ===================== -->
+    <!-- Every tool view is toolbar / (optional sub-bar) / content / footer. These three classes
+         are that skeleton, so a tool cannot pick its own heights, paddings or separators. -->
+    <Style Selector="Border.toolbar">
+        <Setter Property="Height" Value="44" />
+        <Setter Property="Padding" Value="14,0,12,0" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.subbar">
+        <Setter Property="Padding" Value="14,8,12,8" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.footer">
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+    </Style>
+    <Style Selector="Border.footer TextBlock">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <!-- Path / target shown beside the action that set it. -->
+    <Style Selector="TextBlock.path">
+        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="PrefixCharacterEllipsis" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <!-- Label column in forms and inline add-rows. -->
+    <Style Selector="TextBlock.label">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+
     <!-- ===================== DataGrid (shared by ~20 parser tools) ===================== -->
     <Style Selector="DataGrid">
         <Setter Property="Background" Value="{DynamicResource CinderBackground0Brush}" />

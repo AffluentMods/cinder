@@ -726,9 +726,20 @@ public sealed partial class HashSetsTool
 {
     private HashSetService? _service;
 
-    [ObservableProperty] private string? _databasePath;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDatabase))]
+    private string? _databasePath;
+
     [ObservableProperty] private string _query = "";
     [ObservableProperty] private string _algorithm = "sha1";
+
+    public bool HasDatabase => !string.IsNullOrEmpty(DatabasePath);
+
+    /// <summary>Hex digits a digest of each algorithm has, to catch a paste of the wrong thing.</summary>
+    private static readonly Dictionary<string, int> DigestHexLength = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["md5"] = 32, ["sha1"] = 40, ["sha256"] = 64, ["blake3"] = 64,
+    };
     [ObservableProperty] private string? _verdictLine;
     [ObservableProperty] private string? _statusLine;
 
@@ -745,7 +756,7 @@ public sealed partial class HashSetsTool
             {
                 _service = new HashSetService(saved);
                 DatabasePath = saved;
-                StatusLine = $"DB ready: {saved}";
+                StatusLine = "Hash set open.";
             }
         }
         catch { /* first launch or unreadable settings — pick manually */ }
@@ -754,23 +765,44 @@ public sealed partial class HashSetsTool
     [RelayCommand]
     private async Task PickDatabaseAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick or create the hash-set DB", "SQLite DB", "*.db");
-        if (string.IsNullOrEmpty(path)) return;
+        var path = await ToolDialog.PickFileAsync("Open a hash set", "Hash-set database", "*.db");
+        if (!string.IsNullOrEmpty(path)) OpenDatabase(path, created: false);
+        _ = ct;
+    }
+
+    /// <summary>
+    /// Creating needs a save dialog: an open dialog only lists files that already exist, so the
+    /// old single "Open / create" button could never create anything.
+    /// </summary>
+    [RelayCommand]
+    private async Task NewDatabaseAsync(CancellationToken ct)
+    {
+        var path = await ToolDialog.SaveFileAsync("Create a hash set", "hashsets.db", "db");
+        if (!string.IsNullOrEmpty(path)) OpenDatabase(path, created: true);
+        _ = ct;
+    }
+
+    private void OpenDatabase(string path, bool created)
+    {
         try
         {
             _service?.Dispose();
             _service = new HashSetService(path);
             DatabasePath = path;
-            StatusLine = $"DB ready: {path}";
+            VerdictLine = null;
+            StatusLine = created
+                ? "Empty hash set created. Import a list to fill it."
+                : "Hash set open.";
 
             // Remember it: the Filesystem tool reads this to hand out Known / Unknown verdicts.
             var store = new SettingsStore();
             store.Save(store.Load() with { HashSetDatabase = path });
-            _ = ct;
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            _service = null;
+            DatabasePath = null;
+            StatusLine = $"Could not open {path}: {ex.Message}";
         }
     }
 
@@ -779,19 +811,20 @@ public sealed partial class HashSetsTool
     {
         if (_service is null)
         {
-            StatusLine = "Pick a DB first.";
+            StatusLine = "Open or create a hash set first.";
             return;
         }
-        var path = await ToolDialog.PickFileAsync("Pick NSRL minimal CSV", "NSRL minimal", "*.csv");
+        var path = await ToolDialog.PickFileAsync("Pick the NSRL minimal list (NSRLFile.txt or .csv)", "NSRL list", "*.txt;*.csv");
         if (string.IsNullOrEmpty(path)) return;
+        StatusLine = "Importing… this can take several minutes for the full NSRL list.";
         try
         {
             var n = await Task.Run(() => _service.ImportNsrlMinimalCsv(path, $"NSRL_{DateTime.UtcNow:yyyyMMdd}"), ct);
-            StatusLine = $"Imported {n:N0} rows.";
+            StatusLine = $"Imported {n:N0} hashes from {System.IO.Path.GetFileName(path)}.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Import failed: {ex.Message}";
         }
     }
 
@@ -800,21 +833,34 @@ public sealed partial class HashSetsTool
     {
         if (_service is null)
         {
-            VerdictLine = "Pick a DB first.";
+            StatusLine = "Open or create a hash set first.";
             return;
         }
-        if (string.IsNullOrWhiteSpace(Query))
+        var digest = Query.Trim().ToLowerInvariant();
+        if (digest.Length == 0)
         {
+            return;
+        }
+        if (!digest.All(Uri.IsHexDigit))
+        {
+            VerdictLine = "That is not a hash: a hash contains only the characters 0-9 and a-f.";
+            return;
+        }
+        if (DigestHexLength.TryGetValue(Algorithm, out var expected) && digest.Length != expected)
+        {
+            VerdictLine = $"A {Algorithm.ToUpperInvariant()} hash is {expected} characters; this one is {digest.Length}. Check the algorithm, or that the whole hash was pasted.";
             return;
         }
         try
         {
-            var match = _service.Lookup(Algorithm, Query.Trim().ToLowerInvariant());
-            VerdictLine = match is null ? "no match." : $"{match.Verdict} · {match.SetName} · {match.Label}";
+            var match = _service.Lookup(Algorithm, digest);
+            VerdictLine = match is null
+                ? "Not in this hash set. That does not make the file suspicious, only unlisted."
+                : $"Match: {match.Verdict}\nList: {match.SetName}\n{match.Label}".TrimEnd();
         }
         catch (Exception ex)
         {
-            VerdictLine = $"Failed: {ex.Message}";
+            VerdictLine = $"Lookup failed: {ex.Message}";
         }
     }
 }
@@ -936,41 +982,57 @@ public sealed partial class VirusTotalTool
     [RelayCommand]
     private async Task LookupAsync(CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(ApiKey))
+        ResultText = null;
+        if (string.IsNullOrWhiteSpace(ApiKey))
         {
-            StatusLine = "Set your VirusTotal API key first.";
+            StatusLine = "Enter your VirusTotal API key first. You can create a free one at virustotal.com under your profile.";
             return;
         }
-        if (string.IsNullOrWhiteSpace(Hash))
+        var hash = Hash.Trim().ToLowerInvariant();
+        // Only a well-formed digest may leave the machine: the value goes into the request
+        // path, and anything else (a file name, a path) would disclose it to a third party.
+        if (hash.Length is not (32 or 40 or 64) || !hash.All(Uri.IsHexDigit))
         {
+            StatusLine = "Enter an MD5 (32 characters), SHA-1 (40) or SHA-256 (64) hash. Nothing was sent.";
             return;
         }
+        StatusLine = "Asking VirusTotal…";
         try
         {
-            var client = new VirusTotalClient(_http, () => ApiKey);
-            var report = await client.LookupAsync(Hash.Trim().ToLowerInvariant(), ct);
+            var client = new VirusTotalClient(_http, () => ApiKey.Trim());
+            var report = await client.LookupAsync(hash, ct);
             if (report is null)
             {
-                ResultText = "No record / not seen.";
-                StatusLine = client.QuotaExceeded ? "Quota exceeded." : "OK.";
+                StatusLine = client.QuotaExceeded
+                    ? "VirusTotal refused the request: your API key has used up its quota. Try again later."
+                    : "VirusTotal has no record of this hash. That means nobody has submitted the file, not that it is safe.";
             }
             else
             {
+                var total = report.Malicious + report.Suspicious + report.Harmless + report.Undetected;
                 ResultText = $"""
-                    Hash: {report.Hash}
-                    Malicious: {report.Malicious}
-                    Suspicious: {report.Suspicious}
-                    Harmless: {report.Harmless}
-                    Undetected: {report.Undetected}
-                    First seen: {report.FirstSubmissionUtc}
-                    Last analyzed: {report.LastAnalysisUtc}
+                    Hash            {report.Hash}
+                    Flagged by      {report.Malicious} of {total} engines as malicious, {report.Suspicious} as suspicious
+                    Not flagged by  {report.Harmless + report.Undetected} engines
+                    First seen      {report.FirstSubmissionUtc:yyyy-MM-dd HH:mm:ss} UTC
+                    Last analysed   {report.LastAnalysisUtc:yyyy-MM-dd HH:mm:ss} UTC
                     """;
-                StatusLine = "OK.";
+                StatusLine = "Lookup complete. The query is recorded in the custody log when a case is open.";
+                await ActiveCaseContext.LogAsync(CustodyAction.Annotation,
+                    new { Kind = "virustotal-lookup", Hash = hash, report.Malicious, report.Suspicious, Engines = total }, ct);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Lookup cancelled.";
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        {
+            StatusLine = "VirusTotal rejected the API key. Check that it was pasted in full.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not reach VirusTotal: {ex.Message}";
         }
     }
 }
@@ -981,8 +1043,11 @@ public sealed partial class VirusTotalTool
 
 public sealed partial class MapTool
 {
+    /// <summary>Hard stop for one ingest, so a huge photo share cannot grow the list without bound.</summary>
+    private const int MaxPointsPerIngest = 25_000;
+
     public GeoIndex Index { get; } = new();
-    public ObservableCollection<GeoPoint> Points { get; } = new();
+    public ObservableCollection<MapRow> Points { get; } = new();
 
     [ObservableProperty] private double _latitude;
     [ObservableProperty] private double _longitude;
@@ -993,10 +1058,17 @@ public sealed partial class MapTool
     [RelayCommand]
     private void AddPoint()
     {
-        var p = new GeoPoint(Latitude, Longitude, DateTimeOffset.UtcNow, Label, Source, null);
-        Index.Add(p);
-        Points.Add(p);
+        if (Latitude is < -90 or > 90 || Longitude is < -180 or > 180 || double.IsNaN(Latitude) || double.IsNaN(Longitude))
+        {
+            StatusLine = "Not added: latitude must be between -90 and 90, longitude between -180 and 180.";
+            return;
+        }
+        // A hand-entered point has no event time. Recording "now" would put the moment the
+        // examiner typed it into a column that otherwise holds evidence timestamps.
+        Add(new MapRow(Latitude, Longitude, null, "", "not recorded",
+            Label.Trim(), string.IsNullOrWhiteSpace(Source) ? "manual" : Source.Trim()));
         Latitude = 0; Longitude = 0; Label = "";
+        StatusLine = "Point added.";
     }
 
     [RelayCommand]
@@ -1004,13 +1076,20 @@ public sealed partial class MapTool
     {
         Points.Clear();
         Index.Clear();
+        StatusLine = "List cleared.";
+    }
+
+    private void Add(MapRow row)
+    {
+        Index.Add(new GeoPoint(row.Latitude, row.Longitude, row.Timestamp, row.Label, row.Source, null));
+        Points.Add(row);
     }
 
     /// <summary>
-    /// Walk a folder of images, extract GPS coordinates from EXIF, and add every geo-tagged
-    /// photo as a point. Pure C# via MetadataExtractor — no Python, no shell-outs.
+    /// Walk a folder of images, read the GPS position from EXIF, and add every geo-tagged photo
+    /// as a point. Pure C# via MetadataExtractor: no Python, no shell-outs.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task IngestPhotosAsync(CancellationToken ct)
     {
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
@@ -1018,24 +1097,43 @@ public sealed partial class MapTool
         if (owner is null) return;
         var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Pick a folder of photos to map",
+            Title = "Pick a folder of photos",
         });
         var root = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(root)) return;
 
-        StatusLine = "Scanning photos…";
-        var added = await Task.Run(() => ScanFolderForExifGps(root, Index, Points, ct), ct);
-        StatusLine = $"Added {added:N0} GPS point{(added == 1 ? "" : "s")} from {root}.";
+        StatusLine = "Reading photos…";
+        var progress = new Progress<(int Scanned, int Found)>(p =>
+            StatusLine = $"Reading photos… {p.Scanned:N0} read, {p.Found:N0} with a GPS position");
+        try
+        {
+            var (rows, scanned, capped) = await Task.Run(() => ScanFolderForExifGps(root, progress, ct), ct);
+            foreach (var row in rows)
+            {
+                Add(row);
+            }
+            StatusLine = rows.Count == 0
+                ? $"None of the {scanned:N0} photos under {root} carries a GPS position."
+                : $"Added {rows.Count:N0} of {scanned:N0} photos from {root}."
+                  + (capped ? $" Stopped at the {MaxPointsPerIngest:N0}-point limit; ingest subfolders separately for the rest." : "");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Stopped. Nothing from this folder was added.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not read {root}: {ex.Message}";
+        }
     }
 
-    private static int ScanFolderForExifGps(
-        string root,
-        GeoIndex index,
-        ObservableCollection<GeoPoint> points,
-        CancellationToken ct)
+    private static readonly string[] PhotoExtensions = [".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".png", ".webp", ".dng"];
+
+    private static (List<MapRow> Rows, int Scanned, bool Capped) ScanFolderForExifGps(
+        string root, IProgress<(int, int)> progress, CancellationToken ct)
     {
-        int added = 0;
-        var exts = new[] { ".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".png", ".webp" };
+        var rows = new List<MapRow>();
+        var scanned = 0;
         foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
         {
             RecurseSubdirectories = true,
@@ -1043,36 +1141,126 @@ public sealed partial class MapTool
         }))
         {
             ct.ThrowIfCancellationRequested();
-            if (added >= 25_000) break;
-            if (!exts.Contains(System.IO.Path.GetExtension(path).ToLowerInvariant())) continue;
+            if (!PhotoExtensions.Contains(System.IO.Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)) continue;
+            if (rows.Count >= MaxPointsPerIngest)
+            {
+                return (rows, scanned, true);
+            }
+            scanned++;
+            if (scanned % 50 == 0)
+            {
+                progress.Report((scanned, rows.Count));
+            }
             try
             {
                 var dirs = MetadataExtractor.ImageMetadataReader.ReadMetadata(path);
                 var gps = dirs.OfType<MetadataExtractor.Formats.Exif.GpsDirectory>().FirstOrDefault();
-                if (gps is null) continue;
-                var maybeLoc = gps.GetGeoLocation();
-                if (maybeLoc is not MetadataExtractor.GeoLocation loc || loc.IsZero) continue;
-                // Use file mtime as a proxy for the photo's timestamp — pulling DateTimeOriginal
-                // out of EXIF requires the extension-method path which varies across
-                // MetadataExtractor versions; mtime is good enough for plotting.
-                var ts = new DateTimeOffset(new FileInfo(path).LastWriteTimeUtc, TimeSpan.Zero);
-                var p = new GeoPoint(loc.Latitude, loc.Longitude, ts,
-                    System.IO.Path.GetFileName(path), "exif", null);
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                {
-                    index.Add(p);
-                    points.Add(p);
-                });
-                added++;
+                if (gps?.GetGeoLocation() is not { IsZero: false } loc) continue;
+                var (ts, display, origin) = PhotoTime(path, dirs, gps);
+                rows.Add(new MapRow(loc.Latitude, loc.Longitude, ts, display, origin, System.IO.Path.GetFileName(path), "photo EXIF"));
             }
             catch
             {
-                // unreadable image — skip
+                // Unreadable or truncated image: it simply contributes no point.
             }
         }
-        return added;
+        return (rows, scanned, false);
+    }
+
+    /// <summary>
+    /// The best available time for a photo, and where it came from. The GPS fix is UTC by
+    /// definition. The camera clock has no time zone unless the camera wrote an offset, so it is
+    /// shown as recorded rather than passed off as UTC. File modified time is the last resort
+    /// and is labelled as such, because copying a file can change it.
+    /// </summary>
+    private static (DateTimeOffset? Utc, string Display, string Origin) PhotoTime(
+        string path, IReadOnlyList<MetadataExtractor.Directory> dirs, MetadataExtractor.Formats.Exif.GpsDirectory gps)
+    {
+        const string Format = "yyyy-MM-dd HH:mm:ss";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (gps.TryGetGpsDate(out var gpsUtc))
+        {
+            var t = new DateTimeOffset(DateTime.SpecifyKind(gpsUtc, DateTimeKind.Utc));
+            return (t, t.ToString(Format, inv) + " UTC", "GPS fix");
+        }
+        var exif = dirs.OfType<MetadataExtractor.Formats.Exif.ExifSubIfdDirectory>().FirstOrDefault();
+        if (exif is not null && MetadataExtractor.DirectoryExtensions.TryGetDateTime(
+                exif, MetadataExtractor.Formats.Exif.ExifDirectoryBase.TagDateTimeOriginal, out var taken))
+        {
+            return (null, taken.ToString(Format, inv) + " (no time zone)", "camera clock");
+        }
+        var modified = new DateTimeOffset(new FileInfo(path).LastWriteTimeUtc, TimeSpan.Zero);
+        return (modified, modified.ToString(Format, inv) + " UTC", "file modified time");
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        if (Points.Count == 0) return;
+        if (!string.Equals(format, "kml", StringComparison.OrdinalIgnoreCase))
+        {
+            var rows = Points.Select(p => (object)new
+            {
+                p.Latitude, p.Longitude, Time = p.TimeDisplay, p.TimeSource, p.Source, p.Label,
+            }).ToList();
+            if (await ToolExport.SaveRowsAsync(Id, "locations", format, rows, ct) is { } status) StatusLine = status;
+            return;
+        }
+
+        var path = await ToolDialog.SaveFileAsync("Export as KML", "locations.kml", "kml");
+        if (string.IsNullOrEmpty(path)) return;
+        var snapshot = Points.ToList();
+        try
+        {
+            await Task.Run(() => WriteKml(path, snapshot), ct);
+            await ActiveCaseContext.LogAsync(CustodyAction.DataExported, new { Tool = Id, Format = "kml", Path = path, Rows = snapshot.Count }, ct);
+            StatusLine = $"Exported {snapshot.Count:N0} point{(snapshot.Count == 1 ? "" : "s")} to {path}";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Export failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>KML 2.2, one Placemark per point. XmlWriter does the escaping: labels are evidence-controlled.</summary>
+    internal static void WriteKml(string path, IReadOnlyList<MapRow> points)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        using var xml = System.Xml.XmlWriter.Create(path, new System.Xml.XmlWriterSettings { Indent = true, Encoding = new System.Text.UTF8Encoding(false) });
+        xml.WriteStartDocument();
+        xml.WriteStartElement("kml", "http://www.opengis.net/kml/2.2");
+        xml.WriteStartElement("Document");
+        xml.WriteElementString("name", "Cinder locations");
+        foreach (var p in points)
+        {
+            xml.WriteStartElement("Placemark");
+            xml.WriteElementString("name", string.IsNullOrEmpty(p.Label) ? p.Source : p.Label);
+            xml.WriteElementString("description", $"{p.TimeDisplay} ({p.TimeSource}); source: {p.Source}".Trim());
+            if (p.Timestamp is { } t)
+            {
+                xml.WriteStartElement("TimeStamp");
+                xml.WriteElementString("when", t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", inv));
+                xml.WriteEndElement();
+            }
+            xml.WriteStartElement("Point");
+            // KML order is longitude,latitude.
+            xml.WriteElementString("coordinates", $"{p.Longitude.ToString("R", inv)},{p.Latitude.ToString("R", inv)},0");
+            xml.WriteEndElement();
+            xml.WriteEndElement();
+        }
+        xml.WriteEndElement();
+        xml.WriteEndElement();
+        xml.WriteEndDocument();
     }
 }
+
+/// <summary>
+/// One row of the location list. <see cref="Timestamp"/> is set only when the time is known in
+/// UTC; <see cref="TimeDisplay"/> is what the examiner reads and <see cref="TimeSource"/> says
+/// which clock it came from.
+/// </summary>
+public sealed record MapRow(
+    double Latitude, double Longitude, DateTimeOffset? Timestamp, string TimeDisplay, string TimeSource, string Label, string Source);
 
 // =====================================================================================
 // GRAPH — communication graph builder.
@@ -1080,9 +1268,12 @@ public sealed partial class MapTool
 
 public sealed partial class GraphTool
 {
+    /// <summary>Hard stop for one ingest, so a huge mail store cannot grow the graph without bound.</summary>
+    private const int MaxInteractionsPerIngest = 25_000;
+
     public CommunicationGraph Graph { get; } = new();
     public ObservableCollection<GraphNode> Nodes { get; } = new();
-    public ObservableCollection<GraphEdge> Edges { get; } = new();
+    public ObservableCollection<GraphEdgeRow> Edges { get; } = new();
 
     [ObservableProperty] private string _from = "";
     [ObservableProperty] private string _to = "";
@@ -1090,13 +1281,33 @@ public sealed partial class GraphTool
     [ObservableProperty] private string? _subject;
     [ObservableProperty] private string? _statusLine;
 
+    /// <summary>The person picked in the left list; the message list narrows to them.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EdgesHeading), nameof(HasSelectedNode))]
+    private GraphNode? _selectedNode;
+
+    public bool HasSelectedNode => SelectedNode is not null;
+
+    public string EdgesHeading => SelectedNode is { } n ? $"MESSAGES TO OR FROM {n.Identity.ToUpperInvariant()}" : "ALL MESSAGES";
+
+    partial void OnSelectedNodeChanged(GraphNode? value) => RefreshEdges();
+
+    [RelayCommand]
+    private void ShowAll() => SelectedNode = null;
+
     [RelayCommand]
     private void AddEdge()
     {
-        if (string.IsNullOrWhiteSpace(From) || string.IsNullOrWhiteSpace(To)) return;
-        Graph.AddInteraction(From, To, Source, DateTimeOffset.UtcNow, Subject);
+        if (string.IsNullOrWhiteSpace(From) || string.IsNullOrWhiteSpace(To))
+        {
+            StatusLine = "Not added: fill in both who sent it and who received it.";
+            return;
+        }
+        // No timestamp: a hand-entered link has no event time, and "now" would look like one.
+        Graph.AddInteraction(From.Trim(), To.Trim(), string.IsNullOrWhiteSpace(Source) ? "manual" : Source.Trim(), null, Subject);
         Refresh();
         From = ""; To = ""; Subject = "";
+        StatusLine = "Link added.";
     }
 
     [RelayCommand]
@@ -1104,13 +1315,14 @@ public sealed partial class GraphTool
     {
         Graph.Clear();
         Refresh();
+        StatusLine = "Graph cleared.";
     }
 
     /// <summary>
-    /// Walk a folder of email files (.eml / .msg / .mbox) and auto-build the communication
-    /// graph from From / To / Cc headers. Pure C# via MsgReader and an in-house MBOX scanner.
+    /// Walk a folder of email files (.eml / .msg / .mbox) and build the graph from the
+    /// From / To / Cc headers. Pure C# via MsgReader and an in-house MBOX header scanner.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task IngestEmailFolderAsync(CancellationToken ct)
     {
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
@@ -1123,15 +1335,41 @@ public sealed partial class GraphTool
         var root = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(root)) return;
 
-        StatusLine = "Ingesting…";
-        var n = await Task.Run(() => ScanFolderForEmail(root, Graph, ct), ct);
+        StatusLine = "Reading mail…";
+        var progress = new Progress<(int Files, int Links)>(p =>
+            StatusLine = $"Reading mail… {p.Files:N0} files, {p.Links:N0} sender-recipient links");
+        var result = new IngestResult();
+        try
+        {
+            await Task.Run(() => ScanFolderForEmail(root, Graph, result, progress, ct), ct);
+            StatusLine = result.Links == 0
+                ? $"No readable .eml, .msg or .mbox mail found under {root}."
+                : $"Added {result.Links:N0} links from {result.Files:N0} files under {root}."
+                  + (result.Unreadable > 0 ? $" {result.Unreadable:N0} files could not be read." : "")
+                  + (result.Capped ? $" Stopped at the {MaxInteractionsPerIngest:N0}-link limit; ingest subfolders separately for the rest." : "");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = $"Stopped. {result.Links:N0} links read before stopping were kept.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not read {root}: {ex.Message}";
+        }
         Refresh();
-        StatusLine = $"Added {n:N0} interaction{(n == 1 ? "" : "s")} from {root}.";
     }
 
-    private static int ScanFolderForEmail(string root, CommunicationGraph graph, CancellationToken ct)
+    private sealed class IngestResult
     {
-        int added = 0;
+        public int Files;
+        public int Links;
+        public int Unreadable;
+        public bool Capped;
+    }
+
+    private static void ScanFolderForEmail(
+        string root, CommunicationGraph graph, IngestResult result, IProgress<(int, int)> progress, CancellationToken ct)
+    {
         foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
         {
             RecurseSubdirectories = true,
@@ -1139,29 +1377,39 @@ public sealed partial class GraphTool
         }))
         {
             ct.ThrowIfCancellationRequested();
-            if (added >= 25_000) break;
+            if (result.Links >= MaxInteractionsPerIngest)
+            {
+                result.Capped = true;
+                return;
+            }
             var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+            if (ext is not (".msg" or ".eml" or ".mbox")) continue;
+            result.Files++;
             try
             {
                 switch (ext)
                 {
                     case ".msg":
-                        IngestMsg(path, graph, ref added);
+                        IngestMsg(path, graph, ref result.Links);
                         break;
                     case ".eml":
-                        IngestEml(path, graph, ref added);
+                        IngestEml(path, graph, ref result.Links);
                         break;
-                    case ".mbox":
-                        IngestMbox(path, graph, ref added, ct);
+                    default:
+                        IngestMbox(path, graph, ref result.Links, ct);
                         break;
                 }
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch
             {
-                // unreadable / parse error — skip
+                result.Unreadable++;
             }
+            progress.Report((result.Files, result.Links));
         }
-        return added;
     }
 
     private static void IngestMsg(string path, CommunicationGraph graph, ref int added)
@@ -1169,11 +1417,8 @@ public sealed partial class GraphTool
         using var msg = new MsgReader.Outlook.Storage.Message(path);
         var from = msg.GetEmailSender(false, false) ?? "";
         var to = msg.GetEmailRecipients(MsgReader.Outlook.RecipientType.To, false, false) ?? "";
-        var subject = msg.Subject ?? "";
-        // MsgReader's SentOn surface varies — coerce whatever DateTime/DateTimeOffset it
-        // hands us into a DateTimeOffset.
-        DateTimeOffset ts = CoerceToUtcOffset(msg.SentOn);
-        AddFromHeader(graph, from, to, "msg", ts, subject, ref added);
+        var cc = msg.GetEmailRecipients(MsgReader.Outlook.RecipientType.Cc, false, false) ?? "";
+        AddFromHeader(graph, from, JoinRecipients(to, cc), "msg", ToUtc(msg.SentOn), msg.Subject ?? "", ref added);
     }
 
     private static void IngestEml(string path, CommunicationGraph graph, ref int added)
@@ -1181,56 +1426,67 @@ public sealed partial class GraphTool
         using var fs = File.OpenRead(path);
         var msg = MsgReader.Mime.Message.Load(fs);
         var from = msg.Headers.From?.Address ?? "";
-        var to = string.Join(", ", msg.Headers.To?.Select(t => t.Address) ?? Array.Empty<string>());
-        var subject = msg.Headers.Subject ?? "";
-        DateTimeOffset ts = CoerceToUtcOffset(msg.Headers.DateSent);
-        AddFromHeader(graph, from, to, "eml", ts, subject, ref added);
+        var recipients = (msg.Headers.To ?? []).Concat(msg.Headers.Cc ?? []).Select(t => t.Address);
+        // DateSent is DateTime.MinValue when the header is absent or unparseable.
+        AddFromHeader(graph, from, string.Join(", ", recipients), "eml", ToUtc(msg.Headers.DateSent), msg.Headers.Subject ?? "", ref added);
     }
 
+    private static string JoinRecipients(string to, string cc) =>
+        string.IsNullOrWhiteSpace(cc) ? to : string.IsNullOrWhiteSpace(to) ? cc : to + ", " + cc;
+
     /// <summary>
-    /// Normalise whatever shape (DateTime, DateTime?, DateTimeOffset, DateTimeOffset?) a third
-    /// party hands us into a UTC DateTimeOffset, defaulting to now if null/empty.
+    /// A sent time as UTC, or null when the message does not carry one. Never "now": an
+    /// invented time in an evidence column is worse than a blank.
     /// </summary>
-    private static DateTimeOffset CoerceToUtcOffset(object? value)
+    private static DateTimeOffset? ToUtc(object? value) => value switch
     {
-        return value switch
-        {
-            DateTimeOffset dto => dto.ToUniversalTime(),
-            DateTime dt when dt != default =>
-                new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero),
-            _ => DateTimeOffset.UtcNow,
-        };
-    }
+        DateTimeOffset dto when dto != default => dto.ToUniversalTime(),
+        DateTime dt when dt != default => dt.Kind == DateTimeKind.Local
+            ? new DateTimeOffset(dt).ToUniversalTime()
+            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero),
+        _ => null,
+    };
 
     private static void IngestMbox(string path, CommunicationGraph graph, ref int added, CancellationToken ct)
     {
         using var sr = new StreamReader(path);
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string? line;
-        bool inHeaders = false;
+        string? lastHeader = null;
+        var inHeaders = false;
         while ((line = sr.ReadLine()) is not null)
         {
             ct.ThrowIfCancellationRequested();
-            if (added >= 25_000) break;
+            if (added >= MaxInteractionsPerIngest) break;
 
             if (line.StartsWith("From ", StringComparison.Ordinal))
             {
                 FlushMboxHeaders(graph, headers, ref added);
                 inHeaders = true;
+                lastHeader = null;
                 continue;
             }
-            if (inHeaders && string.IsNullOrEmpty(line))
+            if (!inHeaders)
+            {
+                continue;
+            }
+            if (line.Length == 0)
             {
                 inHeaders = false;
                 continue;
             }
-            if (inHeaders)
+            // RFC 5322 folding: a line starting with space or tab continues the previous header.
+            // Long To / Cc lists are almost always folded, so ignoring this drops recipients.
+            if ((line[0] == ' ' || line[0] == '\t') && lastHeader is not null)
             {
-                var colon = line.IndexOf(':');
-                if (colon > 0)
-                {
-                    headers[line[..colon]] = line[(colon + 1)..].Trim();
-                }
+                headers[lastHeader] += " " + line.Trim();
+                continue;
+            }
+            var colon = line.IndexOf(':');
+            if (colon > 0)
+            {
+                lastHeader = line[..colon];
+                headers[lastHeader] = line[(colon + 1)..].Trim();
             }
         }
         FlushMboxHeaders(graph, headers, ref added);
@@ -1240,55 +1496,85 @@ public sealed partial class GraphTool
     {
         if (headers.Count == 0) return;
         var from = headers.GetValueOrDefault("From", "");
-        var to = headers.GetValueOrDefault("To", "");
+        var to = JoinRecipients(headers.GetValueOrDefault("To", ""), headers.GetValueOrDefault("Cc", ""));
         var subject = headers.GetValueOrDefault("Subject", "");
-        DateTimeOffset ts = DateTimeOffset.UtcNow;
-        if (headers.TryGetValue("Date", out var d) && DateTimeOffset.TryParse(d, out var parsed))
-        {
-            ts = parsed.ToUniversalTime();
-        }
+        DateTimeOffset? ts = headers.TryGetValue("Date", out var d)
+            && DateTimeOffset.TryParse(d, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsed)
+            ? parsed.ToUniversalTime()
+            : null;
         AddFromHeader(graph, from, to, "mbox", ts, subject, ref added);
         headers.Clear();
     }
 
     private static void AddFromHeader(CommunicationGraph graph, string from, string to,
-                                       string source, DateTimeOffset ts, string subject, ref int added)
+                                       string source, DateTimeOffset? ts, string subject, ref int added)
     {
         if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) return;
-        // To header can be a comma-separated list — emit one edge per recipient.
+        var sender = ExtractAddress(from);
+        // One link per recipient.
         foreach (var recipient in to.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            graph.AddInteraction(
-                ExtractAddress(from),
-                ExtractAddress(recipient),
-                source,
-                ts,
-                subject);
+            var address = ExtractAddress(recipient);
+            if (address.Length == 0) continue;
+            graph.AddInteraction(sender, address, source, ts, subject);
             added++;
         }
     }
 
-    private static string ExtractAddress(string headerValue)
+    internal static string ExtractAddress(string headerValue)
     {
         // Headers come in two shapes: "Name <foo@bar>" and "foo@bar". Pull just the address.
         var s = headerValue.Trim();
-        var lt = s.IndexOf('<');
-        var gt = s.IndexOf('>');
+        var lt = s.LastIndexOf('<');
+        var gt = s.LastIndexOf('>');
         if (lt >= 0 && gt > lt)
         {
             return s[(lt + 1)..gt].Trim();
         }
-        return s;
+        return s.Trim('"', ' ');
     }
 
     private void Refresh()
     {
+        var keep = SelectedNode?.Identity;
         Nodes.Clear();
-        foreach (var n in Graph.Nodes) Nodes.Add(n);
+        // Most-connected first: that is the question the examiner is asking of this list.
+        foreach (var n in Graph.Nodes.OrderByDescending(n => n.InCount + n.OutCount).ThenBy(n => n.Identity, StringComparer.OrdinalIgnoreCase))
+        {
+            Nodes.Add(n);
+        }
+        SelectedNode = keep is null ? null : Nodes.FirstOrDefault(n => string.Equals(n.Identity, keep, StringComparison.OrdinalIgnoreCase));
+        RefreshEdges();
+    }
+
+    private void RefreshEdges()
+    {
         Edges.Clear();
-        foreach (var e in Graph.Edges) Edges.Add(e);
+        var who = SelectedNode?.Identity;
+        foreach (var e in Graph.Edges)
+        {
+            if (who is not null
+                && !string.Equals(e.From, who, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(e.To, who, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            Edges.Add(new GraphEdgeRow(e.From, e.To, e.Source,
+                e.Timestamp?.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "",
+                e.Subject ?? ""));
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Edges.Select(e => (object)new { e.From, e.To, SentUtc = e.SentUtc, e.Source, e.Subject }).ToList();
+        if (await ToolExport.SaveRowsAsync(Id, "communications", format, rows, ct) is { } status) StatusLine = status;
     }
 }
+
+/// <summary>One sender-to-recipient link as shown in the message list. <see cref="SentUtc"/> is blank when the message carries no date.</summary>
+public sealed record GraphEdgeRow(string From, string To, string Source, string SentUtc, string Subject);
 
 // =====================================================================================
 // ACQUIRE — Imager / Verify / Mount / Convert / VSS / RAM / Carver / Cloud
@@ -1795,25 +2081,46 @@ public sealed partial class ConvertTool
 public sealed partial class ShadowCopyTool
 {
     [ObservableProperty] private string? _statusLine;
+
+    /// <summary>"Nothing listed yet" and "listed, and there are none" are different answers.</summary>
+    [ObservableProperty] private string _emptyTitle = "Snapshots on this computer";
+
     public ObservableCollection<Cinder.Native.ShadowCopy> Snapshots { get; } = new();
 
     [RelayCommand]
-    private void Refresh()
+    private async Task RefreshAsync(CancellationToken ct)
     {
         Snapshots.Clear();
+        StatusLine = "Listing snapshots…";
         try
         {
-            var enumr = ShadowCopyService.ForCurrentPlatform();
-            foreach (var s in enumr.Enumerate())
+            // Enumeration shells out to the OS snapshot tools; keep it off the UI thread.
+            var found = await Task.Run(() => ShadowCopyService.ForCurrentPlatform().Enumerate().ToList(), ct);
+            foreach (var s in found)
             {
                 Snapshots.Add(s);
             }
-            StatusLine = $"{Snapshots.Count} snapshot{(Snapshots.Count == 1 ? "" : "s")} found.";
+            EmptyTitle = "No snapshots found";
+            StatusLine = found.Count == 0
+                ? "This computer has no snapshots, or Cinder is not running as Administrator / root."
+                : $"{found.Count:N0} snapshot{(found.Count == 1 ? "" : "s")} found.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            EmptyTitle = "Could not list snapshots";
+            StatusLine = $"Could not list snapshots: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Snapshots.Select(s => (object)new
+        {
+            Snapshot = s.Id, Volume = s.Origin,
+            CreatedUtc = s.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), s.Notes,
+        }).ToList();
+        if (await ToolExport.SaveRowsAsync(Id, "snapshots", format, rows, ct) is { } status) StatusLine = status;
     }
 }
 

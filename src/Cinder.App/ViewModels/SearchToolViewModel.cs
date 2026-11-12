@@ -1,112 +1,192 @@
 using System.Collections.ObjectModel;
 using Avalonia.Platform.Storage;
 using Cinder.App.Services;
+using Cinder.App.ViewModels.Tools;
 using Cinder.Search;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 namespace Cinder.App.ViewModels;
 
-/// <summary>Lucene.NET case-wide search UI.</summary>
+/// <summary>
+/// Full-text search over a folder. The examiner indexes a folder once (the index lives in a
+/// folder they choose) and then queries it; an index built earlier can be reopened.
+/// </summary>
 public sealed partial class SearchToolViewModel : ViewModelBase
 {
+    /// <summary>Results shown per query. Said out loud in the status line when it is reached.</summary>
+    private const int MaxHits = 500;
+
+    /// <summary>Files larger than this are skipped by the indexer (and counted as skipped).</summary>
+    private const long MaxFileBytes = 50L * 1024 * 1024;
+
     private CaseIndex? _index;
 
     [ObservableProperty]
-    private string _indexPath = "";
+    [NotifyPropertyChangedFor(nameof(HasIndex), nameof(ShowReadyState))]
+    private string? _indexPath;
 
     [ObservableProperty]
     private string _query = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReadyTitle), nameof(ReadyMessage))]
     private string? _statusLine;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowReadyState))]
     private bool _isIndexing;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReadyTitle), nameof(ReadyMessage))]
     private int _docCount;
 
+    [ObservableProperty]
+    private SearchHit? _selectedHit;
+
+    /// <summary>The last query that ran, so the "no results" state can name it.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ReadyTitle), nameof(ReadyMessage))]
+    private string? _lastQuery;
+
     public ObservableCollection<SearchHit> Hits { get; } = new();
+
+    public SearchToolViewModel()
+    {
+        Hits.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowReadyState));
+    }
+
+    public bool HasIndex => !string.IsNullOrEmpty(IndexPath);
+
+    /// <summary>An index is open and there is nothing in the grid: say what to do, or that nothing matched.</summary>
+    public bool ShowReadyState => HasIndex && Hits.Count == 0 && !IsIndexing;
+
+    public string ReadyTitle => LastQuery is null
+        ? DocCount == 0 ? "This index is empty" : "Ready to search"
+        : "No results";
+
+    public string ReadyMessage => LastQuery is null
+        ? DocCount == 0
+            ? "Use \"Index a folder…\" to add files to it."
+            : $"{DocCount:N0} files indexed. Type what you are looking for above and press Enter."
+        : $"Nothing in the index matches \"{LastQuery}\". Check the spelling, try fewer words, or index more folders.";
 
     [RelayCommand]
     private async Task PickIndexFolderAsync(CancellationToken ct)
     {
-        var owner = (Avalonia.Application.Current?.ApplicationLifetime
-            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (owner is null) return;
-        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
-        {
-            Title = "Pick the case index folder",
-        });
-        var path = folders.FirstOrDefault()?.TryGetLocalPath();
+        var path = await PickFolderAsync("Open an existing search index folder");
         if (string.IsNullOrEmpty(path)) return;
-        IndexPath = path;
+        if (!CaseIndex.Exists(path))
+        {
+            StatusLine = $"{path} does not contain a search index. Use \"Index a folder…\" to build one.";
+            return;
+        }
+        OpenIndex(path);
+        _ = ct;
+    }
+
+    private bool OpenIndex(string path)
+    {
         try
         {
             _index?.Dispose();
             _index = new CaseIndex(path);
-            StatusLine = $"Opened index at {path}.";
+            IndexPath = path;
+            DocCount = _index.DocumentCount;
+            LastQuery = null;
+            Hits.Clear();
+            StatusLine = $"Index open: {DocCount:N0} files.";
+            return true;
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            _index = null;
+            IndexPath = null;
+            StatusLine = $"Could not open the index at {path}: {ex.Message}";
+            return false;
         }
     }
 
     /// <summary>
-    /// Build (or extend) the Lucene index from a folder of evidence. Walks every file under
-    /// the picked folder, extracts text via DocumentReader where possible (DOCX/PDF/etc.), and
-    /// falls back to a printable-strings extraction for binary files. Each file becomes one
-    /// indexed document.
+    /// Index every file under a folder. Text comes from <see cref="DocumentReader"/> where the
+    /// format is known (DOCX, PDF, XLSX, …) and from a printable-strings pass otherwise, so
+    /// names, URLs and messages embedded in binaries are searchable too. Re-indexing a folder
+    /// replaces its files rather than duplicating them.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task BuildIndexAsync(CancellationToken ct)
     {
-        if (_index is null)
-        {
-            StatusLine = "Pick an index folder first.";
-            return;
-        }
-        var owner = (Avalonia.Application.Current?.ApplicationLifetime
-            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (owner is null) return;
-        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Pick the evidence folder to ingest",
-        });
-        var sourcePath = folders.FirstOrDefault()?.TryGetLocalPath();
+        var sourcePath = await PickFolderAsync("Pick the folder to index");
         if (string.IsNullOrEmpty(sourcePath)) return;
 
+        if (_index is null)
+        {
+            var indexFolder = await PickFolderAsync("Pick an empty folder to store the search index in");
+            if (string.IsNullOrEmpty(indexFolder)) return;
+            if (IsInside(indexFolder, sourcePath))
+            {
+                StatusLine = "Store the index outside the folder being indexed, or it would index itself.";
+                return;
+            }
+            if (!OpenIndex(indexFolder)) return;
+        }
+        var index = _index!;
+
         IsIndexing = true;
-        StatusLine = "Ingesting…";
+        LastQuery = null;
+        Hits.Clear();
+        StatusLine = "Indexing…";
+        var progress = new Progress<int>(n => StatusLine = $"Indexing… {n:N0} files");
+        var result = new IngestResult();
         try
         {
-            _index.OpenForWrite();
-            var indexed = await Task.Run(async () => await IngestAsync(sourcePath, _index, ct), ct);
-            _index.Commit();
-            DocCount += indexed;
-            StatusLine = $"Indexed {indexed:N0} file{(indexed == 1 ? "" : "s")} from {sourcePath}.";
+            index.OpenForWrite();
+            await Task.Run(() => IngestAsync(sourcePath, index, result, progress, ct), ct);
+            StatusLine = $"Indexed {result.Indexed:N0} file{(result.Indexed == 1 ? "" : "s")} from {sourcePath}."
+                + (result.TooLarge > 0 ? $" Skipped {result.TooLarge:N0} over 50 MB." : "")
+                + (result.Unreadable > 0 ? $" {result.Unreadable:N0} could not be read." : "");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = $"Stopped. The {result.Indexed:N0} files indexed so far are searchable.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Index build failed: {ex.Message}";
+            StatusLine = $"Indexing failed: {ex.Message}";
         }
         finally
         {
+            try
+            {
+                index.Commit();
+                DocCount = index.DocumentCount;
+            }
+            catch (Exception ex)
+            {
+                StatusLine = $"Could not save the index: {ex.Message}";
+            }
             IsIndexing = false;
         }
+        await ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.ParserRan,
+            new { Tool = "search", Action = "index", Source = sourcePath, Index = IndexPath, Files = result.Indexed }, CancellationToken.None);
     }
 
-    /// <summary>
-    /// Walk a directory recursively and index every file under 50 MB. Tries DocumentReader
-    /// first (which handles DOCX / PDF / XLSX / PPTX / ODT / EPUB / RTF / TXT / code), then
-    /// falls back to a printable-strings extraction for binaries — captures every URL,
-    /// filename, error message etc. embedded in executables, memory dumps, images, etc.
-    /// </summary>
-    private static async Task<int> IngestAsync(string root, CaseIndex index, CancellationToken ct)
+    private sealed class IngestResult
     {
-        int n = 0;
+        public int Indexed;
+        public int TooLarge;
+        public int Unreadable;
+    }
+
+    private static bool IsInside(string candidate, string parent)
+    {
+        var c = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var p = Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return c.StartsWith(p, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
+    private static async Task IngestAsync(string root, CaseIndex index, IngestResult result, IProgress<int> progress, CancellationToken ct)
+    {
         var enumeration = new EnumerationOptions
         {
             RecurseSubdirectories = true,
@@ -116,23 +196,24 @@ public sealed partial class SearchToolViewModel : ViewModelBase
         foreach (var path in Directory.EnumerateFiles(root, "*", enumeration))
         {
             ct.ThrowIfCancellationRequested();
-            if (n >= 100_000) break;
             FileInfo info;
             try { info = new FileInfo(path); }
-            catch { continue; }
-            if (info.Length == 0 || info.Length > 50L * 1024 * 1024) continue;
+            catch { result.Unreadable++; continue; }
+            if (info.Length == 0) continue;
+            if (info.Length > MaxFileBytes) { result.TooLarge++; continue; }
 
             try
             {
-                // Try DocumentReader first for known textual formats.
-                var result = await DocumentReader.ReadAsync(path, ct);
-                var text = result.Success && !string.IsNullOrWhiteSpace(result.Text)
-                    ? result.Text
+                var read = await DocumentReader.ReadAsync(path, ct);
+                var text = read.Success && !string.IsNullOrWhiteSpace(read.Text)
+                    ? read.Text
                     : ExtractPrintableStrings(path, ct);
                 if (string.IsNullOrWhiteSpace(text)) continue;
 
+                // The path is the document id, so indexing the same folder twice updates
+                // each file in place instead of returning every hit twice.
                 index.IndexDocument(new IndexableDoc(
-                    Id: Guid.NewGuid().ToString(),
+                    Id: path,
                     Source: "file",
                     User: null,
                     Path: path,
@@ -140,21 +221,28 @@ public sealed partial class SearchToolViewModel : ViewModelBase
                     Text: text,
                     Timestamp: new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero),
                     Tags: [Path.GetExtension(path).TrimStart('.')]));
-                n++;
+                result.Indexed++;
+                if (result.Indexed % 25 == 0)
+                {
+                    progress.Report(result.Indexed);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
-                // skip unreadable files
+                result.Unreadable++;
             }
         }
-        return n;
     }
 
     private static string ExtractPrintableStrings(string path, CancellationToken ct)
     {
         var sb = new System.Text.StringBuilder();
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-        Span<byte> buf = stackalloc byte[1 << 15];
+        var buf = new byte[1 << 15];
         var run = new System.Text.StringBuilder();
         int read;
         while ((read = fs.Read(buf)) > 0)
@@ -187,25 +275,75 @@ public sealed partial class SearchToolViewModel : ViewModelBase
     {
         if (_index is null)
         {
-            StatusLine = "Pick or build an index first.";
+            StatusLine = "Index a folder first, or open an index you built earlier.";
             return;
         }
-        if (string.IsNullOrWhiteSpace(Query))
+        var query = Query.Trim();
+        if (query.Length == 0)
         {
             return;
         }
         Hits.Clear();
         try
         {
-            foreach (var h in _index.Search(Query, max: 200))
+            var hits = _index.Search(query, MaxHits);
+            foreach (var h in hits)
             {
                 Hits.Add(h);
             }
-            StatusLine = $"{Hits.Count} hit{(Hits.Count == 1 ? "" : "s")} for \"{Query}\".";
+            LastQuery = query;
+            StatusLine = Hits.Count >= MaxHits
+                ? $"Showing the best {MaxHits:N0} matches for \"{query}\". Add words to narrow it down."
+                : $"{Hits.Count:N0} match{(Hits.Count == 1 ? "" : "es")} for \"{query}\".";
+        }
+        catch (FormatException ex)
+        {
+            LastQuery = null;
+            StatusLine = $"That query could not be read: {ex.Message}";
         }
         catch (Exception ex)
         {
+            LastQuery = null;
             StatusLine = $"Search failed: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private void OpenHit(SearchHit? hit)
+    {
+        hit ??= SelectedHit;
+        if (hit?.Path is not { Length: > 0 } path)
+        {
+            return;
+        }
+        if (!File.Exists(path))
+        {
+            StatusLine = $"{path} is no longer at that location.";
+            return;
+        }
+        AppNavigator.OpenInHex?.Invoke(path, null);
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Hits.Select(h => (object)new
+        {
+            h.Score,
+            File = h.Summary ?? "",
+            Path = h.Path ?? "",
+            ModifiedUtc = h.Timestamp?.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) ?? "",
+            Query = LastQuery ?? "",
+        }).ToList();
+        if (await ToolExport.SaveRowsAsync("search", "search-results", format, rows, ct) is { } status) StatusLine = status;
+    }
+
+    private static async Task<string?> PickFolderAsync(string title)
+    {
+        var owner = (Avalonia.Application.Current?.ApplicationLifetime
+            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (owner is null) return null;
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = title });
+        return folders.FirstOrDefault()?.TryGetLocalPath();
     }
 }

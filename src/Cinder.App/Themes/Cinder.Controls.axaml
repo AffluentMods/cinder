@@ -1,0 +1,35 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:c="using:Cinder.App.Controls">
+
+    <!-- Empty state: icon tile, title, one sentence, then the action passed as content. -->
+    <ControlTheme x:Key="{x:Type c:EmptyState}" TargetType="c:EmptyState">
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="MaxWidth" Value="460" />
+        <Setter Property="Margin" Value="24" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <ControlTemplate>
+                <StackPanel Spacing="14">
+                    <Border Width="52" Height="52" CornerRadius="12" HorizontalAlignment="Center"
+                            Background="{DynamicResource CinderSurface2Brush}"
+                            BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
+                        <c:CinderIcon Data="{TemplateBinding Icon}" Width="24" Height="24"
+                                      Foreground="{DynamicResource CinderAccentBrush}" />
+                    </Border>
+                    <TextBlock Text="{TemplateBinding Title}" FontSize="18" FontWeight="600"
+                               HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"
+                               Foreground="{DynamicResource CinderForegroundBrush}" />
+                    <TextBlock Text="{TemplateBinding Message}" FontSize="13" LineHeight="19"
+                               TextAlignment="Center" TextWrapping="Wrap"
+                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                               IsVisible="{TemplateBinding Message, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    <ContentPresenter Name="PART_ContentPresenter" HorizontalAlignment="Center"
+                                      Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}" />
+                </StackPanel>
+            </ControlTemplate>
+        </Setter>
+    </ControlTheme>
+</ResourceDictionary>

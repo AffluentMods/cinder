@@ -76,4 +76,8 @@
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 
+    <!-- The stock header reserves 32 px for a sort arrow in every column, which clips the
+         caption of any narrow column ("Score" became "Sc"). 14 px fits the arrow. -->
+    <x:Double x:Key="DataGridSortIconMinWidth">14</x:Double>
+
 </ResourceDictionary>

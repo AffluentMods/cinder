@@ -83,7 +83,6 @@ public abstract partial class ToolViewModel : ViewModelBase
         ["email"] = "partial",
         ["memory"] = "external",
         ["yara"] = "subset",
-        ["virustotal"] = "shell",
         ["mount"] = "partial",
         ["ramcapture"] = "shell",
         ["cloud"] = "shell",
