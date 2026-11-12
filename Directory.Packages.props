@@ -42,7 +42,7 @@
     <PackageVersion Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.12" />
 
     <!-- MVVM -->
-    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
 
     <!-- DI / Hosting / Logging -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
