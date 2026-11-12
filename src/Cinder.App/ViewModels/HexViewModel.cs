@@ -205,7 +205,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
     public long InspectorOffset => HasSelection && SelectionLength > 1 ? Math.Min(SelectionStart, SelectionEnd) : CaretOffset;
 
     /// <summary>Says which of the two it is, so the values are never read against the wrong byte.</summary>
-    public string InspectorBasis => HasSelection && SelectionLength > 1 ? "from selection start" : "from caret";
+    public string InspectorBasis => HasSelection && SelectionLength > 1 ? "from selection" : "from caret";
 
     [ObservableProperty]
     private bool _isLittleEndian = true;

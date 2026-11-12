@@ -207,7 +207,9 @@ public sealed partial class IocMatchTool : SidecarToolViewModel
             if (damagedFiles is { Count: > 0 })
             {
                 // Name the images, so the examiner knows which ones to verify.
-                var names = damagedFiles.Take(3).Select(Path.GetFileName);
+                // Last segment under either separator: Path.GetFileName only splits on the
+                // current platform's, so a Windows path listed on Linux kept its folders.
+                var names = damagedFiles.Take(3).Select(f => f[(f.LastIndexOfAny(['/', '\\']) + 1)..]);
                 text += $" Affected: {string.Join(", ", names)}{(damagedFiles.Count > 3 ? $" and {damagedFiles.Count - 3:N0} more" : "")}.";
             }
         }

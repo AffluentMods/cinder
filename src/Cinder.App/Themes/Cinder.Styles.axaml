@@ -211,9 +211,19 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="VerticalAlignment" Value="Bottom" />
     </Style>
+    <!-- The accent line on the active tab is a child element (Border.tab-accent), not an inset
+         BoxShadow. On screen both draw the same (checked at 150 %), but an off-screen render at
+         any scale other than 100 % lost the tab's content with the inset shadow, which made
+         high-resolution renders of the window unusable. -->
     <Style Selector="Border.tab.on">
         <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
-        <Setter Property="BoxShadow" Value="inset 0 2 0 0 #FF7A1B" />
+    </Style>
+    <Style Selector="Border.tab-accent">
+        <Setter Property="Height" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="CornerRadius" Value="6,6,0,0" />
+        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
     <Style Selector="Border.tab Button.tabclose">
         <Setter Property="Opacity" Value="0" />

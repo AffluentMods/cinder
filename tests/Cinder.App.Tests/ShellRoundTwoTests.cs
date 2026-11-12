@@ -26,7 +26,7 @@ public class ShellRoundTwoTests
         hex.CaretOffset = 15;
 
         hex.InspectorOffset.Should().Be(8);
-        hex.InspectorBasis.Should().Be("from selection start");
+        hex.InspectorBasis.Should().Be("from selection");
         hex.InspectorRows.Single(r => r.Label == "FILETIME").Value.Should().Be("2024-01-01 00:00:00");
     }
 

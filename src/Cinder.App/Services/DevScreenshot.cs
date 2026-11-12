@@ -22,7 +22,7 @@ namespace Cinder.App.Services;
 ///              [--fresh-recents] [--recent-case "name|examiner|path"]… [--recent-evidence path]…
 ///              [--evidence file] [--row-filter text] [--hex-bookmark 0x200]…
 ///              [--report-demo] [--custody-verify] [--filter text] [--no-rail]
-///              [--palette] [--help-open] [--dialog settings] [--diag]
+///              [--palette] [--help-open] [--dialog settings] [--diag] [--hold seconds]
 /// </code>
 ///
 /// The window is rendered through <see cref="RenderTargetBitmap"/>, i.e. the same visual tree
@@ -57,6 +57,18 @@ public static class DevScreenshot
         }
 
         var delay = int.TryParse(Arg(args, "--delay"), out var d) ? d : 1500;
+        // --hold keeps the real window on screen after the render, so the on-screen result (the
+        // compositor at the monitor's own scale) can be compared with the off-screen render.
+        var hold = int.TryParse(Arg(args, "--hold"), out var hs) ? Math.Clamp(hs, 0, 120) : 0;
+        if (hold == 0)
+        {
+            // A review run renders off-screen; do not flash a window over whatever the
+            // developer is doing.
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Position = new PixelPoint(-30000, -30000);
+            window.ShowInTaskbar = false;
+            window.ShowActivated = false;
+        }
         var scale = double.TryParse(Arg(args, "--scale"), NumberStyles.Float, CultureInfo.InvariantCulture, out var sc) ? Math.Clamp(sc, 1, 4) : 1;
         var examiner = Arg(args, "--examiner") ?? Environment.UserName;
 
@@ -175,6 +187,10 @@ public static class DevScreenshot
                         }
                     }
                     await File.WriteAllTextAsync(shot + ".diag.txt", diag.ToString());
+                }
+                if (hold > 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(hold));
                 }
                 if (!ReferenceEquals(target, window))
                 {
