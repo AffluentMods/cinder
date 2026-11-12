@@ -207,7 +207,10 @@ public class SettingsStoreTests : IDisposable
             Theme = "Dark",
             AiProvider = new Dictionary<string, string>
             {
-                ["id"] = "openai", ["apiKey"] = "sk-secret-value", ["temperature"] = "0.2", ["model"] = "gpt-4o-mini",
+                ["id"] = "openai",
+                ["apiKey"] = "sk-secret-value",
+                ["temperature"] = "0.2",
+                ["model"] = "gpt-4o-mini",
             },
             CloudClientIds = new Dictionary<string, string> { ["box"] = "someone-elses-key" },
         };

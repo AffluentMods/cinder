@@ -259,7 +259,11 @@ public sealed class Aff4Reader : IDisposable
             !_triples.Any(t => t.S == urn && t.P == Aff4Writer.StoredChunkMarker);
         var info = new ImageStreamInfo
         {
-            Urn = urn, ChunkSize = chunkSize, ChunksPerSegment = perSegment, Compression = compression, Size = size,
+            Urn = urn,
+            ChunkSize = chunkSize,
+            ChunksPerSegment = perSegment,
+            Compression = compression,
+            Size = size,
             AlwaysCompressed = legacyCinder,
         };
         _streams[urn] = info;

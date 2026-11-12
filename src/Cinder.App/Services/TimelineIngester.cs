@@ -494,11 +494,17 @@ public static class TimelineIngester
     /// <summary>Zone names RFC 5322 still allows in a Date header (obs-zone) that .NET does not know.</summary>
     private static readonly Dictionary<string, string> ObsoleteZones = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["UT"] = "+0000", ["UTC"] = "+0000", ["Z"] = "+0000",
-        ["EST"] = "-0500", ["EDT"] = "-0400",
-        ["CST"] = "-0600", ["CDT"] = "-0500",
-        ["MST"] = "-0700", ["MDT"] = "-0600",
-        ["PST"] = "-0800", ["PDT"] = "-0700",
+        ["UT"] = "+0000",
+        ["UTC"] = "+0000",
+        ["Z"] = "+0000",
+        ["EST"] = "-0500",
+        ["EDT"] = "-0400",
+        ["CST"] = "-0600",
+        ["CDT"] = "-0500",
+        ["MST"] = "-0700",
+        ["MDT"] = "-0600",
+        ["PST"] = "-0800",
+        ["PDT"] = "-0700",
     };
 
     /// <summary>

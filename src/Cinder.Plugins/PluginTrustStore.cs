@@ -94,8 +94,23 @@ public sealed class PluginTrustStore
         {
             return;
         }
-        state.Trusted.Add(new Entry { Sha256 = hash, FileName = fileName is null ? null : Path.GetFileName(fileName), TrustedUtc = DateTimeOffset.UtcNow });
+        state.Trusted.Add(new Entry { Sha256 = hash, FileName = LeafName(fileName), TrustedUtc = DateTimeOffset.UtcNow });
         Write(state);
+    }
+
+    /// <summary>
+    /// The last path segment under either separator. <see cref="Path.GetFileName(string)"/> only
+    /// splits on the current platform's separators, so a Windows path recorded on Linux (a
+    /// shared trust file, or a plugin folder on a mounted Windows volume) kept its whole path.
+    /// </summary>
+    private static string? LeafName(string? fileName)
+    {
+        if (fileName is null)
+        {
+            return null;
+        }
+        var cut = fileName.LastIndexOfAny(['/', '\\']);
+        return cut >= 0 ? fileName[(cut + 1)..] : fileName;
     }
 
     /// <summary>Withdraws an approval. Returns false if the hash was not trusted.</summary>

@@ -880,7 +880,10 @@ public sealed partial class HashSetsTool
     /// <summary>Hex digits a digest of each algorithm has, to catch a paste of the wrong thing.</summary>
     private static readonly Dictionary<string, int> DigestHexLength = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["md5"] = 32, ["sha1"] = 40, ["sha256"] = 64, ["blake3"] = 64,
+        ["md5"] = 32,
+        ["sha1"] = 40,
+        ["sha256"] = 64,
+        ["blake3"] = 64,
     };
     [ObservableProperty] private string? _verdictLine;
     [ObservableProperty] private string? _statusLine;
@@ -1410,7 +1413,12 @@ public sealed partial class MapTool
         {
             var rows = Points.Select(p => (object)new
             {
-                p.Latitude, p.Longitude, Time = p.TimeDisplay, p.TimeSource, p.Source, p.Label,
+                p.Latitude,
+                p.Longitude,
+                Time = p.TimeDisplay,
+                p.TimeSource,
+                p.Source,
+                p.Label,
             }).ToList();
             if (await ToolExport.SaveRowsAsync(Id, "locations", format, rows, ct) is { } status) StatusLine = status;
             return;
@@ -1867,7 +1875,13 @@ public sealed partial class ImagerTool
                 + ". The log beside it is marked incomplete. Do not treat it as a full image.";
             await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceImaged, new
             {
-                Source, Output, Format = fmt.ToString(), Complete = false, ex.BytesAcquired, Partial = ex.PartialPaths, Error = ex.Message,
+                Source,
+                Output,
+                Format = fmt.ToString(),
+                Complete = false,
+                ex.BytesAcquired,
+                Partial = ex.PartialPaths,
+                Error = ex.Message,
             }, CancellationToken.None);
         }
         catch (UnauthorizedAccessException ex)
@@ -2368,8 +2382,10 @@ public sealed partial class ShadowCopyTool
     {
         var rows = Snapshots.Select(s => (object)new
         {
-            Snapshot = s.Id, Volume = s.Origin,
-            CreatedUtc = s.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture), s.Notes,
+            Snapshot = s.Id,
+            Volume = s.Origin,
+            CreatedUtc = s.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            s.Notes,
         }).ToList();
         if (await ToolExport.SaveRowsAsync(Id, "snapshots", format, rows, ct) is { } status) StatusLine = status;
     }
@@ -2524,7 +2540,14 @@ public sealed partial class CarverTool
     {
         var rows = Hits.Select(h => (object)new
         {
-            Type = h.Label, h.Extension, Offset = $"0x{h.Offset:X}", h.Length, h.Validated, File = h.OutputPath ?? "", Note = h.Note ?? "", Source = Source ?? "",
+            Type = h.Label,
+            h.Extension,
+            Offset = $"0x{h.Offset:X}",
+            h.Length,
+            h.Validated,
+            File = h.OutputPath ?? "",
+            Note = h.Note ?? "",
+            Source = Source ?? "",
         }).ToList();
         if (await ToolExport.SaveRowsAsync(Id, "carved-files", format, rows, ct) is { } status) StatusLine = status;
     }
