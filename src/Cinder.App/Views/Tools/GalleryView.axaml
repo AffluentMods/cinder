@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.GalleryView"
              x:DataType="tools:GalleryTool">
@@ -12,7 +13,7 @@
                 <Button Grid.Column="0" Content="Pick folder…" Classes="accent"
                         Command="{Binding PickFolderCommand}" />
                 <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
-                           Text="{Binding FolderPath, FallbackValue='No folder loaded'}"
+                           Text="{Binding FolderPath, TargetNullValue='No folder loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                 <TextBlock Grid.Column="2" VerticalAlignment="Center"
                            Text="{Binding StatusLine}"
@@ -31,9 +32,8 @@
                         Background="{DynamicResource CinderSurface3Brush}"
                         BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                         HorizontalAlignment="Center">
-                    <TextBlock Text="🖼" FontSize="32"
-                               Foreground="{DynamicResource CinderAccentBrush}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <c:CinderIcon Data="{x:Static c:Icons.Image}" Width="28" Height="28"
+                                  Foreground="{DynamicResource CinderAccentBrush}" />
                 </Border>
                 <TextBlock Text="No folder loaded"
                            FontSize="{DynamicResource CinderFontSizeXl}" FontWeight="600"
@@ -146,7 +146,7 @@
                                         <TextBlock Grid.Column="0" Text="DIMENSIONS" Classes="section" />
                                         <SelectableTextBlock Grid.Column="1" Classes="mono"
                                                              FontSize="{DynamicResource CinderFontSizeSm}"
-                                                             Text="{Binding PreviewDimensions, FallbackValue='—'}"
+                                                             Text="{Binding PreviewDimensions, TargetNullValue='—'}"
                                                              Foreground="{DynamicResource CinderForegroundBrush}" />
                                     </Grid>
                                     <Grid ColumnDefinitions="100,*">

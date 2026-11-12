@@ -51,7 +51,7 @@
                 </ItemsControl>
                 <TextBlock Text="(no recent cases yet)"
                            Foreground="{DynamicResource CinderForegroundDisabledBrush}"
-                           IsVisible="{Binding Recents.Count, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=0}" />
+                           IsVisible="{Binding !Recents.Count}" />
             </StackPanel>
         </ScrollViewer>
     </Grid>

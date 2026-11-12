@@ -1,23 +1,34 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.VerifyView"
              x:DataType="tools:VerifyTool">
-    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
-        <StackPanel Spacing="14" MaxWidth="720">
-            <Button Classes="accent" Content="Pick image + verify…" Command="{Binding PickAndRunCommand}"
-                    HorizontalAlignment="Left" />
-            <TextBlock Text="{Binding ImagePath, FallbackValue='No image selected'}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       FontFamily="{DynamicResource CinderFontFamilyMono}" />
-            <SelectableTextBlock Text="{Binding ResultText}"
-                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                 FontSize="{DynamicResource CinderFontSizeSm}"
-                                 TextWrapping="Wrap"
-                                 IsVisible="{Binding ResultText, Converter={x:Static ObjectConverters.IsNotNull}}" />
-            <TextBlock Text="{Binding StatusLine}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
+            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
+                       Text="Re-reads every byte of an image and compares the result with the digest recorded when it was acquired — inside the container for E01 and AFF4, or a .sha256 / .md5 companion file for raw, VHD and VHDX. There are three outcomes: verified, failed, or unverifiable (nothing to compare against). The result is written to the custody log." />
+            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Command="{Binding PickAndRunCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <c:CinderIcon Data="{x:Static c:Icons.Check}" Width="15" Height="15" />
+                    <TextBlock Text="Pick image and verify…" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14"
+                              Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBlock Text="{Binding ImagePath, TargetNullValue='No image selected'}" Classes="mono muted" FontSize="12.5"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="16,14"
+                    IsVisible="{Binding ResultText, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <SelectableTextBlock Text="{Binding ResultText}" Classes="mono" FontSize="12.5" TextWrapping="Wrap" LineHeight="19" />
+            </Border>
+            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
+                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

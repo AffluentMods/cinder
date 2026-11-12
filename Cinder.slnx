@@ -29,6 +29,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Cinder.Carving.Tests/Cinder.Carving.Tests.csproj" />
     <Project Path="tests/Cinder.Core.Tests/Cinder.Core.Tests.csproj" />
+    <Project Path="tests/Cinder.App.Tests/Cinder.App.Tests.csproj" />
     <Project Path="tests/Cinder.Hex.Tests/Cinder.Hex.Tests.csproj" />
     <Project Path="tests/Cinder.Imaging.Tests/Cinder.Imaging.Tests.csproj" />
     <Project Path="tests/Cinder.Native.Tests/Cinder.Native.Tests.csproj" />

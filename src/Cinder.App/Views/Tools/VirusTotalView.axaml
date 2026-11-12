@@ -27,7 +27,7 @@
             </Grid>
         </Border>
         <ScrollViewer Grid.Row="2" Padding="20" Background="{DynamicResource CinderBackground0Brush}">
-            <SelectableTextBlock Text="{Binding ResultText, FallbackValue='Lookups are hash-only and never upload bytes. Opt-in.'}"
+            <SelectableTextBlock Text="{Binding ResultText, TargetNullValue='Lookups are hash-only and never upload bytes. Opt-in.'}"
                                  FontFamily="{DynamicResource CinderFontFamilyMono}"
                                  FontSize="{DynamicResource CinderFontSizeSm}"
                                  Foreground="{DynamicResource CinderForegroundBrush}"

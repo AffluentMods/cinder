@@ -31,7 +31,7 @@
                     <Button Grid.Column="0" Classes="accent" Content="Pick file + scan…"
                             Command="{Binding PickAndScanCommand}" />
                     <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
-                               Text="{Binding ScanTarget, FallbackValue='No file scanned'}"
+                               Text="{Binding ScanTarget, TargetNullValue='No file scanned'}"
                                Classes="mono"
                                FontSize="{DynamicResource CinderFontSizeXs}"
                                TextTrimming="CharacterEllipsis"

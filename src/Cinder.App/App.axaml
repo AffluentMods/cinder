@@ -4,7 +4,9 @@
              x:Class="Cinder.App.App"
              RequestedThemeVariant="Dark">
     <Application.Styles>
-        <sty:FluentAvaloniaTheme PreferUserAccentColor="False" />
+        <!-- CustomAccentColor: without it FluentAvalonia falls back to its own (violet) accent,
+             and every primary button in the app renders off-brand. -->
+        <sty:FluentAvaloniaTheme PreferUserAccentColor="False" CustomAccentColor="#FF7A1B" />
         <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml" />
         <StyleInclude Source="avares://Cinder/Themes/Cinder.Styles.axaml" />
     </Application.Styles>
@@ -12,6 +14,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceInclude Source="avares://Cinder/Themes/Cinder.Tokens.axaml" />
+                <ResourceInclude Source="avares://Cinder/Themes/Cinder.FluentOverrides.axaml" />
                 <ResourceInclude Source="avares://Cinder/Views/Tools/ToolHost.axaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

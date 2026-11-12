@@ -30,7 +30,7 @@
         </DataGrid>
 
         <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
-            <TextBlock Text="{Binding StatusLine, FallbackValue='Open a case and click Refresh.'}"
+            <TextBlock Text="{Binding StatusLine, TargetNullValue='Open a case and click Refresh.'}"
                        FontSize="{DynamicResource CinderFontSizeXs}"
                        Foreground="{DynamicResource CinderForegroundMutedBrush}" />
         </Border>

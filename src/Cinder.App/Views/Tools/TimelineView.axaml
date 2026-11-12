@@ -1,131 +1,169 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Cinder.App.ViewModels"
-             xmlns:srch="using:Cinder.Search"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.TimelineView"
              x:DataType="vm:TimelineToolViewModel">
-    <Grid RowDefinitions="Auto,*">
+    <!--
+        Super-timeline. Toolbar: get events in (ingest) · act on them (bookmark, export).
+        Filter bar wraps instead of colliding with the toolbar at narrow widths. Histogram shows
+        where the activity is; the grid is every matching event.
+    -->
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*">
 
-        <!-- Filter bar -->
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
+        <!-- ===== Toolbar ===== -->
+        <Border Grid.Row="0" Height="44" Padding="14,0,12,0"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <DockPanel>
-                <Button DockPanel.Dock="Right"
-                        Classes="accent"
-                        Content="Refresh"
-                        Command="{Binding RefreshCommand}"
-                        Margin="6,0,0,0" />
-                <Button DockPanel.Dock="Right"
-                        Content="Seed demo events"
-                        Command="{Binding AddDemoEventsCommand}"
-                        Margin="6,0,0,0" />
-                <Button DockPanel.Dock="Right"
-                        Classes="accent"
-                        Content="Ingest folder…"
-                        Command="{Binding IngestFolderCommand}"
-                        ToolTip.Tip="Walk a triage folder; cross-merge EVTX + Registry + Prefetch + LNK + browser + email + recycle-bin events"
-                        Margin="6,0,0,0" />
-                <!-- Export: everything matching the current filter, in the formats the rest of
-                     the DFIR ecosystem reads. Timesketch takes JSONL/CSV directly; the bodyfile
-                     feeds mactime, Autopsy and Plaso. -->
-                <Button DockPanel.Dock="Right" Content="Export bodyfile"
-                        Command="{Binding ExportCommand}" CommandParameter="body"
-                        ToolTip.Tip="Sleuth Kit body format — mactime / Autopsy / Plaso"
-                        Margin="6,0,0,0" />
-                <Button DockPanel.Dock="Right" Content="Export CSV"
-                        Command="{Binding ExportCommand}" CommandParameter="csv"
-                        ToolTip.Tip="Timesketch CSV (message, datetime, timestamp_desc, …)"
-                        Margin="6,0,0,0" />
-                <Button DockPanel.Dock="Right" Content="Export JSONL"
-                        Command="{Binding ExportCommand}" CommandParameter="jsonl"
-                        ToolTip.Tip="Timesketch JSONL — streams on import, best for large timelines"
-                        Margin="6,0,0,0" />
-                <Button DockPanel.Dock="Right" Content="Bookmark event"
-                        Command="{Binding BookmarkSelectedCommand}"
-                        ToolTip.Tip="Flag the selected event as a finding in the open case; Reports turns bookmarks into exhibits"
-                        Margin="6,0,0,0" />
-                <TextBox DockPanel.Dock="Right" Width="180" Watermark="Bookmark note"
-                         Text="{Binding BookmarkNote}" Margin="6,0,0,0" />
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="From" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <DatePicker SelectedDate="{Binding From, Mode=TwoWay}" />
-                    </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="To" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <DatePicker SelectedDate="{Binding To, Mode=TwoWay}" />
-                    </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="User" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <TextBox Text="{Binding UserFilter}" Watermark="(any)" Width="120" />
-                    </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="Source" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <TextBox Text="{Binding SourceFilter}" Watermark="evtx, browser.history…" Width="180" />
-                    </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="Contains" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <TextBox Text="{Binding TextFilter}" Watermark="text in summary" Width="200" />
-                    </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="ATT&amp;CK" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <AutoCompleteBox Text="{Binding MitreFilter}"
-                                         ItemsSource="{Binding KnownMitreIds}"
-                                         FilterMode="Contains"
-                                         Watermark="T1078, T1053, TA0002…"
-                                         Width="230"
-                                         ToolTip.Tip="Technique or tactic id prefix. Events are auto-tagged on ingest from Windows event ids, Sysmon, PowerShell logging, Prefetch, UserAssist and Recycle Bin." />
-                    </StackPanel>
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="accent" Height="26" Padding="10,0" Command="{Binding IngestFolderCommand}"
+                            ToolTip.Tip="Walk a triage folder and merge EVTX, registry, Prefetch, LNK, browser, email, Recycle Bin, $J and $LogFile events">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="14" Height="14" />
+                            <TextBlock Text="Ingest folder…" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tb icon" Command="{Binding RefreshCommand}" ToolTip.Tip="Re-apply filters">
+                        <c:CinderIcon Data="{x:Static c:Icons.Swap}" Width="14" Height="14" />
+                    </Button>
                 </StackPanel>
-            </DockPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="tb" ToolTip.Tip="Flag the selected event as a finding in the open case">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Bookmark}" Width="14" Height="14" />
+                            <TextBlock Text="Bookmark" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <StackPanel Width="300" Spacing="10">
+                                    <TextBlock Text="BOOKMARK SELECTED EVENT" Classes="section" />
+                                    <TextBox Watermark="Note (optional)" Text="{Binding BookmarkNote}"
+                                             AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
+                                    <Button Classes="accent" HorizontalAlignment="Right" Content="Add bookmark"
+                                            Command="{Binding BookmarkSelectedCommand}" />
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    <Button Classes="tb" ToolTip.Tip="Everything matching the current filter, in formats the DFIR ecosystem reads">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Download}" Width="14" Height="14" />
+                            <TextBlock Text="Export" VerticalAlignment="Center" />
+                            <c:CinderIcon Data="{x:Static c:Icons.ChevronDown}" Width="12" Height="12" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuItem Header="Timesketch JSONL — best for large timelines" Command="{Binding ExportCommand}" CommandParameter="jsonl" />
+                                <MenuItem Header="Timesketch CSV" Command="{Binding ExportCommand}" CommandParameter="csv" />
+                                <MenuItem Header="Sleuth Kit bodyfile — mactime / Autopsy / Plaso" Command="{Binding ExportCommand}" CommandParameter="body" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+                    <Button Classes="ghost icon" ToolTip.Tip="More">
+                        <TextBlock Text="⋯" FontSize="16" Margin="0,-4,0,0" />
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuItem Header="Add demo events (for trying the tool)" Command="{Binding AddDemoEventsCommand}" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
+            </Grid>
         </Border>
 
-        <Grid Grid.Row="1" RowDefinitions="80,Auto,*">
-            <!-- Histogram -->
-            <Border Grid.Row="0" Background="{DynamicResource CinderBackground0Brush}" Padding="14,10">
-                <ItemsControl ItemsSource="{Binding Histogram}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Rectangle Margin="1,0"
-                                       Fill="{DynamicResource CinderAccentBrush}"
-                                       VerticalAlignment="Bottom"
-                                       Width="NaN"
-                                       Height="{Binding}" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </Border>
+        <!-- ===== Filters ===== -->
+        <Border Grid.Row="1" Padding="14,8,14,10" Background="{DynamicResource CinderSurface1Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <WrapPanel Orientation="Horizontal">
+                <WrapPanel.Styles>
+                    <Style Selector="WrapPanel > StackPanel">
+                        <Setter Property="Margin" Value="0,2,14,2" />
+                        <Setter Property="Spacing" Value="4" />
+                    </Style>
+                </WrapPanel.Styles>
+                <StackPanel>
+                    <TextBlock Text="FROM" Classes="section" />
+                    <DatePicker SelectedDate="{Binding From, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="TO" Classes="section" />
+                    <DatePicker SelectedDate="{Binding To, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="USER" Classes="section" />
+                    <TextBox Text="{Binding UserFilter}" Watermark="any" Width="130" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="SOURCE" Classes="section" />
+                    <TextBox Text="{Binding SourceFilter}" Watermark="evtx, browser.history…" Width="170" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="CONTAINS" Classes="section" />
+                    <TextBox Text="{Binding TextFilter}" Watermark="text in summary" Width="190" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="ATT&amp;CK" Classes="section" />
+                    <AutoCompleteBox Text="{Binding MitreFilter}"
+                                     ItemsSource="{Binding KnownMitreIds}"
+                                     FilterMode="Contains"
+                                     Watermark="T1078, TA0002…"
+                                     Width="170"
+                                     ToolTip.Tip="Technique or tactic id prefix. Events are auto-tagged on ingest from Windows event ids, Sysmon, PowerShell logging, Prefetch, UserAssist and Recycle Bin." />
+                </StackPanel>
+            </WrapPanel>
+        </Border>
 
-            <Border Grid.Row="1" Background="{DynamicResource CinderBackground1Brush}" Padding="14,4">
-                <TextBlock Text="{Binding StatusLine}"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            </Border>
+        <!-- ===== Histogram ===== -->
+        <Border Grid.Row="2" Height="64" Padding="14,10,14,6" IsVisible="{Binding Events.Count}">
+            <ItemsControl ItemsSource="{Binding Histogram}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Rectangle Margin="1,0" RadiusX="1" RadiusY="1"
+                                   Fill="{DynamicResource CinderAccentDimBrush}"
+                                   VerticalAlignment="Bottom" Height="{Binding}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
 
-            <!-- Event list -->
-            <DataGrid Grid.Row="2" ItemsSource="{Binding Events}" SelectedItem="{Binding SelectedEvent}"
-                      Background="{DynamicResource CinderBackground0Brush}"
-                      Foreground="{DynamicResource CinderForegroundBrush}"
-                      GridLinesVisibility="Horizontal"
-                      AutoGenerateColumns="False"
-                      IsReadOnly="True">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Timestamp (UTC)" Binding="{Binding Timestamp, StringFormat=u}" Width="200" />
-                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="160" />
-                    <DataGridTextColumn Header="User" Binding="{Binding User}" Width="120" />
-                    <DataGridTextColumn Header="ATT&amp;CK" Binding="{Binding TagsDisplay}" Width="110" />
-                    <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="*" />
-                </DataGrid.Columns>
-            </DataGrid>
-        </Grid>
+        <Border Grid.Row="3" Height="26" Padding="14,0" IsVisible="{Binding Events.Count}"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+            <TextBlock Text="{Binding StatusLine}" Classes="dim" FontSize="11.5" VerticalAlignment="Center" />
+        </Border>
+
+        <!-- ===== Events ===== -->
+        <DataGrid Grid.Row="4" ItemsSource="{Binding Events}" SelectedItem="{Binding SelectedEvent}"
+                  AutoGenerateColumns="False" IsReadOnly="True" IsVisible="{Binding Events.Count}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Timestamp (UTC)" Binding="{Binding Timestamp, StringFormat='yyyy-MM-dd HH:mm:ss'}" Width="170"
+                                    FontFamily="{DynamicResource CinderFontFamilyMono}" FontSize="12.5" />
+                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="150"
+                                    FontFamily="{DynamicResource CinderFontFamilyMono}" FontSize="12.5" />
+                <DataGridTextColumn Header="User" Binding="{Binding User}" Width="120" FontSize="12.5" />
+                <DataGridTextColumn Header="ATT&amp;CK" Binding="{Binding TagsDisplay}" Width="110"
+                                    FontFamily="{DynamicResource CinderFontFamilyMono}" FontSize="12.5" />
+                <DataGridTextColumn Header="Summary" Binding="{Binding Summary}" Width="*" FontSize="12.5" />
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- ===== Empty ===== -->
+        <StackPanel Grid.Row="2" Grid.RowSpan="3" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    MaxWidth="460" Spacing="14" IsVisible="{Binding !Events.Count}">
+            <Border Width="52" Height="52" CornerRadius="12" HorizontalAlignment="Center"
+                    Background="{DynamicResource CinderSurface2Brush}"
+                    BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
+                <c:CinderIcon Data="{x:Static c:Icons.Clock}" Width="24" Height="24"
+                              Foreground="{DynamicResource CinderAccentBrush}" />
+            </Border>
+            <TextBlock Text="No events yet" FontSize="18" FontWeight="600" HorizontalAlignment="Center" />
+            <TextBlock Classes="muted" FontSize="13" TextAlignment="Center" TextWrapping="Wrap"
+                       Text="Ingest a triage folder (a KAPE target collection, a mounted image, an exported user profile). Every timestamped artefact is parsed, tagged with ATT&amp;CK where it applies, and merged into one chronological view." />
+            <Button Classes="accent" HorizontalAlignment="Center" Height="30" Padding="14,0"
+                    Content="Ingest folder…" Command="{Binding IngestFolderCommand}" />
+        </StackPanel>
     </Grid>
 </UserControl>

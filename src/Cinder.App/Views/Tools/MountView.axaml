@@ -1,22 +1,37 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.MountView"
              x:DataType="tools:MountTool">
-    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
-        <StackPanel Spacing="14" MaxWidth="720">
-            <Button Classes="accent" Content="Pick image + mount read-only…" Command="{Binding PickAndMountCommand}"
-                    HorizontalAlignment="Left" />
-            <TextBlock Text="{Binding ImagePath, FallbackValue='No image selected'}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       FontFamily="{DynamicResource CinderFontFamilyMono}" />
-            <SelectableTextBlock Text="{Binding MountedAt}"
-                                 FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                 IsVisible="{Binding MountedAt, Converter={x:Static ObjectConverters.IsNotNull}}" />
-            <TextBlock Text="{Binding StatusLine}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
+            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
+                       Text="Attaches an image read-only so other programs can browse it: VHD, VHDX and ISO through Windows' built-in Mount-DiskImage; raw images through a loop device on Linux. E01 needs Arsenal Image Mounter installed. Nothing is written to the image." />
+            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Command="{Binding PickAndMountCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <c:CinderIcon Data="{x:Static c:Icons.Mount}" Width="15" Height="15" />
+                    <TextBlock Text="Pick image and mount read-only…" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14"
+                              Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBlock Text="{Binding ImagePath, TargetNullValue='No image selected'}" Classes="mono muted" FontSize="12.5"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
+                    IsVisible="{Binding MountedAt, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="MOUNTED AT" Classes="section" />
+                    <SelectableTextBlock Text="{Binding MountedAt}" Classes="mono" FontSize="13" />
+                </StackPanel>
+            </Border>
+            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
+                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

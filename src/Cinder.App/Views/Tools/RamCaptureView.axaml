@@ -1,19 +1,35 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.RamCaptureView"
              x:DataType="tools:RamCaptureTool">
-    <ScrollViewer Padding="20" Background="{DynamicResource CinderBackground0Brush}">
-        <StackPanel Spacing="14" MaxWidth="720">
-            <Button Classes="accent" Content="Pick output + capture…" Command="{Binding PickAndCaptureCommand}"
-                    HorizontalAlignment="Left" />
-            <TextBlock Text="{Binding Output, FallbackValue='No output path selected'}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       FontFamily="{DynamicResource CinderFontFamilyMono}" />
-            <TextBlock Text="{Binding StatusLine}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
+            <Border Background="{DynamicResource CinderWarnSoftBrush}" BorderBrush="{DynamicResource CinderWarnBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="14,12">
+                <Grid ColumnDefinitions="Auto,*">
+                    <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
+                                  Foreground="{DynamicResource CinderWarnBrush}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="12.5" LineHeight="18"
+                               Text="Not functional yet. Live memory capture needs a signed kernel driver on Windows (winpmem) or LiME on Linux, and neither is bundled. Capture with one of those tools today, then open the dump in the Memory tool." />
+                </Grid>
+            </Border>
+            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
+                       Text="When it ships: pick where the dump goes, Cinder captures physical memory, hashes it as it writes, and records the capture in the custody log." />
+            <Button Classes="tb" HorizontalAlignment="Left" Height="30" Content="Pick output and capture…"
+                    Command="{Binding PickAndCaptureCommand}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14"
+                              Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <TextBlock Text="{Binding Output, TargetNullValue='No output path selected'}" Classes="mono muted" FontSize="12.5"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
+                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

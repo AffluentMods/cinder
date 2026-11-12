@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:vm="using:Cinder.App.ViewModels"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.HelpFlyoutView"
@@ -35,11 +36,8 @@
                                 Background="{DynamicResource CinderSurface3Brush}"
                                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                                 VerticalAlignment="Center">
-                            <TextBlock Text="{Binding Workspace.SelectedTool.Icon}"
-                                       FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                       FontSize="{DynamicResource CinderFontSizeMd}"
-                                       Foreground="{DynamicResource CinderAccentBrush}"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <c:CinderIcon Data="{Binding Workspace.SelectedTool.IconGeometry}" Width="18" Height="18"
+                                          Foreground="{DynamicResource CinderAccentBrush}" />
                         </Border>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1" Margin="14,0,0,0">
                             <StackPanel Orientation="Horizontal" Spacing="8">

@@ -9,7 +9,7 @@
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <Button Classes="accent" Content="Open workflow .json…" Command="{Binding LoadCommand}" />
-                <TextBlock VerticalAlignment="Center" Text="{Binding Path, FallbackValue='No workflow loaded'}"
+                <TextBlock VerticalAlignment="Center" Text="{Binding Path, TargetNullValue='No workflow loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                 <TextBlock VerticalAlignment="Center" Margin="14,0"
                            Text="{Binding StatusLine}"

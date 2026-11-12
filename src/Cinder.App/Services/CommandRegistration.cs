@@ -19,7 +19,7 @@ public static class CommandRegistration
 
         registry.Register(new CommandDescriptor(
             Id: "file.open",
-            Title: "Open file… (Ctrl+O)",
+            Title: "Open file…",
             Subtitle: "Load a file into the hex viewer.",
             Category: "File",
             Invoke: async ct =>
@@ -53,7 +53,7 @@ public static class CommandRegistration
 
         registry.Register(new CommandDescriptor(
             Id: "hex.find",
-            Title: "Find in buffer… (Ctrl+F)",
+            Title: "Find in buffer (dialog)…",
             Subtitle: "Search the open file: hex / ASCII / UTF-16 / regex.",
             Category: "Hex",
             Invoke: _ =>
@@ -73,7 +73,7 @@ public static class CommandRegistration
 
         registry.Register(new CommandDescriptor(
             Id: "hex.goto",
-            Title: "Goto offset… (Ctrl+G)",
+            Title: "Go to offset…",
             Subtitle: "Jump the caret to a specific offset (decimal or 0x… hex).",
             Category: "Hex",
             Invoke: _ =>
@@ -93,7 +93,7 @@ public static class CommandRegistration
 
         registry.Register(new CommandDescriptor(
             Id: "app.settings",
-            Title: "Settings… (Ctrl+,)",
+            Title: "Settings…",
             Subtitle: "Theme, density, AI provider, cloud client_ids, parsers directory.",
             Category: "App",
             Invoke: _ =>
@@ -182,7 +182,7 @@ public static class CommandRegistration
 
         registry.Register(new CommandDescriptor(
             Id: "view.theme.toggle",
-            Title: "Toggle Theme (Dark / Light)",
+            Title: "Toggle theme (dark / light)",
             Subtitle: "Switch between Cinder's dark and light variants.",
             Category: "View",
             Invoke: _ =>
@@ -204,9 +204,14 @@ public static class CommandRegistration
         registry.Register(new CommandDescriptor(
             Id: "app.about",
             Title: "About Cinder",
-            Subtitle: "Version, license, and acknowledgments.",
+            Subtitle: "Version and license.",
             Category: "Help",
-            Invoke: _ => Task.CompletedTask));
+            Invoke: _ =>
+            {
+                Dispatcher.UIThread.Post(() =>
+                    mainVm.Announce($"Cinder {UpdateChecker.CurrentVersion()} · Apache-2.0 · github.com/AffluentMods/cinder"));
+                return Task.CompletedTask;
+            }));
 
         registry.Register(new CommandDescriptor(
             Id: "app.exit",
@@ -224,6 +229,75 @@ public static class CommandRegistration
                 });
                 return Task.CompletedTask;
             }));
+    }
+
+    /// <summary>Shortcut shown in the palette for each built-in that has one.</summary>
+    private static readonly Dictionary<string, string> Shortcuts = new(StringComparer.Ordinal)
+    {
+        ["file.open"] = "Ctrl O",
+        ["hex.goto"] = "Ctrl G",
+        ["app.settings"] = "Ctrl ,",
+        ["case.open"] = "Ctrl Shift O",
+        ["case.create"] = "Ctrl N",
+    };
+
+    /// <summary>
+    /// Everything reachable from the rail and the shell is reachable from Ctrl+K too: one
+    /// "go to" command per tool, the pane toggles, and the hex viewer's keyboard actions.
+    /// </summary>
+    public static void RegisterNavigation(CommandRegistry registry, MainWindowViewModel mainVm)
+    {
+        foreach (var (id, keys) in Shortcuts)
+        {
+            if (registry.Commands.FirstOrDefault(c => c.Id == id) is { } c)
+            {
+                registry.Replace(c with { Shortcut = keys });
+            }
+        }
+
+        foreach (var section in mainVm.Workspace.Sections)
+        {
+            foreach (var tool in section.Tools)
+            {
+                var t = tool;
+                registry.Register(new CommandDescriptor(
+                    Id: "tool." + t.Id,
+                    Title: t.Title,
+                    Subtitle: t.Subtitle,
+                    Category: section.Title == "Home" ? "Go to" : section.Title,
+                    Invoke: _ =>
+                    {
+                        Dispatcher.UIThread.Post(() => mainVm.Workspace.SelectedTool = t);
+                        return Task.CompletedTask;
+                    }));
+            }
+        }
+
+        void Action(string id, string title, string category, string? keys, Action run, string? subtitle = null) =>
+            registry.Register(new CommandDescriptor(id, title, subtitle, category, _ =>
+            {
+                Dispatcher.UIThread.Post(run);
+                return Task.CompletedTask;
+            }, keys));
+
+        Action("view.rail", "Toggle sidebar", "View", "Ctrl B", () => mainVm.ToggleRailCommand.Execute(null));
+        Action("view.inspector", "Toggle inspector", "View", "Ctrl Alt B", () => mainVm.ToggleInspectorCommand.Execute(null),
+            "The byte inspector beside the hex viewer.");
+        Action("hex.findinline", "Find in hex viewer", "Hex", "Ctrl F", () => mainVm.FocusFindCommand.Execute(null));
+        Action("hex.findnext", "Find next", "Hex", "F3", () => mainVm.Hex.FindNextCommand.Execute(null));
+        Action("hex.findprev", "Find previous", "Hex", "Shift F3", () => mainVm.Hex.FindPreviousCommand.Execute(null));
+        Action("hex.bookmark", "Bookmark caret", "Hex", "Ctrl D", () => mainVm.Hex.AddBookmarkCommand.Execute(null));
+        Action("hex.copyhex", "Copy selection as hex", "Hex", "Ctrl C", () => mainVm.Hex.CopySelectionAsHexCommand.Execute(null));
+        Action("hex.back", "Back to previous offset", "Hex", "Alt Left", () => mainVm.Hex.NavigateBackCommand.Execute(null));
+        Action("hex.forward", "Forward to next offset", "Hex", "Alt Right", () => mainVm.Hex.NavigateForwardCommand.Execute(null));
+        Action("hex.strings", "Open current file in Strings", "Hex", null, () => mainVm.OpenInStringsCommand.Execute(null));
+        Action("hex.hash", "Hash current file (SHA-256)", "Hex", null, () => mainVm.Hex.StartHashCommand.Execute(null),
+            "Reads every byte; files up to 2 GiB are hashed automatically on open.");
+        Action("hex.utf16", "Show text pane as UTF-16LE", "Hex", null, () => mainVm.Hex.TextIsUtf16 = true);
+        Action("hex.ascii", "Show text pane as ASCII", "Hex", null, () => mainVm.Hex.TextIsUtf16 = false);
+        Action("hex.close", "Close file tab", "Hex", "Ctrl W", () => mainVm.CloseBufferCommand.Execute(mainVm.Hex));
+        Action("case.close", "Close case", "Case", null, () => mainVm.CloseCaseCommand.Execute(mainVm.ActiveCase));
+        Action("help.tool", "Help for this tool", "Help", "F1", () => mainVm.OpenHelpCommand.Execute(null));
     }
 
     private static Window? ResolveMainWindow()

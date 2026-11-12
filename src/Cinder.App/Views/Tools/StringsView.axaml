@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.StringsView"
              x:DataType="tools:StringsTool">
@@ -10,7 +11,7 @@
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <Button Grid.Column="0" Content="Pick file…" Classes="accent" Command="{Binding PickCommand}" />
                 <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
-                           Text="{Binding Path, FallbackValue='No file loaded'}"
+                           Text="{Binding Path, TargetNullValue='No file loaded'}"
                            Foreground="{DynamicResource CinderForegroundMutedBrush}"
                            Classes="mono"
                            FontSize="{DynamicResource CinderFontSizeXs}"
@@ -76,9 +77,8 @@
                         Background="{DynamicResource CinderSurface3Brush}"
                         BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
                         HorizontalAlignment="Center">
-                    <TextBlock Text="Aa" FontSize="24" FontWeight="600"
-                               Foreground="{DynamicResource CinderAccentBrush}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <c:CinderIcon Data="{x:Static c:Icons.Text}" Width="28" Height="28"
+                                  Foreground="{DynamicResource CinderAccentBrush}" />
                 </Border>
                 <TextBlock Text="No file loaded"
                            FontSize="{DynamicResource CinderFontSizeXl}" FontWeight="600"
