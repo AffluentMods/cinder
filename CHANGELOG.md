@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The whole codebase was read for defects (imaging, core and file systems, the hex
 control, the tool view-models, the shell and services, the smaller libraries and
 the Python sidecar) and the confirmed ones were fixed, each with a regression
-test where the logic can be tested. The .NET suite went from 269 to 1,474
+test where the logic can be tested. The .NET suite went from 269 to 1,488
 tests across eight projects; the Python sidecar from 2 to 164.
 
 **Evidence integrity**
