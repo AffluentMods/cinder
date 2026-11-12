@@ -6,7 +6,13 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Cinder.App.ViewModels;
 
-/// <summary>UI for the report builder. Wraps <see cref="Cinder.Reports.ReportBuilder"/>.</summary>
+/// <summary>
+/// UI for the report builder. Wraps <see cref="Cinder.Reports.ReportBuilder"/>.
+///
+/// <para>The bookmark list that becomes the Exhibits section belongs to one case. It reloads
+/// when the active case changes, when the Reports tool is opened and immediately before every
+/// export, and a list loaded from one case is never written into a report for another.</para>
+/// </summary>
 public sealed partial class ReportsToolViewModel : ViewModelBase
 {
     private readonly Func<string> _activeCaseAccessor;
@@ -39,6 +45,14 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
     /// <summary>Bookmarks loaded from the active case, in creation order.</summary>
     public ObservableCollection<Cinder.Core.Cases.Bookmark> Bookmarks { get; } = new();
 
+    /// <summary>The case <see cref="Bookmarks"/> was loaded from. Null when nothing is loaded.</summary>
+    private Guid? _bookmarksCaseId;
+    private int _bookmarkLoadSerial;
+
+    /// <summary>True when the loaded bookmarks belong to the case that is open now.</summary>
+    private bool BookmarksAreForOpenCase =>
+        _bookmarksCaseId is { } id && Services.ActiveCaseContext.Current?.Id == id;
+
     /// <summary>When set, <see cref="Build"/> appends an "Exhibits" section with one exhibit per bookmark.</summary>
     [ObservableProperty]
     private bool _includeBookmarks = true;
@@ -50,30 +64,52 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
 
     /// <summary>Reads the active case's bookmarks so they can become exhibits.</summary>
     [RelayCommand]
-    private async Task LoadBookmarksAsync(CancellationToken ct)
+    private Task LoadBookmarksAsync(CancellationToken ct) => SyncBookmarksAsync(ct);
+
+    /// <summary>
+    /// Replaces <see cref="Bookmarks"/> with the open case's bookmarks (or nothing, when no case
+    /// is open) and refreshes the preview. A slower earlier load cannot overwrite a later one.
+    /// </summary>
+    internal async Task SyncBookmarksAsync(CancellationToken ct)
     {
+        var serial = ++_bookmarkLoadSerial;
         var session = Services.ActiveCaseContext.Current;
         Bookmarks.Clear();
+        _bookmarksCaseId = null;
         if (session?.Path is null)
         {
-            BookmarkSummary = "Open a case to load its bookmarks.";
+            BookmarkSummary = "Open a case to add its bookmarks as exhibits.";
             Refresh();
             return;
         }
         try
         {
             var store = new Cinder.Core.Cases.BookmarkStore(new Cinder.Core.Cases.CaseStore(session.Path));
-            foreach (var b in await store.ListAsync(session.Id, ct))
+            var list = await store.ListAsync(session.Id, ct);
+            if (serial != _bookmarkLoadSerial)
+            {
+                return;
+            }
+            foreach (var b in list)
             {
                 Bookmarks.Add(b);
             }
+            _bookmarksCaseId = session.Id;
             BookmarkSummary = Bookmarks.Count == 0
-                ? "No bookmarks in this case yet — use \"Bookmark selected\" in any tool."
+                ? $"No bookmarks in {session.Name} yet. Select a row in any tool and choose Bookmark."
                 : $"{Bookmarks.Count} bookmark{(Bookmarks.Count == 1 ? "" : "s")} from {session.Name}";
+        }
+        catch (OperationCanceledException)
+        {
+            return;
         }
         catch (Exception ex)
         {
-            BookmarkSummary = $"Could not load bookmarks: {ex.Message}";
+            if (serial != _bookmarkLoadSerial)
+            {
+                return;
+            }
+            BookmarkSummary = $"Could not load the bookmarks of {session.Name}: {ex.Message}";
         }
         Refresh();
     }
@@ -98,18 +134,20 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
                 {
                     if (!string.IsNullOrEmpty(kv.Value))
                     {
-                        description.AppendLine($"- **{kv.Key}:** {kv.Value}");
+                        // Values come from evidence: escaped so a crafted file name or page
+                        // title cannot add headings, tables or links to the report.
+                        description.AppendLine($"- **{ReportMarkdown.EscapeInline(kv.Key)}:** {ReportMarkdown.EscapeInline(kv.Value)}");
                     }
                 }
             }
         }
         catch (System.Text.Json.JsonException)
         {
-            description.AppendLine(b.RowJson);
+            description.AppendLine(ReportMarkdown.EscapeInline(b.RowJson));
         }
         description.AppendLine();
-        description.AppendLine($"_Bookmarked by {b.Examiner} in {b.Tool} at {b.CreatedUtc:u}" +
-                               (string.IsNullOrEmpty(b.EvidencePath) ? "_" : $" from `{b.EvidencePath}`_"));
+        description.AppendLine($"_Bookmarked by {ReportMarkdown.EscapeInline(b.Examiner ?? "")} in {ReportMarkdown.EscapeInline(b.Tool ?? "")} at {b.CreatedUtc.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC" +
+                               (string.IsNullOrEmpty(b.EvidencePath) ? "_" : $" from {ReportMarkdown.CodeSpan(b.EvidencePath)}_"));
 
         return new Exhibit(
             Id: $"EX-{ordinal:D4}",
@@ -130,7 +168,24 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
         _selectedTemplate = ReportTemplates.All[0];
         ApplyTemplate(_selectedTemplate);
         Refresh();
+
+        // Exhibits follow the open case: reload when it changes, and when the Reports tool is
+        // opened (bookmarks may have been added in other tools since).
+        Services.ActiveCaseContext.Changed += OnActiveCaseChanged;
+        Tools.ToolViewModel.ToolSelected += tool =>
+        {
+            if (tool.Kind == "reports")
+            {
+                _ = SyncBookmarksAsync(CancellationToken.None);
+            }
+        };
+        if (Services.ActiveCaseContext.Current is not null)
+        {
+            _ = SyncBookmarksAsync(CancellationToken.None);
+        }
     }
+
+    private void OnActiveCaseChanged(CaseSession? session) => _ = SyncBookmarksAsync(CancellationToken.None);
 
     partial void OnSelectedTemplateChanged(ReportTemplate value)
     {
@@ -138,12 +193,27 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
         Refresh();
     }
 
+    /// <summary>
+    /// Switches to a template's sections without throwing away what the examiner wrote. A
+    /// section whose title exists in the new template keeps its text there; any other section
+    /// that has text is carried over after the template's own.
+    /// </summary>
     private void ApplyTemplate(ReportTemplate template)
     {
+        var written = Sections.Where(s => !string.IsNullOrWhiteSpace(s.Body)).ToList();
         Sections.Clear();
         foreach (var name in template.DefaultSections)
         {
-            Sections.Add(new DraftSection { Title = name, Body = "" });
+            var kept = written.FirstOrDefault(s => string.Equals(s.Title, name, StringComparison.OrdinalIgnoreCase));
+            if (kept is not null)
+            {
+                written.Remove(kept);
+            }
+            Sections.Add(new DraftSection { Title = name, Body = kept?.Body ?? "" });
+        }
+        foreach (var extra in written)
+        {
+            Sections.Add(extra);
         }
         if (Sections.Count == 0)
         {
@@ -184,7 +254,9 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
         {
             rb.AddSection(s.Title, s.Body);
         }
-        if (IncludeBookmarks && Bookmarks.Count > 0)
+        // Only bookmarks loaded from the case this report is for. A list left over from
+        // another case is ignored here and replaced as soon as the reload finishes.
+        if (IncludeBookmarks && Bookmarks.Count > 0 && BookmarksAreForOpenCase)
         {
             // Exhibits are constructed directly and handed to AddSection, which registers them
             // in the index once; RegisterExhibit + AddSection would list each twice.
@@ -199,6 +271,8 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
     [RelayCommand]
     private async Task ExportAsync(string format)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = Cinder.App.Services.ActiveCaseContext.Current;
         if (string.IsNullOrEmpty(format))
         {
             return;
@@ -229,13 +303,18 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
         }
         try
         {
+            // Read the bookmarks again from the open case, so the export reflects the case file
+            // as it is now and can never carry another case's findings.
+            await SyncBookmarksAsync(CancellationToken.None);
             var rb = Build();
             var exporter = new ReportExporter();
             var actual = await exporter.ExportAsync(rb, fmt, path);
             LastExportPath = actual;
-            StatusLine = $"Exported to {actual}";
+            StatusLine = fmt == ReportFormat.PdfA
+                ? $"Exported to {actual} as PDF/A-2b."
+                : $"Exported to {actual}.";
 
-            await Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.ReportExported, new
+            await Services.ActiveCaseContext.LogAsync(custodyCase, Cinder.Core.Custody.CustodyAction.ReportExported, new
             {
                 Title,
                 Template = SelectedTemplate.Id,
@@ -247,8 +326,49 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusLine = $"Export failed: {ex.Message}";
+            StatusLine = DescribeExportFailure(fmt, path, ex);
         }
+    }
+
+    /// <summary>
+    /// The status line when an export fails: which file was not written, in which format, and
+    /// why, in words. For PDF it also says that nothing lesser was written in its place: a PDF
+    /// export is PDF/A-2b or it is an error, never a quiet fallback to an ordinary PDF.
+    /// </summary>
+    internal static string DescribeExportFailure(ReportFormat format, string path, Exception ex)
+    {
+        var what = format switch
+        {
+            ReportFormat.PdfA => "the PDF (PDF/A-2b)",
+            ReportFormat.Pdf => "the PDF",
+            ReportFormat.Docx => "the Word document",
+            ReportFormat.Html => "the HTML page",
+            ReportFormat.JsonPlaybook => "the JSON file",
+            _ => "the Markdown file",
+        };
+        var reason = ex switch
+        {
+            UnauthorizedAccessException => "Cinder is not allowed to write to that location. Choose a folder you can save to.",
+            DirectoryNotFoundException => "the folder no longer exists. Choose another location.",
+            IOException io when io.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+                => "the file is open in another program. Close it there and export again.",
+            IOException io => io.Message,
+            // The exporter wraps the PDF engine's error; the innermost message is the cause.
+            _ => Innermost(ex).Message,
+        };
+        var tail = format == ReportFormat.PdfA
+            ? " Cinder does not fall back to an ordinary PDF, so there is no PDF to use. Export as Word or HTML if you need the report now."
+            : "";
+        return $"Could not write {what} to {path}: {reason.TrimEnd('.')}.{tail}";
+    }
+
+    private static Exception Innermost(Exception ex)
+    {
+        while (ex.InnerException is not null)
+        {
+            ex = ex.InnerException;
+        }
+        return ex;
     }
 }
 

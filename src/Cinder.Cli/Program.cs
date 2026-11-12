@@ -69,7 +69,7 @@ public static class Program
 
         Common verbs:
           case create <path> --name <n> --examiner <e>
-          custody verify <case-path>
+          custody verify <case-path>     exit 0 = every chain intact, 1 = broken, 2 = unreadable
           hash <file> [--md5] [--sha1] [--sha256] [--blake3]
           sig identify <file>
           report build <case-path> --template expert-witness --out <md>
@@ -112,14 +112,12 @@ public static class Program
 
     private static async Task<int> RunCustodyAsync(string[] args)
     {
-        if (args[0] != "verify") { return RunUnknown("custody " + args[0]); }
-        var store = new CaseStore(args[1]);
-        var log = new CustodyLog(store);
-        // Need a case ID — pick any.
-        Console.Error.WriteLine("(Phase 8.1: chain-walking for all cases in the file)");
-        await Task.CompletedTask;
-        _ = log;
-        return 0;
+        if (args.Length < 2 || args[0] != "verify")
+        {
+            Console.Error.WriteLine("usage: cinder custody verify <case-path>");
+            return 1;
+        }
+        return await CustodyVerifyCommand.RunAsync(args[1], Console.Out, Console.Error);
     }
 
     private static async Task<int> RunHashAsync(string[] args)

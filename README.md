@@ -64,31 +64,23 @@ Known limits with workarounds: **[LIMITATIONS.md](LIMITATIONS.md)**.
 
 ## Screenshots
 
-_Not yet captured._ The four shots below are the intended set; the capture
-protocol (window size, theme, synthetic evidence to load, redaction rules) is in
-[docs/screenshots.md](docs/screenshots.md). Drop the files into
-`assets/screenshots/` with the names given there and uncomment the block below.
-
-<!--
-  Uncomment once assets/screenshots/{home,hex,evtx,report}.png exist. Leaving
-  these as live <img> tags before the files land renders four broken images on
-  the project's front page, which is a worse first impression than saying the
-  shots aren't taken yet.
+Every frame is synthetic: a generated NTFS volume and a made-up case. How they
+are produced, and the rules for what may appear in them, are in
+[docs/screenshots.md](docs/screenshots.md).
 
 <div align="center">
 
-| Home dashboard | Hex viewer |
+| Home | Hex Viewer |
 |---|---|
-| <img src="assets/screenshots/home.png" alt="Home dashboard with recent cases and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex viewer with a large image open and the inspector visible" /> |
-| Recent cases, recent evidence, quick-start guide. | Memory-mapped, opens 100 GB images instantly. Inspector decodes 14 types at the caret. |
+| <img src="assets/screenshots/home.png" alt="Home with the open case, recent cases and evidence, and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex Viewer on an NTFS image with a FILETIME selected and decoded in the data inspector" /> |
+| Start a case, reopen one, or look at a file without one. | Bytes coloured by class, an entropy overview strip, and a data inspector that decodes the selection. |
 
-| Event Log timeline | PDF report |
+| Filesystem | Reports |
 |---|---|
-| <img src="assets/screenshots/evtx.png" alt="Event Log viewer with filter and channel column" /> | <img src="assets/screenshots/report.png" alt="Generated PDF report with exhibit cards and index" /> |
-| Streams every record with timestamp, channel, EventId, user, computer. | Cover, per-section narrative, embedded exhibit cards, exhibit index. |
+| <img src="assets/screenshots/filesystem.png" alt="Filesystem tool listing an NTFS volume with MFT record numbers and timestamps" /> | <img src="assets/screenshots/report.png" alt="Reports tool with a findings section and bookmarks loaded as exhibits" /> |
+| Every file and folder on a disk image, with its record number and times. Filter, bookmark, export. | Write the report in sections; bookmarks become numbered exhibits; export PDF/A, Word, HTML, Markdown or JSON. |
 
 </div>
--->
 
 ## Cinder vs the alternatives
 
@@ -296,9 +288,10 @@ Advisories](https://github.com/AffluentMods/cinder/security/advisories/new) —
 ## Telemetry
 
 **None.** Cinder does not phone home. Ever. No analytics, no crash
-reporting that uploads to a server, no usage pings beyond a public
-GitHub API call (for update checks) that you can disable. Your evidence
-stays on your machine.
+reporting that uploads to a server, no usage pings, and no network call
+it makes by itself: the update check runs only when you choose "Check
+for updates" from the command palette. Your evidence stays on your
+machine.
 
 ## Contributing
 

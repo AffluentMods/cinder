@@ -64,12 +64,30 @@ public sealed class EwfReader : IDisposable
     /// <summary>Ceiling on section-chain hops per segment. Backstop against a pathological chain.</summary>
     private const int MaxSectionsPerSegment = 1 << 16;
 
+    /// <summary>
+    /// Header sections tried per segment before giving up on case metadata. Each attempt reads
+    /// and inflates a payload of up to <see cref="MaxSectionDataBytes"/>, so a segment made of
+    /// thousands of undecodable header sections must not get an attempt for each.
+    /// </summary>
+    private const int MaxHeaderAttempts = 8;
+
+    /// <summary>Length of an E01 <c>volume</c> / <c>data</c> section payload.</summary>
+    private const int GeometrySectionLength = 1052;
+
+    /// <summary>Offset of the 16-byte set identifier within that payload.</summary>
+    private const int SetIdentifierOffset = 64;
+
     /// <summary>Largest chunk geometry we will accept (sectors-per-chunk × bytes-per-sector).</summary>
     private const int MaxChunkSizeBytes = 64 * 1024 * 1024;
 
     private readonly List<Stream> _segments;
     private readonly bool _ownsStreams;
     private readonly List<int> _damagedChunks = [];
+    private readonly List<string> _ignoredSegments = [];
+    private byte[]? _setIdentifier;
+
+    /// <summary>How a segment's section chain ended, or why the segment was not taken.</summary>
+    private enum SegmentEnd { Continues, Done, Foreign }
 
     public string? CaseDescription { get; private set; }
     public string? AcquisitionDate { get; private set; }
@@ -82,6 +100,22 @@ public sealed class EwfReader : IDisposable
     public string? RecordedMd5 { get; private set; }
     public string? RecordedSha1 { get; private set; }
     public int SegmentCount => _segments.Count;
+
+    /// <summary>
+    /// Segment files that sit where the chain's next segments would be but are not part of this
+    /// image, each with the reason: the image had already ended (its last segment closed with
+    /// <c>done</c>), the file's header carries the wrong segment number, or its set identifier
+    /// is another acquisition's. They are left unread — typically the tail of an older, longer
+    /// image that was written to the same base name. Empty for a clean chain.
+    /// </summary>
+    public IReadOnlyList<string> IgnoredSegments => _ignoredSegments;
+
+    /// <summary>
+    /// True when the last segment read closes the image with a <c>done</c> section. False means
+    /// the chain stops at a segment that expected a successor: one or more segments are
+    /// missing, and reads past the chunks that are present will fail.
+    /// </summary>
+    public bool EndsWithDone { get; private set; }
 
     /// <summary>
     /// Chunks that failed to decompress and were zero-filled, in the order they were first
@@ -215,10 +249,38 @@ public sealed class EwfReader : IDisposable
         var globalChunkSeg = new List<int>();
         var globalChunkOff = new List<long>();
 
+        // Segment files are found by name, and a name proves nothing: the files after the
+        // real last segment may be left over from an earlier image. The chain therefore ends
+        // where the format says it ends (`done`), and a file that identifies itself as some
+        // other segment, or as part of another acquisition, is not stitched on.
+        var accepted = 0;
+        string? stopReason = null;
         for (int segIx = 0; segIx < _segments.Count; segIx++)
         {
-            ParseSegment(segIx, globalChunkSeg, globalChunkOff);
+            var end = ParseSegment(segIx, globalChunkSeg, globalChunkOff, out var foreignReason);
+            if (end == SegmentEnd.Foreign)
+            {
+                stopReason = foreignReason;
+                break;
+            }
+            accepted++;
+            if (end == SegmentEnd.Done)
+            {
+                EndsWithDone = true;
+                stopReason = "the image ends at the segment before it";
+                break;
+            }
         }
+        for (int i = accepted; i < _segments.Count; i++)
+        {
+            var name = (_segments[i] as FileStream)?.Name ?? $"segment #{i + 1}";
+            _ignoredSegments.Add($"{name}: {(i == accepted ? stopReason : "it follows a segment that was not accepted")}");
+            if (_ownsStreams)
+            {
+                try { _segments[i].Dispose(); } catch { }
+            }
+        }
+        _segments.RemoveRange(accepted, _segments.Count - accepted);
 
         if (BytesPerSector == 0)
         {
@@ -233,8 +295,9 @@ public sealed class EwfReader : IDisposable
         ChunkOffsets = [.. globalChunkOff];
     }
 
-    private void ParseSegment(int segIx, List<int> globalChunkSeg, List<long> globalChunkOff)
+    private SegmentEnd ParseSegment(int segIx, List<int> globalChunkSeg, List<long> globalChunkOff, out string? foreignReason)
     {
+        foreignReason = null;
         var file = _segments[segIx];
         var fileLength = file.Length;
 
@@ -246,6 +309,19 @@ public sealed class EwfReader : IDisposable
                 $"EWF: bad magic in segment #{segIx} (expected EVF prefix).");
         }
 
+        // The header numbers the segment within its chain. A later file whose number is not
+        // the one its position calls for is some other segment that happens to carry the name.
+        var segmentNumber = BitConverter.ToUInt16(header, 9);
+        if (segIx > 0 && segmentNumber != segIx + 1)
+        {
+            foreignReason = $"its header says it is segment {segmentNumber}, not segment {segIx + 1}";
+            return SegmentEnd.Foreign;
+        }
+
+        // Nothing a segment contributes is kept until the whole segment has been accepted.
+        var end = SegmentEnd.Continues;
+        string? segMd5 = null, segSha1 = null, segCaseDescription = null;
+
         long pos = SegmentHeaderLength;
         var segTables = new List<List<long>>();
         var segTableBases = new List<long>();
@@ -253,6 +329,8 @@ public sealed class EwfReader : IDisposable
         // The chain is required to move strictly forward. Without that a container whose
         // sections point at each other (or at themselves) would loop here forever.
         var hops = 0;
+        var headerAttempts = 0;
+        long segEntryTotal = 0;
 
         while (true)
         {
@@ -273,55 +351,84 @@ public sealed class EwfReader : IDisposable
             var next = BitConverter.ToInt64(hdr, 16);
             var size = BitConverter.ToInt64(hdr, 24);
 
+            // `next` and `done` end a segment and carry no payload. They are recognised before
+            // the size is looked at because EnCase writes their section size as 0 rather than
+            // 76, and such a descriptor must not be mistaken for a malformed section.
+            if (type is "done" or "next")
+            {
+                end = type == "done" ? SegmentEnd.Done : SegmentEnd.Continues;
+                goto SegmentDone;
+            }
+
             var dataStart = pos + SectionHeaderLength;
             var dataLen = ValidateSectionData(segIx, type, pos, size, dataStart, fileLength);
 
+            // Only the bytes each section is known to need are read. Reading a whole declared
+            // payload would let a chain of sections that all claim the rest of the file cost a
+            // full-file read and allocation per section.
             switch (type)
             {
                 case "header2":
                 case "header":
-                    if (CaseDescription is null && dataLen > 0)
+                    if (CaseDescription is null && segCaseDescription is null && dataLen > 0 && headerAttempts < MaxHeaderAttempts)
                     {
+                        headerAttempts++;
                         var raw = ReadAt(file, dataStart, (int)dataLen);
-                        try { CaseDescription = DecompressString(raw, type == "header2"); }
+                        try { segCaseDescription = DecompressString(raw, type == "header2"); }
                         catch { /* tolerate a broken header — it is metadata, not evidence */ }
                     }
                     break;
 
                 case "disk":
                 case "volume":
-                    if (BytesPerSector == 0 && dataLen >= 32)
+                case "data":
+                    // `data` opens every later segment with a copy of the volume section, set
+                    // identifier included — the GUID one acquisition stamps on all its segments.
+                    if (dataLen >= GeometrySectionLength)
                     {
-                        ParseVolume(ReadAt(file, dataStart, (int)dataLen), segIx);
+                        var id = ReadAt(file, dataStart + SetIdentifierOffset, 16);
+                        if (id.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
+                        {
+                            if (_setIdentifier is null)
+                            {
+                                _setIdentifier = id;
+                            }
+                            else if (segIx > 0 && !id.AsSpan().SequenceEqual(_setIdentifier))
+                            {
+                                foreignReason = $"its set identifier {new Guid(id)} is not this image's {new Guid(_setIdentifier)}";
+                                return SegmentEnd.Foreign;
+                            }
+                        }
+                    }
+                    if (type != "data" && BytesPerSector == 0 && dataLen >= 32)
+                    {
+                        ParseVolume(ReadAt(file, dataStart, 32), segIx);
                     }
                     break;
 
                 case "table":
                     if (dataLen >= 24)
                     {
-                        ParseTable(ReadAt(file, dataStart, (int)dataLen), segIx, segTables, segTableBases);
+                        segEntryTotal += ParseTable(file, dataStart, dataLen, segIx, segTables, segTableBases,
+                            segEntryTotal, globalChunkOff.Count, fileLength);
                     }
                     break;
 
                 case "hash":
                     if (dataLen >= 16)
                     {
-                        var h = ReadAt(file, dataStart, (int)dataLen);
-                        RecordedMd5 ??= Convert.ToHexStringLower(h.AsSpan(0, 16));
+                        segMd5 ??= HexUnlessZero(ReadAt(file, dataStart, 16));
                     }
                     break;
 
                 case "digest":
                     if (dataLen >= 36)
                     {
-                        var h = ReadAt(file, dataStart, (int)dataLen);
-                        RecordedMd5 ??= Convert.ToHexStringLower(h.AsSpan(0, 16));
-                        RecordedSha1 ??= Convert.ToHexStringLower(h.AsSpan(16, 20));
+                        var h = ReadAt(file, dataStart, 36);
+                        segMd5 ??= HexUnlessZero(h.AsSpan(0, 16));
+                        segSha1 ??= HexUnlessZero(h.AsSpan(16, 20));
                     }
                     break;
-
-                case "done":
-                    goto SegmentDone;
             }
 
             // A self-referential or zero `next` marks the end of the chain. Anything that
@@ -339,6 +446,10 @@ public sealed class EwfReader : IDisposable
         }
 
     SegmentDone:
+        CaseDescription ??= segCaseDescription;
+        RecordedMd5 ??= segMd5;
+        RecordedSha1 ??= segSha1;
+
         for (int t = 0; t < segTables.Count; t++)
         {
             var entries = segTables[t];
@@ -370,6 +481,7 @@ public sealed class EwfReader : IDisposable
                 globalChunkOff.Add(encoded);
             }
         }
+        return end;
     }
 
     /// <summary>
@@ -379,6 +491,12 @@ public sealed class EwfReader : IDisposable
     /// </summary>
     private static long ValidateSectionData(int segIx, string type, long pos, long size, long dataStart, long fileLength)
     {
+        if (size == 0)
+        {
+            // Some writers leave the size unset on a section that has no payload. Treat it as
+            // empty; every consumer below requires a minimum payload before it reads anything.
+            return 0;
+        }
         if (size < SectionHeaderLength)
         {
             throw new InvalidDataException(
@@ -386,18 +504,35 @@ public sealed class EwfReader : IDisposable
         }
 
         var dataLen = size - SectionHeaderLength;
-        if (dataLen > MaxSectionDataBytes)
+
+        // The ceiling protects sections whose payload is read into memory. A `sectors` section
+        // holds the chunk data itself — hundreds of megabytes in any real acquisition — and is
+        // never read as a whole (chunks are addressed through the table), so it is only
+        // required to lie inside the file.
+        if (IsMetadataSection(type) && dataLen > MaxSectionDataBytes)
         {
             throw new InvalidDataException(
                 $"EWF: segment #{segIx} section '{type}' declares {dataLen:N0} bytes, above the {MaxSectionDataBytes:N0}-byte ceiling.");
         }
-        if (dataStart + dataLen > fileLength)
+        if (dataLen > fileLength - dataStart)
         {
             throw new InvalidDataException(
                 $"EWF: segment #{segIx} section '{type}' runs past the end of the file.");
         }
         return dataLen;
     }
+
+    /// <summary>Sections the parser reads into memory, and therefore bounds.</summary>
+    private static bool IsMetadataSection(string type) =>
+        type is "header" or "header2" or "volume" or "disk" or "table" or "hash" or "digest";
+
+    /// <summary>
+    /// Hex of a recorded digest, or null when the field is all zero. Writers that compute only
+    /// one of MD5 / SHA-1 leave the other field zero-filled; that is "not recorded", and
+    /// reading it as a hash would fail verification of every such container.
+    /// </summary>
+    private static string? HexUnlessZero(ReadOnlySpan<byte> digest) =>
+        digest.IndexOfAnyExcept((byte)0) < 0 ? null : Convert.ToHexStringLower(digest);
 
     private void ParseVolume(byte[] v, int segIx)
     {
@@ -440,37 +575,58 @@ public sealed class EwfReader : IDisposable
         NumberOfSectors = sectorCount;
     }
 
-    private static void ParseTable(byte[] t, int segIx, List<List<long>> segTables, List<long> segTableBases)
+    /// <summary>
+    /// Reads one table section and returns how many entries it added.
+    ///
+    /// <para>Both limits are enforced here, before anything is allocated, because nothing in
+    /// the section chain stops table sections from overlapping: a file a few megabytes long can
+    /// declare thousands of tables that each claim the rest of the file. Every entry occupies
+    /// four bytes of its segment, so the tables of one segment (<paramref name="segmentEntries"/>
+    /// so far) can never legitimately hold more entries than a quarter of the segment's length;
+    /// and the chain as a whole (<paramref name="earlierSegmentEntries"/> from the segments
+    /// before this one) stays under <see cref="MaxTotalChunks"/>.</para>
+    /// </summary>
+    private static long ParseTable(Stream file, long dataStart, long dataLen, int segIx,
+        List<List<long>> segTables, List<long> segTableBases, long segmentEntries, long earlierSegmentEntries, long segmentLength)
     {
-        var entryCount = BitConverter.ToUInt32(t, 0);
-        var tableBase = BitConverter.ToUInt64(t, 8);
+        var entriesSoFar = segmentEntries + earlierSegmentEntries;
+        var head = ReadAt(file, dataStart, 24);
+        var entryCount = BitConverter.ToUInt32(head, 0);
+        var tableBase = BitConverter.ToUInt64(head, 8);
 
         // The declared entry count must fit the section that declared it. Without this check a
         // container claiming four billion entries either allocates 32 GB or walks off the end
-        // of `t` — the classic malformed-evidence crash.
+        // of the section — the classic malformed-evidence crash.
         var needed = 24L + (long)entryCount * 4;
-        if (needed > t.Length)
+        if (needed > dataLen)
         {
             throw new InvalidDataException(
-                $"EWF: segment #{segIx} table declares {entryCount:N0} entries needing {needed:N0} bytes, but the section holds {t.Length:N0}.");
+                $"EWF: segment #{segIx} table declares {entryCount:N0} entries needing {needed:N0} bytes, but the section holds {dataLen:N0}.");
         }
-        if (entryCount > MaxTotalChunks)
+        if ((segmentEntries + entryCount) * 4 > segmentLength)
         {
             throw new InvalidDataException(
-                $"EWF: segment #{segIx} table declares {entryCount:N0} entries, above the {MaxTotalChunks:N0} ceiling.");
+                $"EWF: segment #{segIx} tables declare {segmentEntries + entryCount:N0} entries between them, more than a {segmentLength:N0}-byte segment can hold. The table sections overlap.");
+        }
+        if (entriesSoFar + entryCount > MaxTotalChunks)
+        {
+            throw new InvalidDataException(
+                $"EWF: segment #{segIx} table brings the chain to {entriesSoFar + entryCount:N0} entries, above the {MaxTotalChunks:N0}-chunk ceiling.");
         }
         if (tableBase > long.MaxValue)
         {
             throw new InvalidDataException($"EWF: segment #{segIx} table declares an out-of-range base offset.");
         }
 
+        var raw = ReadAt(file, dataStart + 24, checked((int)(entryCount * 4L)));
         var entries = new List<long>((int)entryCount);
         for (int i = 0; i < entryCount; i++)
         {
-            entries.Add(BitConverter.ToUInt32(t, 24 + (i * 4)));
+            entries.Add(BitConverter.ToUInt32(raw, i * 4));
         }
         segTables.Add(entries);
         segTableBases.Add((long)tableBase);
+        return entryCount;
     }
 
     public Stream OpenStream() => new EwfStream(this);

@@ -1,29 +1,79 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Globalization;
 
 namespace Cinder.Carving;
 
-/// <summary>One carved blob: source offset, length, signature, validation result.</summary>
-public sealed record CarveHit(string Label, string Extension, long Offset, long Length, bool Validated, string? OutputPath = null);
+/// <summary>
+/// One carved object: where it starts in the source, how long it is, which rule found it and
+/// whether it passed that rule's checks. <see cref="OutputPath"/> is set only when the object
+/// was written; <see cref="Note"/> says how the length was decided or why nothing was written.
+/// </summary>
+public sealed record CarveHit(
+    string Label,
+    string Extension,
+    long Offset,
+    long Length,
+    bool Validated,
+    string? OutputPath = null,
+    string? Note = null);
 
 /// <summary>
-/// Header/footer file carver.
+/// Header-driven file carver.
 ///
-/// <para>Reads the input in 4 MiB windows with a tail overlap of <c>maxHeaderLength - 1</c> so a
-/// header straddling a window boundary is still matched. Each window "owns" the region before
-/// its overlap tail; hits inside the tail are left for the next window, which sees them at its
-/// head. That partition is what keeps a boundary-straddling header from being carved twice.</para>
+/// <para><b>Scanning.</b> The input is read in 4 MiB windows with a retained tail, so a header
+/// straddling a window boundary is still matched. Each window "owns" the objects that start
+/// before its tail; later ones are left for the next window, which sees them at its head. That
+/// partition is what keeps a boundary-straddling header from being carved twice, and the tail
+/// is long enough that every owned hit has <see cref="HeadBytes"/> bytes in memory to inspect.</para>
 ///
-/// <para>Each hit is extracted from the window when it fits there, or by seeking the source
-/// when it doesn't, then trimmed at the signature's footer and optionally passed to the
-/// signature's validator before being written.</para>
+/// <para><b>Deciding what a hit is worth.</b> A header pattern matching is only a candidate.
+/// The rule's <see cref="CarveSignature.Probe"/> is run on the bytes already in the window: it
+/// can discard the hit (the pattern occurred by chance), give the object's exact length from
+/// the format's own header, or say the length is not recorded. Without a declared length the
+/// footer is searched for; without a footer the object runs to the next header of the same
+/// type or <see cref="UnsizedCarveLimitBytes"/>, whichever is nearer. Nothing here allocates or
+/// reads in proportion to <see cref="CarveSignature.MaxLengthBytes"/>.</para>
+///
+/// <para><b>Bounded work.</b> Following a structure or searching for a footer costs reads in
+/// proportion to the object, which is fine when there is an object. Evidence can be arranged
+/// so that there never is: headers every few bytes, each leading into a long walk that ends
+/// nowhere. Probes and footer searches therefore draw on one allowance that grows with the
+/// amount of input scanned (<see cref="ScanWorkPerInputByte"/> bytes of work per byte of
+/// input, plus <see cref="InitialScanWork"/>). When it is spent, further candidates are
+/// reported as not extracted until the scan has advanced enough to refill it.</para>
+///
+/// <para><b>Extracting.</b> Objects are streamed to the output file through a fixed buffer,
+/// not assembled in memory. Once an object's extent is known, further headers of the same type
+/// inside it are skipped: they are that object's own content (the entries of a ZIP, the
+/// thumbnail of a JPEG), not separate files.</para>
 /// </summary>
 public sealed class FileCarver
 {
     private const int ChunkSize = 4 << 20;
+    private const int CopyBufferSize = 1 << 20;
+
+    /// <summary>Bytes guaranteed to be in memory at every hit (fewer only when the input ends first).</summary>
+    public const int HeadBytes = 4096;
+
+    /// <summary>Largest object a whole-blob <see cref="CarveSignature.Validator"/> is run on.</summary>
+    public const int MaxValidatorBlobBytes = 256 << 20;
+
+    /// <summary>Work probes and footer searches may do before any input has been scanned.</summary>
+    public const long InitialScanWork = 256L << 20;
+
+    /// <summary>Further work allowed per byte of input scanned.</summary>
+    public const int ScanWorkPerInputByte = 8;
 
     private readonly IReadOnlyList<CarveSignature> _signatures;
     private readonly int _overlap;
+
+    /// <summary>
+    /// Ceiling on an object whose format gives neither a length nor a trailer. Such an object
+    /// is carved to the next header of the same type or this many bytes, whichever is nearer
+    /// (and never past the rule's own maximum).
+    /// </summary>
+    public long UnsizedCarveLimitBytes { get; init; } = 32L << 20;
 
     public FileCarver(IReadOnlyList<CarveSignature>? signatures = null)
     {
@@ -38,15 +88,49 @@ public sealed class FileCarver
             {
                 throw new ArgumentException($"Carve signature '{s.Label}' has an empty header pattern.", nameof(signatures));
             }
+            if (s.HeaderOffset < 0 || s.FooterTrailerBytes < 0)
+            {
+                throw new ArgumentException($"Carve signature '{s.Label}' has a negative offset.", nameof(signatures));
+            }
+            if (s.MaxLengthBytes <= 0)
+            {
+                throw new ArgumentException($"Carve signature '{s.Label}' has no maximum length.", nameof(signatures));
+            }
         }
-        _overlap = _signatures.Max(s => s.Header.Length) - 1;
+
+        // The retained tail must hold a whole header pattern (so a straddling one is seen) and
+        // a whole head (so a probe has its bytes), whichever is longer.
+        var longestHeader = _signatures.Max(s => s.HeaderOffset + s.Header.Length);
+        _overlap = Math.Max(HeadBytes, longestHeader) - 1;
     }
 
-    public async IAsyncEnumerable<CarveHit> CarveAsync(
+    /// <summary>Carves <paramref name="input"/> from its current position. Offsets are relative to that position.</summary>
+    public IAsyncEnumerable<CarveHit> CarveAsync(
         Stream input,
         string? outputDirectory = null,
         IProgress<long>? progress = null,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
+        => CarveCoreAsync(input, 0, outputDirectory, progress, ct);
+
+    /// <summary>
+    /// Carves a slice of a larger source. <paramref name="baseOffset"/> is where the slice
+    /// starts in that source; it is added to every reported <see cref="CarveHit.Offset"/> and
+    /// used in the output file names, so two slices never write the same file.
+    /// </summary>
+    public IAsyncEnumerable<CarveHit> CarveAsync(
+        Stream input,
+        long baseOffset,
+        string? outputDirectory,
+        IProgress<long>? progress = null,
+        CancellationToken ct = default)
+        => CarveCoreAsync(input, baseOffset, outputDirectory, progress, ct);
+
+    private async IAsyncEnumerable<CarveHit> CarveCoreAsync(
+        Stream input,
+        long baseOffset,
+        string? outputDirectory,
+        IProgress<long>? progress,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(input);
         if (outputDirectory is not null)
@@ -54,10 +138,21 @@ public sealed class FileCarver
             Directory.CreateDirectory(outputDirectory);
         }
 
+        // Everything below is relative to where the stream stood when carving began; a seekable
+        // stream handed over part-way through is carved from there, not from its start.
+        var seekable = input.CanSeek;
+        var origin = seekable ? input.Position : 0;
+        long? totalLength = seekable ? Math.Max(0, input.Length - origin) : null;
+
         var pool = ArrayPool<byte>.Shared;
         var window = pool.Rent(ChunkSize + _overlap);
         long windowStart = 0;
         var retained = 0;
+
+        // Per rule: the end of the last object whose extent is known. Headers of the same
+        // rule before that point are inside an object already carved.
+        var carvedUntil = new Dictionary<CarveSignature, long>(ReferenceEqualityComparer.Instance);
+        var budget = new ScanBudget { Remaining = InitialScanWork };
 
         try
         {
@@ -72,6 +167,8 @@ public sealed class FileCarver
                     yield break;
                 }
 
+                budget.Remaining += (long)ScanWorkPerInputByte * read;
+
                 // A window that couldn't be filled is the last one, and owns its whole extent.
                 var isLast = read < ChunkSize;
                 var ownedEnd = isLast ? len : len - _overlap;
@@ -80,23 +177,23 @@ public sealed class FileCarver
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    var absolute = windowStart + raw.LocalOffset;
-                    var blob = await ExtractBlobAsync(input, window, len, raw, absolute, ct).ConfigureAwait(false);
-                    if (blob.Length == 0)
+                    var relative = windowStart + raw.ObjectStart;
+                    if (carvedUntil.TryGetValue(raw.Signature, out var until) && relative < until)
                     {
                         continue;
                     }
 
-                    var validated = raw.Signature.Validator?.Invoke(blob) ?? true;
-                    string? outPath = null;
-                    if (validated && outputDirectory is not null)
+                    var result = await ExtractAsync(
+                        input, seekable, origin, totalLength, window, len, raw, relative, baseOffset, outputDirectory, budget, ct).ConfigureAwait(false);
+                    if (result is not { } extracted)
                     {
-                        outPath = Path.Combine(outputDirectory, $"{absolute:X12}.{raw.Signature.Extension}");
-                        await WriteBlobAsync(outPath, blob, ct).ConfigureAwait(false);
+                        continue;
                     }
-
-                    yield return new CarveHit(
-                        raw.Signature.Label, raw.Signature.Extension, absolute, blob.Length, validated, outPath);
+                    if (extracted.ExtentKnown)
+                    {
+                        carvedUntil[raw.Signature] = relative + extracted.Hit.Length;
+                    }
+                    yield return extracted.Hit;
                 }
 
                 progress?.Report(windowStart + ownedEnd);
@@ -118,124 +215,335 @@ public sealed class FileCarver
     }
 
     /// <summary>
-    /// Finds every signature header in <c>window[0..length)</c> that starts before
-    /// <paramref name="ownedEnd"/>, in ascending offset order.
+    /// Finds every header in <c>window[0..length)</c> whose object starts before
+    /// <paramref name="ownedEnd"/>, in ascending offset order (ties in rule order).
     /// </summary>
     private List<RawHit> ScanWindow(byte[] window, int length, int ownedEnd)
     {
         var bag = new ConcurrentBag<RawHit>();
 
-        Parallel.ForEach(_signatures, sig =>
+        Parallel.For(0, _signatures.Count, index =>
         {
+            var sig = _signatures[index];
             var span = window.AsSpan(0, length);
             var from = 0;
-            while (from < ownedEnd)
+            while (from < length)
             {
-                // Vectorized. The previous scalar byte-by-byte comparison ran roughly
-                // length × signatures × headerLength operations per window, which made a
-                // whole-disk carve impractically slow.
                 var idx = span[from..].IndexOf(sig.Header.AsSpan());
                 if (idx < 0)
                 {
                     break;
                 }
                 var at = from + idx;
-                if (at >= ownedEnd)
+                var objectStart = at - sig.HeaderOffset;
+                if (objectStart >= ownedEnd)
                 {
                     break;
                 }
-                bag.Add(new RawHit(sig, at));
+                // A negative start means the object began before this window: in the first
+                // window that is not an object at all, later it belongs to the previous one.
+                if (objectStart >= 0)
+                {
+                    bag.Add(new RawHit(sig, objectStart, index));
+                }
                 from = at + 1;
             }
         });
 
         var hits = bag.ToList();
-        hits.Sort(static (a, b) => a.LocalOffset.CompareTo(b.LocalOffset));
+        hits.Sort(static (a, b) =>
+        {
+            var byOffset = a.ObjectStart.CompareTo(b.ObjectStart);
+            return byOffset != 0 ? byOffset : a.Order.CompareTo(b.Order);
+        });
         return hits;
     }
 
     /// <summary>
-    /// Materializes the bytes for one hit, trimmed at the signature's footer if it has one.
-    /// Prefers the in-memory window; falls back to seeking the source for objects that extend
-    /// past it. For a non-seekable source that can't be reached, carves what the window holds
-    /// rather than returning nothing.
+    /// Decides what one header hit is, how long it is, and — when it is worth keeping and an
+    /// output directory was given — writes it. Returns null for a hit that is not an object.
     /// </summary>
-    private static async Task<ReadOnlyMemory<byte>> ExtractBlobAsync(
+    private async Task<(CarveHit Hit, bool ExtentKnown)?> ExtractAsync(
         Stream input,
+        bool seekable,
+        long origin,
+        long? totalLength,
         byte[] window,
         int windowLength,
-        RawHit hit,
-        long absoluteOffset,
+        RawHit raw,
+        long relative,
+        long baseOffset,
+        string? outputDirectory,
+        ScanBudget budget,
         CancellationToken ct)
     {
-        var sig = hit.Signature;
-        var wantedFromWindow = windowLength - hit.LocalOffset;
-        var maxWanted = sig.MaxLengthBytes;
+        var sig = raw.Signature;
+        var inWindow = windowLength - raw.ObjectStart;
 
-        // Fast path: the object's whole permitted extent is already in the window.
-        if (wantedFromWindow >= maxWanted)
+        // A non-seekable source can only give what the window holds.
+        var available = totalLength is { } total ? total - relative : inWindow;
+        if (available <= 0)
         {
-            var slice = new ReadOnlyMemory<byte>(window, hit.LocalOffset, (int)maxWanted);
-            return TrimToFooter(slice, sig);
+            return null;
         }
+        inWindow = (int)Math.Min(inWindow, available);
+        var limit = Math.Min(sig.MaxLengthBytes, available);
+        var absolute = baseOffset + relative;
 
-        if (input.CanSeek)
+        CarveHit NotWritten(long length, string note) => new(sig.Label, sig.Extension, absolute, length, false, null, note);
+
+        var savedPosition = seekable ? input.Position : 0;
+        try
         {
-            var savedPos = input.Position;
+            var source = new CarveSource(window, raw.ObjectStart, inWindow, seekable ? input : null, origin + relative, available, limit)
+            {
+                Budget = budget,
+                CancellationToken = ct,
+            };
+            const string OutOfBudget = "not examined: this part of the source is dense with headers that lead nowhere, and the scan allowance for it is spent";
+
+            long length;
+            string? note = null;
+            var extentKnown = false;
+
+            long probed;
             try
             {
-                var available = input.Length - absoluteOffset;
-                if (available <= 0)
+                probed = sig.Probe is null ? CarveProbeResult.UnknownLength : sig.Probe(source);
+            }
+            catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or OverflowException)
+            {
+                // A probe that trips over the bytes it was given has not recognised anything.
+                // The carve goes on; the hit is reported so the failure is visible.
+                return (NotWritten(0, "the rule's structure check failed on these bytes: " + ex.GetType().Name), false);
+            }
+            if (probed == CarveProbeResult.NotThisFormat)
+            {
+                return null;
+            }
+            if (source.BudgetExhausted)
+            {
+                return (NotWritten(0, OutOfBudget), false);
+            }
+            if (probed < 0)
+            {
+                return (NotWritten(0, "header recognised, but the structure after it is damaged or incomplete"), false);
+            }
+
+            if (probed > 0)
+            {
+                if (probed > sig.MaxLengthBytes)
                 {
-                    return ReadOnlyMemory<byte>.Empty;
+                    return (NotWritten(0, string.Create(CultureInfo.InvariantCulture,
+                        $"header declares {probed:N0} bytes, over the {sig.MaxLengthBytes:N0}-byte limit for this type")), false);
+                }
+                if (probed > available)
+                {
+                    return (NotWritten(available, string.Create(CultureInfo.InvariantCulture,
+                        $"truncated: header declares {probed:N0} bytes, the source ends after {available:N0}")), false);
+                }
+                length = probed;
+                extentKnown = true;
+                note = "length from the format header";
+            }
+            else
+            {
+                var bodyStart = sig.HeaderOffset + sig.Header.Length;
+                long footerAt = -1;
+                if (sig.Footer is { Length: > 0 } footer)
+                {
+                    footerAt = source.IndexOf(footer, bodyStart, limit, ct);
                 }
 
-                var max = (int)Math.Min(maxWanted, available);
-                var buf = new byte[max];
-                input.Position = absoluteOffset;
-                var n = await ReadFullAsync(input, buf.AsMemory(), ct).ConfigureAwait(false);
-                if (n <= 0)
+                if (footerAt >= 0)
                 {
-                    return ReadOnlyMemory<byte>.Empty;
+                    length = Math.Min(footerAt + sig.Footer!.Length + sig.FooterTrailerBytes, available);
+                    extentKnown = true;
                 }
-                return TrimToFooter(new ReadOnlyMemory<byte>(buf, 0, n), sig);
+                else if (source.BudgetExhausted)
+                {
+                    return (NotWritten(0, OutOfBudget), false);
+                }
+                else if (sig.Footer is { Length: > 0 } && sig.FooterRequired)
+                {
+                    return (NotWritten(0, string.Create(CultureInfo.InvariantCulture,
+                        $"no end marker within {limit:N0} bytes")), false);
+                }
+                else
+                {
+                    // No length and no trailer: the object runs to the next header of its own
+                    // kind, or to the unsized ceiling.
+                    var cap = Math.Min(limit, UnsizedCarveLimitBytes);
+                    var next = source.IndexOf(sig.Header, sig.HeaderOffset + 1, cap + bodyStart, ct);
+                    if (next < 0 && source.BudgetExhausted)
+                    {
+                        // Without the search there is no telling where this object ends, and
+                        // writing the ceiling for every such header is the flood being avoided.
+                        return (NotWritten(0, OutOfBudget), false);
+                    }
+                    if (next >= 0 && next - sig.HeaderOffset < cap)
+                    {
+                        length = next - sig.HeaderOffset;
+                        note = "length not recorded in this format: carved up to the next header of the same type";
+                    }
+                    else
+                    {
+                        length = cap;
+                        if (cap < sig.MaxLengthBytes && cap < available)
+                        {
+                            note = string.Create(CultureInfo.InvariantCulture,
+                                $"length not recorded in this format: carved the first {cap:N0} bytes");
+                        }
+                    }
+                }
             }
-            finally
+
+            if (length <= 0)
             {
-                input.Position = savedPos;
+                return null;
+            }
+
+            var validated = true;
+            string? outPath = null;
+
+            if (sig.Validator is not null)
+            {
+                if (length > MaxValidatorBlobBytes)
+                {
+                    return (NotWritten(length, string.Create(CultureInfo.InvariantCulture,
+                        $"too large to validate in memory ({length:N0} bytes)")), false);
+                }
+
+                var blob = new byte[length];
+                source.Budget = null;       // reading the object itself is not speculative work
+                var got = source.Read(0, blob);
+                if (got <= 0)
+                {
+                    return null;
+                }
+                var memory = new ReadOnlyMemory<byte>(blob, 0, got);
+                length = got;
+                validated = sig.Validator(memory);
+                if (validated && outputDirectory is not null)
+                {
+                    outPath = OutputPathFor(outputDirectory, absolute, sig.Extension);
+                    await WriteBlobAsync(outPath, memory, ct).ConfigureAwait(false);
+                }
+            }
+            else if (outputDirectory is not null)
+            {
+                outPath = OutputPathFor(outputDirectory, absolute, sig.Extension);
+                var written = await CopyExtentAsync(source, outPath, length, ct).ConfigureAwait(false);
+                if (written <= 0)
+                {
+                    TryDelete(outPath);
+                    return null;
+                }
+                if (written < length)
+                {
+                    note = string.Create(CultureInfo.InvariantCulture,
+                        $"the source ended after {written:N0} of {length:N0} bytes");
+                    length = written;
+                    extentKnown = false;
+                }
+            }
+
+            return (new CarveHit(sig.Label, sig.Extension, absolute, length, validated, outPath, note), extentKnown && validated);
+        }
+        finally
+        {
+            if (seekable)
+            {
+                input.Position = savedPosition;
             }
         }
-
-        // Non-seekable source: carve what this window holds. Previously this returned an empty
-        // blob, which meant every hit found through SlackUnallocCarver's non-seekable slice
-        // was reported with length 0 and never written.
-        var partial = new ReadOnlyMemory<byte>(window, hit.LocalOffset, wantedFromWindow);
-        return TrimToFooter(partial, sig);
     }
 
-    /// <summary>Cuts the blob at the first footer occurrence after the header, if one is found.</summary>
-    private static ReadOnlyMemory<byte> TrimToFooter(ReadOnlyMemory<byte> blob, CarveSignature sig)
-    {
-        var footer = sig.Footer;
-        if (footer is not { Length: > 0 } || blob.Length <= sig.Header.Length)
-        {
-            return blob;
-        }
+    private static string OutputPathFor(string directory, long absoluteOffset, string extension)
+        => Path.Combine(directory, string.Create(CultureInfo.InvariantCulture, $"{absoluteOffset:X12}.{extension}"));
 
-        var searchFrom = sig.Header.Length;
-        var idx = blob.Span[searchFrom..].IndexOf(footer.AsSpan());
-        if (idx < 0)
+    /// <summary>
+    /// Streams <paramref name="length"/> bytes of the object to <paramref name="path"/>: the
+    /// part already in the window first, the rest read from the source through one pooled
+    /// buffer. Returns the bytes written, which is less than asked only if the source ends.
+    /// A file left half-written by a failure or cancellation is removed.
+    /// </summary>
+    private static async Task<long> CopyExtentAsync(CarveSource source, string path, long length, CancellationToken ct)
+    {
+        long written = 0;
+        var completed = false;
+        try
         {
-            return blob;
+            var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.Asynchronous);
+            await using (fs.ConfigureAwait(false))
+            {
+                var fromWindow = (int)Math.Min(length, source.InWindow);
+                if (fromWindow > 0)
+                {
+                    await fs.WriteAsync(source.WindowBytes[..fromWindow], ct).ConfigureAwait(false);
+                    written = fromWindow;
+                }
+
+                if (written < length && source.SeekableStream is { } stream)
+                {
+                    var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+                    try
+                    {
+                        stream.Position = source.StreamBase + written;
+                        while (written < length)
+                        {
+                            var want = (int)Math.Min(buffer.Length, length - written);
+                            var n = await stream.ReadAsync(buffer.AsMemory(0, want), ct).ConfigureAwait(false);
+                            if (n <= 0)
+                            {
+                                break;
+                            }
+                            await fs.WriteAsync(buffer.AsMemory(0, n), ct).ConfigureAwait(false);
+                            written += n;
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(buffer);
+                    }
+                }
+            }
+            completed = true;
+            return written;
         }
-        return blob[..(searchFrom + idx + footer.Length)];
+        finally
+        {
+            if (!completed)
+            {
+                TryDelete(path);
+            }
+        }
     }
 
     private static async Task WriteBlobAsync(string path, ReadOnlyMemory<byte> blob, CancellationToken ct)
     {
-        await using var fs = new FileStream(
-            path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.Asynchronous);
-        await fs.WriteAsync(blob, ct).ConfigureAwait(false);
+        var completed = false;
+        try
+        {
+            var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.Asynchronous);
+            await using (fs.ConfigureAwait(false))
+            {
+                await fs.WriteAsync(blob, ct).ConfigureAwait(false);
+            }
+            completed = true;
+        }
+        finally
+        {
+            if (!completed)
+            {
+                TryDelete(path);
+            }
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>
@@ -258,5 +566,5 @@ public sealed class FileCarver
         return filled;
     }
 
-    private sealed record RawHit(CarveSignature Signature, int LocalOffset);
+    private sealed record RawHit(CarveSignature Signature, int ObjectStart, int Order);
 }

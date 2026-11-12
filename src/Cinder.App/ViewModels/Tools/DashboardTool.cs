@@ -15,25 +15,25 @@ public sealed partial class DashboardTool : ToolViewModel
     public override string Id => "dashboard";
     public override string Title => "Home";
     public override string Icon => "⌂";
-    public override string Subtitle => "Recent cases, quick actions, and a guided start for new examiners.";
+    public override string Subtitle => "Reopen a recent case or file, start a new case, and read a short guide to how the tools fit together.";
     public override string Phase => "0";
     public override string Kind => "dashboard";
 
     public override string HelpMarkdown => """
 ## What this is
-The Home screen — your starting point in Cinder. From here you can create a new
-case, jump back into a recent one, open a single piece of evidence without a case,
-or walk through the "First time?" guide.
-
-## When you'd use it
-Every time you launch Cinder. The Home tab is always the first one selected so
-you're never dropped into an empty parser screen wondering what to do.
+The Home screen, shown when Cinder starts. From here you can create a case, reopen a
+recent case or a recently opened file, open a single file without a case, or read the
+short "First time?" guide.
 
 ## How it works
-Recent cases appear on the left. Quick actions on the right cover the most common
-starts: New Case, Open Case, Open Evidence (no case required, useful for a quick
-look at a single file). The "First time?" panel walks you through Cinder's
-mental model: case → evidence → parsers → timeline → report.
+Recent cases and recently opened files are listed so you can return to them with one
+click. The quick actions cover the usual ways to start: new case, open case, open a
+file. The guide describes the order most examinations follow: case, evidence, tools,
+timeline, report.
+
+## Good to know
+You do not need a case to look at a file. A case is needed for bookmarks and for the
+custody log: without one, nothing you do is recorded.
 """;
 
     public ObservableCollection<RecentCaseRow> RecentCases { get; } = new();
@@ -41,21 +41,25 @@ mental model: case → evidence → parsers → timeline → report.
     public ObservableCollection<GuideStep> Guide { get; } = new()
     {
         new("1", "Create a case",
-            "A case is a folder Cinder keeps your evidence, your parsing results, and your " +
-            "audit trail in. Every investigation starts with one. Click \"New case\" on the right."),
-        new("2", "Add evidence",
-            "Drop in a disk image (.dd, .E01), a memory dump, a registry hive, a single file " +
-            "— anything. Cinder hashes it on import and records the action in the custody log."),
-        new("3", "Open the right tool for the evidence",
-            "The left rail is grouped by what you want to do: Examine (look at one thing), " +
-            "Analyze (look at the case as a whole), Acquire (collect new evidence), " +
-            "Case (manage the investigation)."),
-        new("4", "Build a timeline",
-            "When you've parsed enough artifacts, open Super-timeline. Every timestamped event " +
-            "merges into one chronological view — usually where the story comes together."),
+            "A case is one file that holds your bookmarks and a log of what you did. " +
+            "Click \"New case\" and choose where to save it. Without an open case, " +
+            "nothing is logged and rows cannot be bookmarked."),
+        new("2", "Open your evidence",
+            "Cinder does not import evidence into the case. Each tool asks for the file or " +
+            "folder it reads: a disk image, a registry hive, an event log, a folder of " +
+            "exported files. \"Open file\" shows any file in the Hex Viewer."),
+        new("3", "Pick the tool for the evidence",
+            "The left rail is grouped by what you want to do: Examine (look at one piece of " +
+            "evidence), Analyze (look across evidence), Acquire (make or check an image), " +
+            "Case (bookmarks, reports and the custody log)."),
+        new("4", "Bookmark what matters and build a timeline",
+            "Select a row in any tool and choose Bookmark to keep it as a finding. In " +
+            "Super-timeline, \"Ingest folder\" reads the timestamped events from a folder of " +
+            "evidence into one list in time order."),
         new("5", "Export a report",
-            "When you're done, Reports turns your findings into a court-ready PDF / DOCX, with " +
-            "the chain of custody log appended automatically."),
+            "Reports lets you write sections from a template, adds your bookmarks as numbered " +
+            "exhibits, and exports Markdown, HTML, PDF, Word or JSON. Each export is recorded " +
+            "in the case's custody log; the log itself is viewed and checked in Chain of custody."),
     };
 
     /// <summary>True once at least one recent case/evidence row exists, used to swap empty states.</summary>

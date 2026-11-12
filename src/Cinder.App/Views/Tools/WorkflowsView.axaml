@@ -1,28 +1,72 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
-             xmlns:wf="using:Cinder.Workflow"
              x:Class="Cinder.App.Views.Tools.WorkflowsView"
              x:DataType="tools:WorkflowsTool">
-    <Grid RowDefinitions="Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Open workflow .json…" Command="{Binding LoadCommand}" />
-                <TextBlock VerticalAlignment="Center" Text="{Binding Path, TargetNullValue='No workflow loaded'}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBlock VerticalAlignment="Center" Margin="14,0"
-                           Text="{Binding StatusLine}"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            </StackPanel>
+    <!-- Open a workflow, read its steps, run it, read what each step did. -->
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <Border Grid.Row="0" Classes="toolbar">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="tb" Command="{Binding LoadCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="14" Height="14" />
+                            <TextBlock Text="Open workflow…" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="accent" Height="26" Padding="12,0" Content="Run" Command="{Binding RunCommand}"
+                            IsVisible="{Binding HasWorkflow}" />
+                    <Button Classes="tb" Content="Stop" Command="{Binding RunCancelCommand}" IsVisible="{Binding IsRunning}" />
+                    <ProgressBar IsIndeterminate="True" Width="80" VerticalAlignment="Center" IsVisible="{Binding IsRunning}" />
+                </StackPanel>
+                <TextBlock Grid.Column="1" Classes="path" Margin="14,0" Text="{Binding Path}" ToolTip.Tip="{Binding Path}" />
+            </Grid>
         </Border>
-        <DataGrid Grid.Row="1" ItemsSource="{Binding Nodes}" AutoGenerateColumns="False" IsReadOnly="True"
-                  Background="{DynamicResource CinderBackground0Brush}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="ID"   Binding="{Binding Id}" Width="200" />
-                <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="200" />
-            </DataGrid.Columns>
-        </DataGrid>
+
+        <Panel Grid.Row="1">
+            <Grid ColumnDefinitions="2*,4,3*" IsVisible="{Binding Nodes.Count}">
+                <DockPanel Grid.Column="0">
+                    <Border DockPanel.Dock="Top" Padding="14,8" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                        <TextBlock Text="STEPS, IN RUN ORDER" Classes="section" />
+                    </Border>
+                    <DataGrid ItemsSource="{Binding Nodes}" AutoGenerateColumns="False" IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Step" Binding="{Binding Id}" Width="*" />
+                            <DataGridTextColumn Header="What it does" Binding="{Binding Kind}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+                <GridSplitter Grid.Column="1" />
+                <DockPanel Grid.Column="2">
+                    <Border DockPanel.Dock="Top" Padding="14,8" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                        <TextBlock Text="RESULTS" Classes="section" />
+                    </Border>
+                    <Panel>
+                        <DataGrid ItemsSource="{Binding Outputs}" AutoGenerateColumns="False" IsReadOnly="True"
+                                  IsVisible="{Binding Outputs.Count}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Step" Binding="{Binding NodeId}" Width="150" />
+                                <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="130" />
+                                <DataGridTextColumn Header="Outcome" Binding="{Binding Status}" Width="90" />
+                                <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <TextBlock Text="Nothing has run yet. Press Run to execute the steps on the left, top to bottom."
+                                   Classes="muted" FontSize="13" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="320"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !Outputs.Count}" />
+                    </Panel>
+                </DockPanel>
+            </Grid>
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="Run a saved sequence of steps" IsVisible="{Binding !Nodes.Count}"
+                          Message="A workflow is a small file that lists steps, such as hash a file, pull out its strings, index the results, and the order to run them in. Open one to see its steps, then run it. Use it to repeat the same triage on every piece of evidence.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="Open workflow…" Command="{Binding LoadCommand}" />
+            </c:EmptyState>
+        </Panel>
+
+        <Border Grid.Row="2" Classes="footer">
+            <TextBlock Text="{Binding StatusLine}" />
+        </Border>
     </Grid>
 </UserControl>

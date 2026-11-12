@@ -1,58 +1,90 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:vm="using:Cinder.App.ViewModels"
-             xmlns:srch="using:Cinder.Search"
              x:Class="Cinder.App.Views.Tools.SearchView"
              x:DataType="vm:SearchToolViewModel">
-    <Grid RowDefinitions="Auto,Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto">
-                <TextBlock Grid.Column="0" Text="{Binding IndexPath, TargetNullValue='No index loaded'}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                           Classes="mono"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           TextTrimming="CharacterEllipsis"
-                           VerticalAlignment="Center" />
-                <ProgressBar Grid.Column="1" Width="80" Margin="6,0" IsIndeterminate="True"
-                             IsVisible="{Binding IsIndexing}" />
-                <Button Grid.Column="2" Content="Pick index folder…"
-                        Command="{Binding PickIndexFolderCommand}"
-                        Margin="6,0" />
-                <Button Grid.Column="3" Classes="accent" Content="Build index from folder…"
-                        Command="{Binding BuildIndexCommand}"
-                        Margin="6,0,0,0" />
+    <!-- Index a folder once, then search it as often as you like. -->
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <Border Grid.Row="0" Classes="toolbar">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="tb" Command="{Binding BuildIndexCommand}"
+                            ToolTip.Tip="Reads the text of every file under a folder (documents, plus readable strings from binaries) into the index">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Plus}" Width="14" Height="14" />
+                            <TextBlock Text="Index a folder…" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tb" Content="Stop" Command="{Binding BuildIndexCancelCommand}"
+                            IsVisible="{Binding IsIndexing}" />
+                    <Button Classes="tb" Content="Open existing index…" Command="{Binding PickIndexFolderCommand}"
+                            ToolTip.Tip="Reopen an index folder you built earlier" />
+                </StackPanel>
+                <TextBlock Grid.Column="1" Classes="path" Margin="14,0" Text="{Binding IndexPath}"
+                           ToolTip.Tip="{Binding IndexPath}" />
+                <c:ExportButton Grid.Column="2" ExportCommand="{Binding ExportCommand}" VerticalAlignment="Center"
+                                IsVisible="{Binding Hits.Count}" />
             </Grid>
         </Border>
-        <Border Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="14,10">
+
+        <Border Grid.Row="1" Padding="14,10,12,10" IsVisible="{Binding HasIndex}"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="*,Auto">
-                <TextBox Grid.Column="0" Text="{Binding Query, Mode=TwoWay}"
-                         Watermark="Lucene query — text:foo OR source:evtx OR user:alice"
-                         FontFamily="{DynamicResource CinderFontFamilyMono}">
-                    <TextBox.KeyBindings>
-                        <KeyBinding Gesture="Return" Command="{Binding RunCommand}" />
-                    </TextBox.KeyBindings>
-                </TextBox>
-                <Button Grid.Column="1" Margin="6,0,0,0" Classes="accent" Content="Search"
+                <Border Classes="field" Height="32" Padding="10,0,8,0">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <c:CinderIcon Data="{x:Static c:Icons.Search}" Width="14" Height="14"
+                                      Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+                        <TextBox Grid.Column="1" Classes="bare" Margin="8,0,0,0" FontSize="13"
+                                 Text="{Binding Query, Mode=TwoWay}"
+                                 Watermark="Words to find. Use &quot;quotes&quot; for a phrase, AND / OR between terms, path: or text: to search one field">
+                            <TextBox.KeyBindings>
+                                <KeyBinding Gesture="Return" Command="{Binding RunCommand}" />
+                            </TextBox.KeyBindings>
+                        </TextBox>
+                    </Grid>
+                </Border>
+                <Button Grid.Column="1" Margin="8,0,0,0" Classes="accent" Height="32" Padding="16,0" Content="Search"
                         Command="{Binding RunCommand}" />
             </Grid>
         </Border>
-        <Grid Grid.Row="2" RowDefinitions="Auto,*">
-            <TextBlock Grid.Row="0" Text="{Binding StatusLine}" Margin="14,4"
-                       FontSize="{DynamicResource CinderFontSizeXs}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            <DataGrid Grid.Row="1" ItemsSource="{Binding Hits}"
-                      AutoGenerateColumns="False" IsReadOnly="True"
-                      Background="{DynamicResource CinderBackground0Brush}">
+
+        <Panel Grid.Row="2">
+            <DataGrid ItemsSource="{Binding Hits}" SelectedItem="{Binding SelectedHit}"
+                      AutoGenerateColumns="False" IsReadOnly="True" IsVisible="{Binding Hits.Count}"
+                      DoubleTapped="OnHitDoubleTapped">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Score"     Binding="{Binding Score, StringFormat=F2}" Width="70" />
-                    <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp, StringFormat=u}" Width="200" />
-                    <DataGridTextColumn Header="Source"    Binding="{Binding Source}" Width="160" />
-                    <DataGridTextColumn Header="User"      Binding="{Binding User}"   Width="120" />
-                    <DataGridTextColumn Header="Path"      Binding="{Binding Path}"   Width="240" />
-                    <DataGridTextColumn Header="Summary"   Binding="{Binding Summary}" Width="*" />
+                    <DataGridTextColumn Header="Match" Binding="{Binding Score, StringFormat=F2}" Width="70"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="File" Binding="{Binding Summary}" Width="240" />
+                    <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="*"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Modified (UTC)" Binding="{Binding Timestamp, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" Width="170"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
                 </DataGrid.Columns>
             </DataGrid>
-        </Grid>
+            <c:EmptyState Icon="{x:Static c:Icons.Search}" Title="Search across a whole folder"
+                          IsVisible="{Binding !HasIndex}"
+                          Message="Cinder reads the text out of every file under a folder (documents, and readable strings from programs and other binaries) and builds an index. After that, searches come back instantly. The index is stored in a folder you choose and can be reopened later.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="Index a folder…"
+                        Command="{Binding BuildIndexCommand}" />
+            </c:EmptyState>
+            <c:EmptyState Icon="{x:Static c:Icons.Search}" Title="{Binding ReadyTitle}" Message="{Binding ReadyMessage}"
+                          IsVisible="{Binding ShowReadyState}" />
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,40" Spacing="10"
+                        IsVisible="{Binding IsIndexing}">
+                <ProgressBar IsIndeterminate="True" Width="200" />
+            </StackPanel>
+        </Panel>
+
+        <Border Grid.Row="3" Classes="footer">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Text="{Binding Hits.Count, StringFormat='{}{0:N0} results'}" Classes="mono" IsVisible="{Binding Hits.Count}" />
+                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Margin="16,0,0,0" />
+                <TextBlock Grid.Column="2" Text="Double-click a result to open it in the Hex Viewer" IsVisible="{Binding Hits.Count}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
+            </Grid>
+        </Border>
     </Grid>
 </UserControl>

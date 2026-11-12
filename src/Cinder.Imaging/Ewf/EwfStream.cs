@@ -12,12 +12,15 @@ namespace Cinder.Imaging.Ewf;
 /// indistinguishable from end-of-stream to a hasher or a carver, which would then report a
 /// clean result over a partially-read image.</para>
 /// </summary>
-public sealed class EwfStream : Stream
+public sealed class EwfStream : Stream, IEvidenceDamageSource
 {
     private readonly EwfReader _reader;
     private long _position;
     private byte[]? _cachedChunkData;
     private int _cachedChunkIndex = -1;
+
+    /// <inheritdoc />
+    public IReadOnlyList<int> DamagedChunks => _reader.DamagedChunks;
 
     public EwfStream(EwfReader reader)
     {

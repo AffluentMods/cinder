@@ -17,4 +17,17 @@ public sealed record FileEntry(
     string? Owner,
     string? Group,
     int? UnixMode,
-    IReadOnlyDictionary<string, string>? Extras = null);
+    IReadOnlyDictionary<string, string>? Extras = null)
+{
+    /// <summary>
+    /// True when this entry's timestamp fields are <em>not</em> UTC instants despite their
+    /// names: the filesystem (FAT) records local wall-clock time and no zone, so the fields
+    /// hold that reading exactly as written, with a placeholder offset of +00:00. Show such a
+    /// value as "local time, zone not recorded" — never with a "Z" or "UTC" suffix, and never
+    /// converted. Set by the walker through <c>Extras["time_basis"] = "local-unknown-zone"</c>.
+    /// </summary>
+    public bool TimesAreLocalWallClock =>
+        Extras is not null
+        && Extras.TryGetValue(DiscUtilsWalker.TimeBasisKey, out var basis)
+        && basis == DiscUtilsWalker.TimeBasisLocalUnknownZone;
+}

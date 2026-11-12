@@ -30,36 +30,90 @@ public static class WriteBlockerService
 }
 
 /// <summary>
-/// Linux software write-blocker. Toggles <c>blockdev --setro &lt;dev&gt;</c> on every block device
-/// returned by <c>lsblk -dno NAME</c>. Doesn't block userland writes through the VFS — that's the
-/// <c>dm-readonly</c> device-mapper wrap, which Phase 2.1 will add. For Phase 2 this is enough to
-/// freeze sd*/nvme* writes from the kernel down.
+/// Linux software write-blocker. Runs <c>blockdev --setro &lt;dev&gt;</c> on every disk
+/// <c>lsblk -dno NAME,TYPE</c> lists, then reads the flag back with <c>blockdev --getro</c>.
+/// Doesn't block userland writes through the VFS — that's the <c>dm-readonly</c> device-mapper
+/// wrap, which Phase 2.1 will add. For Phase 2 this is enough to freeze sd*/nvme* writes from
+/// the kernel down.
+///
+/// <para>A device counts as protected only when <c>blockdev</c> exited 0 <em>and</em> the flag
+/// reads back as set. <see cref="TryEngage"/> returns true, and <see cref="IsActive"/> is true,
+/// only when that holds for every device; the ones it does not hold for are listed in
+/// <see cref="FailedDevices"/>. A blocker that says it is engaged while a disk is still
+/// writable is worse than none.</para>
 /// </summary>
 [SupportedOSPlatform("linux")]
 public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
 {
-    private readonly HashSet<string> _frozen = new();
+    /// <summary>Runs a command and returns its exit code and standard output.</summary>
+    internal delegate (int ExitCode, string Output) CommandRunner(string file, IReadOnlyList<string> args);
 
-    public bool IsActive => _frozen.Count > 0;
+    private readonly CommandRunner _run;
+    private readonly HashSet<string> _frozen = new();
+    private readonly List<string> _failed = new();
+
+    public LinuxBlockdevWriteBlocker()
+        : this(RunProcess)
+    {
+    }
+
+    /// <summary>Test seam: the commands go to <paramref name="run"/> instead of real processes.</summary>
+    internal LinuxBlockdevWriteBlocker(CommandRunner run)
+    {
+        _run = run ?? throw new ArgumentNullException(nameof(run));
+    }
+
+    public bool IsActive => _frozen.Count > 0 && _failed.Count == 0;
+
+    /// <summary>Devices the last <see cref="TryEngage"/> could not set, or could not confirm, read-only.</summary>
+    public IReadOnlyList<string> FailedDevices => _failed;
+
+    /// <summary>Devices confirmed read-only.</summary>
+    public IReadOnlyCollection<string> ProtectedDevices => _frozen;
 
     public bool TryEngage()
     {
+        _failed.Clear();
+        List<string> devs;
         try
         {
-            var devs = ListBlockDevices();
-            foreach (var d in devs)
+            devs = ListBlockDevices();
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (var d in devs)
+        {
+            // SECURITY: `d` comes from lsblk output. We allow-list valid device-name
+            // characters before splicing it into a device path — defense in depth even
+            // though blockdev runs as a separate Process invocation with ArgumentList.
+            // A name that fails the check is a device left unprotected, so it is a failure.
+            if (IsSafeDeviceName(d) && SetAndConfirmReadOnly(d))
             {
-                // SECURITY: `d` comes from lsblk output. We allow-list valid device-name
-                // characters before splicing it into a device path — defense in depth even
-                // though blockdev runs as a separate Process invocation with ArgumentList.
-                if (!IsSafeDeviceName(d))
-                {
-                    continue;
-                }
-                Run("blockdev", ["--setro", "/dev/" + d]);
                 _frozen.Add(d);
             }
-            return _frozen.Count > 0;
+            else
+            {
+                _frozen.Remove(d);
+                _failed.Add(d);
+            }
+        }
+        return IsActive;
+    }
+
+    private bool SetAndConfirmReadOnly(string device)
+    {
+        try
+        {
+            var path = "/dev/" + device;
+            if (_run("blockdev", ["--setro", path]).ExitCode != 0)
+            {
+                return false;
+            }
+            var check = _run("blockdev", ["--getro", path]);
+            return check.ExitCode == 0 && check.Output.Trim() == "1";
         }
         catch
         {
@@ -78,8 +132,14 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
                 {
                     continue;
                 }
-                Run("blockdev", ["--setrw", "/dev/" + d]);
-                _frozen.Remove(d);
+                if (_run("blockdev", ["--setrw", "/dev/" + d]).ExitCode == 0)
+                {
+                    _frozen.Remove(d);
+                }
+                else
+                {
+                    ok = false;
+                }
             }
             catch
             {
@@ -106,32 +166,46 @@ public sealed class LinuxBlockdevWriteBlocker : IWriteBlocker
         return true;
     }
 
-    private static IEnumerable<string> ListBlockDevices()
+    /// <summary>
+    /// Whole devices from <c>lsblk</c>, without optical drives: <c>rom</c> devices are not
+    /// acquisition targets, and <c>blockdev</c> cannot open one that has no disc in it.
+    /// </summary>
+    private List<string> ListBlockDevices()
     {
-        var psi = new ProcessStartInfo(ExecutableResolver.ResolveRequired("lsblk"))
+        var (exit, raw) = _run("lsblk", ["-dno", "NAME,TYPE"]);
+        if (exit != 0)
+        {
+            throw new InvalidOperationException($"lsblk: exit {exit}");
+        }
+        var names = new List<string>();
+        foreach (var line in raw.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0 || (parts.Length > 1 && parts[1] == "rom"))
+            {
+                continue;
+            }
+            names.Add(parts[0]);
+        }
+        return names;
+    }
+
+    private static (int ExitCode, string Output) RunProcess(string file, IReadOnlyList<string> args)
+    {
+        var psi = new ProcessStartInfo(ExecutableResolver.ResolveRequired(file))
         {
             RedirectStandardOutput = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        psi.ArgumentList.Add("-dno");
-        psi.ArgumentList.Add("NAME");
-        using var p = new Process { StartInfo = psi };
-        p.Start();
-        var raw = p.StandardOutput.ReadToEnd();
-        p.WaitForExit();
-        return raw.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim());
-    }
-
-    private static void Run(string file, IReadOnlyList<string> args)
-    {
-        var psi = new ProcessStartInfo(ExecutableResolver.ResolveRequired(file)) { UseShellExecute = false, CreateNoWindow = true };
         foreach (var a in args)
         {
             psi.ArgumentList.Add(a);
         }
-        using var p = Process.Start(psi);
-        p?.WaitForExit();
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"{file}: could not be started");
+        var output = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        return (p.ExitCode, output);
     }
 }
 

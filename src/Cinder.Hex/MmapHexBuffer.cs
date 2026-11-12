@@ -38,7 +38,9 @@ public sealed class MmapHexBuffer : IHexBuffer
 
     public int Read(long offset, Span<byte> destination)
     {
-        if (Length == 0 || offset >= Length)
+        // A negative offset would index before the start of the mapping: an unchecked read of
+        // unrelated process memory, or an access violation that takes the application down.
+        if (Length == 0 || offset < 0 || offset >= Length)
         {
             return 0;
         }

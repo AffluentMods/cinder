@@ -11,6 +11,9 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
     [ObservableProperty]
     private string _theme = "Dark";
 
+    // Density, Vim mode, reduce-motion, update check, Python executable and parsers directory
+    // are not on the dialog (nothing in the app reads them yet). They are still loaded and
+    // written back, so saving from the dialog never strips them out of an existing file.
     [ObservableProperty]
     private string _density = "Comfortable";
 
@@ -46,6 +49,17 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
     [ObservableProperty] private string? _oneDriveClientId;
     [ObservableProperty] private string? _dropboxAppKey;
 
+    /// <summary>
+    /// Why the last <see cref="SaveCommand"/> did not save, or — straight after opening — why
+    /// the settings file could not be read. Null when there is nothing wrong. The view can
+    /// bind this, and should keep the dialog open while it is set.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSaveError))]
+    private string? _saveError;
+
+    public bool HasSaveError => !string.IsNullOrEmpty(SaveError);
+
     public IReadOnlyList<string> ThemeOptions { get; } = ["Dark", "Light", "System"];
     public IReadOnlyList<string> DensityOptions { get; } = ["Comfortable", "Compact"];
     public IReadOnlyList<string> AiProviderOptions { get; } =
@@ -54,7 +68,11 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
     public SettingsDialogViewModel(SettingsStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
-        var s = _store.Load();
+        if (!_store.TryLoad(out var s, out var error))
+        {
+            // Shown as defaults, but Save will refuse to write them over the unreadable file.
+            SaveError = $"The settings file could not be read ({error}). It will not be overwritten.";
+        }
         Theme = s.Theme;
         Density = s.Density;
         VimModeInHex = s.VimModeInHex;
@@ -65,7 +83,8 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
         AiProviderId = s.AiProvider.GetValueOrDefault("id", "disabled");
         AiEndpoint = s.AiProvider.GetValueOrDefault("endpoint");
         AiModel = s.AiProvider.GetValueOrDefault("model");
-        AiApiKey = s.AiProvider.GetValueOrDefault("api_key");
+        // The store presents the key under one spelling whichever one the file used.
+        AiApiKey = s.AiProvider.GetValueOrDefault(SettingsStore.ApiKeyName);
         GoogleDriveClientId = s.CloudClientIds.GetValueOrDefault("google-drive");
         OneDriveClientId = s.CloudClientIds.GetValueOrDefault("onedrive");
         DropboxAppKey = s.CloudClientIds.GetValueOrDefault("dropbox");
@@ -75,37 +94,72 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
         TimestampAuthorityUrl = s.TimestampAuthorityUrl;
     }
 
+    /// <summary>
+    /// Saves and applies the settings. Never throws: a failure (disk full, file locked, or a
+    /// settings file that exists but cannot be read) is put in <see cref="SaveError"/> and
+    /// shown in the shell's status bar, because the dialog that called this may close at once.
+    /// </summary>
     [RelayCommand]
     private void Save()
     {
-        var ai = new Dictionary<string, string>(StringComparer.Ordinal)
+        try
         {
-            ["id"] = AiProviderId ?? "disabled",
-        };
-        if (!string.IsNullOrEmpty(AiEndpoint)) ai["endpoint"] = AiEndpoint;
-        if (!string.IsNullOrEmpty(AiModel)) ai["model"] = AiModel;
-        if (!string.IsNullOrEmpty(AiApiKey)) ai["api_key"] = AiApiKey;
+            // Start from what is on disk now, not from what was there when the dialog opened:
+            // anything this dialog does not edit (enabled plug-ins, a hash-set database picked
+            // in its own tool meanwhile, keys added by a newer build) is carried through.
+            if (!_store.TryLoad(out var current, out var error))
+            {
+                throw new SettingsUnreadableException(_store.Path, error ?? "unknown error");
+            }
 
-        var cloud = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(GoogleDriveClientId)) cloud["google-drive"] = GoogleDriveClientId;
-        if (!string.IsNullOrEmpty(OneDriveClientId)) cloud["onedrive"] = OneDriveClientId;
-        if (!string.IsNullOrEmpty(DropboxAppKey)) cloud["dropbox"] = DropboxAppKey;
+            var ai = new Dictionary<string, string>(current.AiProvider, StringComparer.Ordinal);
+            SetOrRemove(ai, "id", AiProviderId ?? "disabled");
+            SetOrRemove(ai, "endpoint", AiEndpoint);
+            SetOrRemove(ai, "model", AiModel);
+            SetOrRemove(ai, SettingsStore.ApiKeyName, AiApiKey);
 
-        _store.Save(new CinderSettings
+            var cloud = new Dictionary<string, string>(current.CloudClientIds, StringComparer.Ordinal);
+            SetOrRemove(cloud, "google-drive", GoogleDriveClientId);
+            SetOrRemove(cloud, "onedrive", OneDriveClientId);
+            SetOrRemove(cloud, "dropbox", DropboxAppKey);
+
+            _store.Save(current with
+            {
+                Theme = Theme,
+                Density = Density,
+                VimModeInHex = VimModeInHex,
+                RespectReduceMotion = RespectReduceMotion,
+                CheckForUpdates = CheckForUpdates,
+                PythonExecutable = PythonExecutable,
+                ParsersDirectory = ParsersDirectory,
+                AiProvider = ai,
+                CloudClientIds = cloud,
+                HashSetDatabase = string.IsNullOrWhiteSpace(HashSetDatabase) ? null : HashSetDatabase,
+                HashFilesOnEnumerate = HashFilesOnEnumerate,
+                HashSizeLimitMb = Math.Clamp(HashSizeLimitMb, 1, 4096),
+                TimestampAuthorityUrl = string.IsNullOrWhiteSpace(TimestampAuthorityUrl) ? null : TimestampAuthorityUrl.Trim(),
+            });
+
+            SaveError = null;
+            ThemeService.Apply(Theme);
+        }
+        catch (Exception ex)
         {
-            Theme = Theme,
-            Density = Density,
-            VimModeInHex = VimModeInHex,
-            RespectReduceMotion = RespectReduceMotion,
-            CheckForUpdates = CheckForUpdates,
-            PythonExecutable = PythonExecutable,
-            ParsersDirectory = ParsersDirectory,
-            AiProvider = ai,
-            CloudClientIds = cloud,
-            HashSetDatabase = string.IsNullOrWhiteSpace(HashSetDatabase) ? null : HashSetDatabase,
-            HashFilesOnEnumerate = HashFilesOnEnumerate,
-            HashSizeLimitMb = Math.Clamp(HashSizeLimitMb, 1, 4096),
-            TimestampAuthorityUrl = string.IsNullOrWhiteSpace(TimestampAuthorityUrl) ? null : TimestampAuthorityUrl.Trim(),
-        });
+            Serilog.Log.Warning(ex, "Settings were not saved");
+            SaveError = "Settings were not saved: " + ex.Message;
+            ShellNotice.Error(SaveError);
+        }
+    }
+
+    private static void SetOrRemove(Dictionary<string, string> map, string key, string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            map.Remove(key);
+        }
+        else
+        {
+            map[key] = value;
+        }
     }
 }

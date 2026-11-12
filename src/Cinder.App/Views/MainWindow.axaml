@@ -23,17 +23,13 @@
         <KeyBinding Gesture="Ctrl+Shift+P" Command="{Binding OpenPaletteCommand}" />
         <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenFileCommand}" />
         <KeyBinding Gesture="Ctrl+N" Command="{Binding CreateCaseCommand}" />
-        <KeyBinding Gesture="Ctrl+F" Command="{Binding FocusFindCommand}" />
-        <KeyBinding Gesture="F3" Command="{Binding Hex.FindNextCommand}" />
-        <KeyBinding Gesture="Shift+F3" Command="{Binding Hex.FindPreviousCommand}" />
-        <KeyBinding Gesture="Ctrl+G" Command="{Binding OpenGotoCommand}" />
-        <KeyBinding Gesture="Ctrl+D" Command="{Binding Hex.AddBookmarkCommand}" />
-        <KeyBinding Gesture="Alt+Left" Command="{Binding Hex.NavigateBackCommand}" />
-        <KeyBinding Gesture="Alt+Right" Command="{Binding Hex.NavigateForwardCommand}" />
-        <KeyBinding Gesture="Ctrl+C" Command="{Binding Hex.CopySelectionAsHexCommand}" />
-        <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseBufferCommand}" CommandParameter="{Binding Hex}" />
+        <!-- Shortcuts that act on the Hex Viewer (find next, bookmark, copy, close tab, go to, back /
+             forward) are handled in code-behind and only while the Hex Viewer is the tool on
+             screen. Bound here they fired from every tool: Ctrl+W in Registry closed a hex tab
+             the examiner could not see, and Ctrl+C replaced the clipboard with hex bytes. -->
         <KeyBinding Gesture="Ctrl+B" Command="{Binding ToggleRailCommand}" />
-        <KeyBinding Gesture="Ctrl+Alt+B" Command="{Binding ToggleInspectorCommand}" />
+        <!-- Not Ctrl+Alt+B: that is AltGr+B, which types "{" on Czech, Slovak, Hungarian and Croatian keyboards. -->
+        <KeyBinding Gesture="Ctrl+Shift+B" Command="{Binding ToggleInspectorCommand}" />
         <KeyBinding Gesture="Ctrl+OemComma" Command="{Binding OpenSettingsCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+O" Command="{Binding OpenCaseFromPickerCommand}" />
         <KeyBinding Gesture="F1" Command="{Binding OpenHelpCommand}" />
@@ -314,7 +310,7 @@
                     </Grid>
                 </Border>
 
-                <ContentControl Content="{Binding Workspace.SelectedTool}"
+                <ContentControl x:Name="ToolArea" Content="{Binding Workspace.SelectedTool}"
                                 ContentTemplate="{StaticResource ToolContentTemplate}" />
             </DockPanel>
 
@@ -338,7 +334,7 @@
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
                     <Ellipse Classes="status-dot ok" />
                     <TextBlock Text="{Binding ActivityHeadline}" Classes="muted" VerticalAlignment="Center"
-                               MaxWidth="420" TextTrimming="CharacterEllipsis" />
+                               MaxWidth="520" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ActivityHeadline}" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14" Margin="16,0,0,0" VerticalAlignment="Center"

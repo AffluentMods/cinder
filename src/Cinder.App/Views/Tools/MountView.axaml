@@ -22,11 +22,16 @@
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
-                    IsVisible="{Binding MountedAt, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <StackPanel Spacing="4">
-                    <TextBlock Text="MOUNTED AT" Classes="section" />
-                    <SelectableTextBlock Text="{Binding MountedAt}" Classes="mono" FontSize="13" />
-                </StackPanel>
+                    IsVisible="{Binding IsMounted}">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="MOUNTED AT" Classes="section" />
+                        <SelectableTextBlock Text="{Binding MountedAt}" Classes="mono" FontSize="13" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="tb" Height="30" VerticalAlignment="Center" Content="Unmount"
+                            Command="{Binding UnmountCommand}"
+                            ToolTip.Tip="Detach the image. Close any program that has files open on it first." />
+                </Grid>
             </Border>
             <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
                     IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">

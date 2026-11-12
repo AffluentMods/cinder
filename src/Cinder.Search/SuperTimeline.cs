@@ -67,8 +67,14 @@ public sealed class SuperTimeline
         }
         foreach (var e in Range(from, to, filter))
         {
-            var idx = (int)(((e.Timestamp - from).Ticks * (long)buckets) / totalTicks);
-            if (idx == buckets) idx = buckets - 1;
+            // Not (ticks * buckets) / totalTicks: that product overflows Int64 once the window
+            // is wider than long.MaxValue / buckets ticks — about 456 years at 64 buckets. One
+            // artefact carrying a far-future FILETIME is enough to stretch the window that far,
+            // and the wrapped (negative) index threw out of every refresh of the timeline.
+            // The quotient is computed first (it is in [0, 1]) and the result clamped, so no
+            // timestamp, however implausible, can index outside the array.
+            var fraction = (double)(e.Timestamp - from).Ticks / totalTicks;
+            var idx = (int)Math.Clamp((long)(fraction * buckets), 0, buckets - 1);
             counts[idx]++;
         }
         return counts;

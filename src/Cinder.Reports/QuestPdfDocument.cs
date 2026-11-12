@@ -21,14 +21,24 @@ internal sealed class QuestPdfDocument : IDocument
 {
     private readonly Report _report;
     private readonly string _markdown;
+    private readonly bool _pdfA;
 
-    private QuestPdfDocument(Report report, string markdown)
+    private QuestPdfDocument(Report report, string markdown, bool pdfA)
     {
         _report = report;
         _markdown = markdown;
+        _pdfA = pdfA;
     }
 
-    public static QuestPdfDocument Create(Report report, string markdown) => new(report, markdown);
+    /// <param name="report">The report to render.</param>
+    /// <param name="markdown">The report's canonical Markdown (kept for parity with the other writers).</param>
+    /// <param name="pdfA">When true the file is written as PDF/A-2b: fonts embedded, XMP
+    /// metadata and an output intent present, nothing that an archive would reject.</param>
+    public static QuestPdfDocument Create(Report report, string markdown, bool pdfA = false) => new(report, markdown, pdfA);
+
+    public DocumentSettings GetSettings() => _pdfA
+        ? new DocumentSettings { PDFA_Conformance = PDFA_Conformance.PDFA_2B }
+        : DocumentSettings.Default;
 
     public DocumentMetadata GetMetadata() => new()
     {

@@ -14,12 +14,14 @@ Methods (all return JSON-serializable dicts):
     registry_amcache(amcache_hive)              -> {entries:[{path, sha1, first_seen, publisher}]}
     registry_usb(system_hive)                   -> {entries:[{device_id, friendly_name, first_connected, last_connected, serial}]}
     registry_wifi(software_hive)                -> {entries:[{ssid, first_seen, last_seen, auth}]}
-    prefetch(prefetch_dir)                      -> {entries:[{executable, hash, run_count, last_run, all_run_times[], loaded_files[]}]}
+    prefetch(prefetch_dir)                      -> {entries:[{executable, hash, run_count, last_run, all_run_times[], loaded_files[], version, source_file}],
+                                                    skipped:[{file, reason}], compressed_not_decoded}
     shellbags(ntuser_path, user)                -> {entries:[{user, path, first_accessed, last_accessed, access_count}]}
     jumplists(jumplist_dir, user)               -> {entries:[{user, app_id, target_path, access_time}]}
     lnk(path)                                   -> {target_path, arguments, icon, working_dir, target_created, target_modified, target_accessed, volume_serial, machine_id}
     evtx_page(path, cursor, limit)              -> {entries:[{record_id, event_id, provider, channel, computer, user, timestamp, level, summary}]}
-    browser_history(profile_path, browser, user)-> {entries:[{user, browser, url, title, visit_count, timestamp, visit_type}]}
+    browser_history(profile_path, browser, user)-> {entries:[{user, browser, url, title, visit_count, timestamp, visit_type}],
+                                                    row_errors, timestamp_errors, read_error?}
     srum_applications(srudb_path)               -> {entries:[{user, application, timestamp, fg_cpu_ms, bytes_read, bytes_written}]}
 """
 
@@ -34,7 +36,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from shared.protocol import Sidecar
+from shared.protocol import Sidecar, report_progress
 
 sidecar = Sidecar()
 
@@ -43,7 +45,10 @@ def _utc_iso(ts) -> str | None:
     if ts is None:
         return None
     if isinstance(ts, (int, float)):
-        return _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc).isoformat()
+        try:
+            return (_dt.datetime(1970, 1, 1, tzinfo=_dt.timezone.utc) + _dt.timedelta(seconds=ts)).isoformat()
+        except (OverflowError, ValueError):
+            return None  # not a representable time: unknown, never a made-up value
     if isinstance(ts, _dt.datetime):
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=_dt.timezone.utc)
@@ -157,41 +162,120 @@ def registry_wifi(params: Any) -> dict[str, Any]:
 
 # -------------------- Prefetch --------------------
 
+_FILETIME_EPOCH = _dt.datetime(1601, 1, 1, tzinfo=_dt.timezone.utc)
+
+# Only the header and the file-information block are parsed, so only that much is read.
+_PF_READ_BYTES = 0x200
+_PF_NAME_OFFSET = 0x10
+_PF_NAME_BYTES = 60        # UTF-16LE, 29 characters + terminator
+_PF_HASH_OFFSET = 0x4C
+_PF_METRICS_OFFSET_FIELD = 0x54
+
+# Format version -> (offset of the last-run FILETIME array, slots in it, offset of the run count).
+# The file-information block differs per version; these offsets are from the start of the file.
+#   17 = Windows XP / 2003, 23 = Vista / 7, 26 = 8 / 8.1, 30 = 10 / 11, 31 = 11 (same layout as 30)
+_PF_LAYOUT: dict[int, tuple[int, int, int]] = {
+    17: (0x78, 1, 0x90),
+    23: (0x80, 1, 0x98),
+    26: (0x80, 8, 0xD0),
+    30: (0x80, 8, 0xD0),
+    31: (0x80, 8, 0xD0),
+}
+# Version 30/31 has a second, 8-byte-shorter file-information variant (later Windows 10
+# builds). It is recognised by where the metrics array starts; its run count sits at 0xC8.
+_PF_V30_VARIANT2_METRICS_OFFSET = 0x128
+_PF_V30_VARIANT2_RUN_COUNT = 0xC8
+
+
+def _filetime_to_dt(filetime: int) -> _dt.datetime | None:
+    """FILETIME (100 ns ticks since 1601) -> datetime, or None if unset or out of range."""
+    if not filetime:
+        return None
+    try:
+        return _FILETIME_EPOCH + _dt.timedelta(microseconds=filetime // 10)
+    except (OverflowError, ValueError):
+        return None
+
+
+class PrefetchSkipped(Exception):
+    """This file is not something the parser can turn into a row; str(ex) says why."""
+
+
+def parse_prefetch(data: bytes) -> dict[str, Any]:
+    """Parse the header of one uncompressed Prefetch file.
+
+    Layout: bytes 0-3 format version, bytes 4-7 the signature ``SCCA``, 8-11 unknown,
+    12-15 file size, 16-75 executable name, 76-79 path hash. Raises PrefetchSkipped for
+    anything else, including MAM-compressed files (Windows 10+), which are identified but
+    not decoded here.
+    """
+    if data[:3] == b"MAM":
+        raise PrefetchSkipped("compressed (MAM), not decoded")
+    if len(data) < 8 or data[4:8] != b"SCCA":
+        raise PrefetchSkipped("not a Prefetch file (no SCCA signature at offset 4)")
+    version = struct.unpack_from("<I", data, 0)[0]
+    layout = _PF_LAYOUT.get(version)
+    if layout is None:
+        raise PrefetchSkipped(f"unsupported Prefetch format version {version}")
+    last_run_offset, last_run_slots, run_count_offset = layout
+    if version >= 30 and len(data) >= _PF_METRICS_OFFSET_FIELD + 4:
+        metrics_offset = struct.unpack_from("<I", data, _PF_METRICS_OFFSET_FIELD)[0]
+        if metrics_offset == _PF_V30_VARIANT2_METRICS_OFFSET:
+            run_count_offset = _PF_V30_VARIANT2_RUN_COUNT
+    needed = max(last_run_offset + 8 * last_run_slots, run_count_offset + 4)
+    if len(data) < needed:
+        raise PrefetchSkipped(f"truncated: {len(data)} bytes, version {version} header needs {needed}")
+
+    raw_name = data[_PF_NAME_OFFSET:_PF_NAME_OFFSET + _PF_NAME_BYTES]
+    name = raw_name.decode("utf-16-le", errors="replace").split("\x00", 1)[0]
+    file_hash = struct.unpack_from("<I", data, _PF_HASH_OFFSET)[0]
+    run_count = struct.unpack_from("<I", data, run_count_offset)[0]
+    run_times = [
+        _filetime_to_dt(struct.unpack_from("<Q", data, last_run_offset + 8 * i)[0])
+        for i in range(last_run_slots)
+    ]
+    run_times = [t for t in run_times if t is not None]  # slot 0 is the most recent run
+    return {
+        "executable": name,
+        "hash": f"{file_hash:08X}",
+        "run_count": int(run_count),
+        "last_run": _utc_iso(run_times[0]) if run_times else None,
+        "all_run_times": [_utc_iso(t) for t in run_times],
+        "loaded_files": [],
+        "version": version,
+    }
+
+
 @sidecar.method("prefetch")
 def prefetch(params: Any) -> dict[str, Any]:
-    """Phase 4 ships a minimal Win10+ Prefetch parser. For full Win7/8/10/11 coverage, use
-    PECmd's CSV import path (TODO 4.1: shell out to PECmd when available)."""
+    """Minimal Prefetch parser: executable name, path hash, run count and last-run times for
+    format versions 17, 23, 26 and 30/31. MAM-compressed files (the norm on Windows 10+)
+    are not decoded: each one is listed in ``skipped`` with the reason, never dropped
+    silently. (TODO 4.1: decode MAM / shell out to PECmd when available.)"""
     pf_dir = Path(params["prefetch_dir"])
-    out = []
-    for f in pf_dir.glob("*.pf"):
+    out: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    for f in sorted(pf_dir.iterdir(), key=lambda p: p.name.lower()):
+        if f.suffix.lower() != ".pf":
+            continue
         try:
-            data = f.read_bytes()
-            if data[:4] not in (b"SCCA", b"MAM\x04"):
-                continue
-            # MAM = compressed (Win10+). For now skip MAM and let a future PECmd integration handle it.
-            if data[:4] == b"MAM\x04":
-                continue
-            # SCCA: uncompressed Prefetch. Header: version(4) signature(4) unk(4) filesize(4)
-            # name(120 UTF-16LE) hash(4) ...
-            name = data[16:16 + 120].decode("utf-16-le", errors="replace").rstrip("\x00")
-            file_hash = struct.unpack_from("<I", data, 0x4C)[0] if len(data) >= 0x50 else 0
-            run_count = struct.unpack_from("<I", data, 0x98)[0] if len(data) >= 0x9C else 0
-            last_run_filetime = struct.unpack_from("<Q", data, 0x80)[0] if len(data) >= 0x88 else 0
-            last_run = (
-                _dt.datetime(1601, 1, 1, tzinfo=_dt.timezone.utc) + _dt.timedelta(microseconds=last_run_filetime / 10)
-                if last_run_filetime else None
-            )
-            out.append({
-                "executable": name,
-                "hash": f"{file_hash:08X}",
-                "run_count": int(run_count),
-                "last_run": _utc_iso(last_run),
-                "all_run_times": [_utc_iso(last_run)] if last_run else [],
-                "loaded_files": [],
-            })
+            if not f.is_file():
+                raise PrefetchSkipped("not a regular file")
+            with f.open("rb") as fh:
+                data = fh.read(_PF_READ_BYTES)
+            entry = parse_prefetch(data)
+            entry["source_file"] = f.name
+            out.append(entry)
+        except PrefetchSkipped as ex:
+            skipped.append({"file": f.name, "reason": str(ex)})
         except Exception as ex:
+            skipped.append({"file": f.name, "reason": f"unreadable: {ex}"})
             sys.stderr.write(f"[prefetch] {f.name}: {ex}\n")
-    return {"entries": out}
+    return {
+        "entries": out,
+        "skipped": skipped,
+        "compressed_not_decoded": sum(1 for s in skipped if s["reason"].startswith("compressed")),
+    }
 
 
 # -------------------- Shellbags / Jumplists --------------------
@@ -281,6 +365,7 @@ def _load_evtx(path: str) -> list[dict[str, Any]]:
     ns = "{http://schemas.microsoft.com/win/2004/08/events/event}"
     with Evtx(path) as evtx:
         for r in evtx.records():
+            report_progress(records=len(rows))
             try:
                 xml = evtx_record_xml_view(r)
                 root = ET.fromstring(xml)
@@ -321,12 +406,107 @@ def evtx_page(params: Any) -> dict[str, Any]:
 # -------------------- Browser history (Chromium / Firefox) --------------------
 
 _CHROME_EPOCH = _dt.datetime(1601, 1, 1, tzinfo=_dt.timezone.utc)
+_UNIX_EPOCH = _dt.datetime(1970, 1, 1, tzinfo=_dt.timezone.utc)
+
+# A live SQLite database is more than one file: recent writes sit in <db>-wal (indexed by
+# <db>-shm) until a checkpoint, and an interrupted transaction leaves <db>-journal. Firefox
+# runs places.sqlite in WAL mode, so without the -wal file the newest visits are missing.
+_SQLITE_COMPANION_SUFFIXES = ("-wal", "-shm", "-journal")
 
 
-def _chrome_to_dt(micros: int) -> _dt.datetime | None:
-    if not micros:
+def _micros_to_dt(epoch: _dt.datetime, micros: Any) -> _dt.datetime | None:
+    """Microseconds since ``epoch`` -> datetime. None when unset; raises ValueError when the
+    stored value is not a representable time (hostile or corrupt row)."""
+    if micros is None or micros == 0:
         return None
-    return _CHROME_EPOCH + _dt.timedelta(microseconds=micros)
+    if isinstance(micros, bool) or not isinstance(micros, (int, float)):
+        raise ValueError(f"timestamp is not a number: {type(micros).__name__}")
+    try:
+        return epoch + _dt.timedelta(microseconds=micros)
+    except (OverflowError, ValueError) as ex:
+        raise ValueError(f"timestamp out of range: {micros}") from ex
+
+
+def _chrome_to_dt(micros: Any) -> _dt.datetime | None:
+    return _micros_to_dt(_CHROME_EPOCH, micros)
+
+
+def _lossy_text(value: bytes) -> str:
+    return value.decode("utf-8", errors="replace")
+
+
+def _as_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return _lossy_text(bytes(value))
+    return str(value)
+
+
+def _read_history_db(db_path: Path, query: str) -> tuple[list[tuple[Any, ...]], str | None]:
+    """Run ``query`` against a private copy of ``db_path`` and return (rows, read_error).
+
+    The evidence directory is never written to: the database and its -wal / -shm /
+    -journal companions are copied into a fresh temporary directory (which is removed
+    afterwards) and SQLite only ever opens the copy. Text is decoded leniently so one
+    title with invalid UTF-8 cannot fail the query. If the database is damaged part-way
+    through, the rows read up to that point are returned together with the error text.
+    """
+    import shutil
+    import tempfile
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="cinder-history-"))
+    rows: list[tuple[Any, ...]] = []
+    read_error: str | None = None
+    try:
+        copy = tmp_dir / db_path.name
+        shutil.copyfile(db_path, copy)  # contents only: a read-only source must not make a read-only copy
+        for suffix in _SQLITE_COMPANION_SUFFIXES:
+            companion = db_path.with_name(db_path.name + suffix)
+            if companion.is_file():
+                shutil.copyfile(companion, tmp_dir / companion.name)
+        con = sqlite3.connect(str(copy))
+        try:
+            con.text_factory = _lossy_text
+            try:
+                for row in con.execute(query):
+                    rows.append(tuple(row))
+            except sqlite3.Error as ex:
+                read_error = str(ex)
+        finally:
+            con.close()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    return rows, read_error
+
+
+def _history_rows(raw_rows: list[tuple[Any, ...]], user: str, browser: str,
+                  epoch: _dt.datetime) -> tuple[list[dict[str, Any]], int, int]:
+    """Convert raw (url, title, visit_count, last_visit) rows one at a time. A row that
+    cannot be converted is counted and skipped; a row whose only problem is its timestamp
+    is kept with ``timestamp: null`` and counted separately. Nothing is made up: a NULL
+    visit count stays null."""
+    out: list[dict[str, Any]] = []
+    row_errors = 0
+    timestamp_errors = 0
+    for raw in raw_rows:
+        try:
+            url, title, visit_count, last_visit = raw
+            try:
+                timestamp = _utc_iso(_micros_to_dt(epoch, last_visit))
+            except ValueError:
+                timestamp = None
+                timestamp_errors += 1
+            out.append({
+                "user": user, "browser": browser,
+                "url": _as_text(url) or "", "title": _as_text(title) or "",
+                "visit_count": int(visit_count) if isinstance(visit_count, (int, float)) else None,
+                "timestamp": timestamp,
+                "visit_type": None,
+            })
+        except Exception:
+            row_errors += 1
+    return out, row_errors, timestamp_errors
 
 
 @sidecar.method("browser_history")
@@ -334,57 +514,32 @@ def browser_history(params: Any) -> dict[str, Any]:
     profile = Path(params["profile_path"])
     browser = params["browser"].lower()
     user = params.get("user", "?")
-    out: list[dict[str, Any]] = []
     if browser in ("chrome", "chromium", "edge", "brave", "opera"):
-        history_db = profile / "History"
-        if not history_db.exists():
-            return {"entries": []}
-        # SQLite is locked while the browser runs — copy first.
-        import shutil
-        tmp = profile / "_cinder_tmp_history.sqlite"
-        shutil.copy2(history_db, tmp)
-        try:
-            con = sqlite3.connect(tmp)
-            cur = con.execute("SELECT url, title, visit_count, last_visit_time FROM urls ORDER BY last_visit_time DESC")
-            for url, title, vc, lvt in cur.fetchall():
-                out.append({
-                    "user": user, "browser": browser,
-                    "url": url, "title": title or "",
-                    "visit_count": int(vc or 1),
-                    "timestamp": _utc_iso(_chrome_to_dt(lvt)),
-                    "visit_type": None,
-                })
-            con.close()
-        finally:
-            try: tmp.unlink()
-            except Exception: pass
+        db_path = profile / "History"
+        query = "SELECT url, title, visit_count, last_visit_time FROM urls ORDER BY last_visit_time DESC"
+        epoch = _CHROME_EPOCH   # microseconds since 1601
     elif browser == "firefox":
-        places = profile / "places.sqlite"
-        if not places.exists():
-            return {"entries": []}
-        import shutil
-        tmp = profile / "_cinder_tmp_places.sqlite"
-        shutil.copy2(places, tmp)
-        try:
-            con = sqlite3.connect(tmp)
-            cur = con.execute("SELECT url, title, visit_count, last_visit_date FROM moz_places ORDER BY last_visit_date DESC")
-            for url, title, vc, lvd in cur.fetchall():
-                ts = _dt.datetime.fromtimestamp((lvd or 0) / 1_000_000, tz=_dt.timezone.utc) if lvd else None
-                out.append({
-                    "user": user, "browser": browser,
-                    "url": url, "title": title or "",
-                    "visit_count": int(vc or 1),
-                    "timestamp": _utc_iso(ts),
-                    "visit_type": None,
-                })
-            con.close()
-        finally:
-            try: tmp.unlink()
-            except Exception: pass
+        db_path = profile / "places.sqlite"
+        query = "SELECT url, title, visit_count, last_visit_date FROM moz_places ORDER BY last_visit_date DESC"
+        epoch = _UNIX_EPOCH     # microseconds since 1970
     elif browser == "safari":
         # TODO 4.1: parse plist + History.db
         return {"entries": [], "todo": "safari history parsing"}
-    return {"entries": out}
+    else:
+        return {"entries": []}
+    if not db_path.is_file():
+        return {"entries": []}
+
+    raw_rows, read_error = _read_history_db(db_path, query)
+    entries, row_errors, timestamp_errors = _history_rows(raw_rows, user, browser, epoch)
+    result: dict[str, Any] = {
+        "entries": entries,
+        "row_errors": row_errors,
+        "timestamp_errors": timestamp_errors,
+    }
+    if read_error is not None:
+        result["read_error"] = read_error
+    return result
 
 
 # -------------------- SRUM (libesedb) --------------------

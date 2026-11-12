@@ -78,11 +78,34 @@ public sealed class BookmarkStore
         return [.. rows.Select(r => r.ToBookmark())];
     }
 
+    /// <summary>
+    /// Deletes the bookmark with this row id, <b>whichever case it belongs to</b>. This overload
+    /// is unscoped: ids are per-file auto-increment integers, so the same id exists in every
+    /// case file that has bookmarks, and an id taken from a list loaded for one case will
+    /// match a different bookmark if the store now points at another case's file. Prefer
+    /// <see cref="DeleteAsync(Guid, long, CancellationToken)"/>, which also checks the case.
+    /// </summary>
+    /// <returns>True if a row was deleted.</returns>
     public async Task<bool> DeleteAsync(long id, CancellationToken ct = default)
     {
         await using var conn = _store.Open();
         var n = await conn.ExecuteAsync(new CommandDefinition(
             "DELETE FROM bookmarks WHERE id = @Id;", new { Id = id }, cancellationToken: ct)).ConfigureAwait(false);
+        return n > 0;
+    }
+
+    /// <summary>
+    /// Deletes the bookmark with this row id only if it belongs to <paramref name="caseId"/>.
+    /// A stale id from another case's list matches nothing and deletes nothing.
+    /// </summary>
+    /// <returns>True if a row was deleted; false if no bookmark with that id exists in that case.</returns>
+    public async Task<bool> DeleteAsync(Guid caseId, long id, CancellationToken ct = default)
+    {
+        await using var conn = _store.Open();
+        var n = await conn.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM bookmarks WHERE id = @Id AND case_id = @CaseId;",
+            new { Id = id, CaseId = caseId.ToString("D") },
+            cancellationToken: ct)).ConfigureAwait(false);
         return n > 0;
     }
 

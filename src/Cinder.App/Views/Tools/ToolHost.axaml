@@ -24,8 +24,10 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="vm:HexViewModel">
-                                    <Border Classes="tab" Classes.on="{Binding IsActiveTab}"
+                                    <Border Classes="tab" Classes.on="{Binding IsActiveTab}" ClipToBounds="True"
                                             ToolTip.Tip="{Binding SourcePath}">
+                                        <Panel>
+                                        <Border Classes="tab-accent" IsVisible="{Binding IsActiveTab}" />
                                         <StackPanel Orientation="Horizontal" Spacing="2" Margin="4,0,6,0">
                                             <Button Classes="ghost" Background="Transparent" Height="30" Padding="8,0"
                                                     Foreground="{DynamicResource CinderForegroundBrush}"
@@ -44,6 +46,7 @@
                                                 <c:CinderIcon Data="{x:Static c:Icons.Close}" Width="12" Height="12" />
                                             </Button>
                                         </StackPanel>
+                                        </Panel>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

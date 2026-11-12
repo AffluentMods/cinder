@@ -7,6 +7,178 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Full review pass — defects fixed, every tool view rebuilt
+
+The whole codebase was read for defects (imaging, core and file systems, the hex
+control, the tool view-models, the shell and services, the smaller libraries and
+the Python sidecar) and the confirmed ones were fixed, each with a regression
+test where the logic can be tested. The .NET suite went from 269 to 1,488
+tests across eight projects; the Python sidecar from 2 to 164.
+
+**Evidence integrity**
+
+- **E01.** Images with more than 64 MiB of chunk data in one `sectors` section
+  (including Cinder's own output) failed to open; `next` / `done` sections of
+  size 0, as EnCase writes them, were rejected; overlapping `table` sections
+  could allocate without bound; an all-zero digest was treated as a recorded
+  hash, so an MD5-only image never verified.
+- **Imager.** A source that keeps failing no longer produces an endless stream
+  of zeros: imaging stops, and what was read is kept as `<output>.partial` with
+  a log marked incomplete. Cancelling deletes the partial output. Images are
+  written to `.partial` and renamed on success, so nothing unfinished sits at
+  the final path. For E01, VHD and VHDX the zero padding that fills the last
+  sector is now part of the recorded hash, so the image verifies in Cinder and
+  in other tools (the log also records the hashes of the source bytes alone).
+  Damaged chunks in a source container are counted and reported.
+- **AFF4.** A chunk stored at exactly the chunk size is returned raw instead of
+  being decompressed first; a map target that cannot be located is an error
+  rather than silent zeros; the writer follows the stored-chunk convention
+  other readers rely on.
+- **NTFS.** `$LogFile` restart-area fields are read from the documented offsets
+  (the page data offset and sequence-number bits were both wrong, so most real
+  logs parsed incorrectly). The USN parser no longer hangs on a truncated final
+  record or stops at a short version-3 record.
+- **FAT.** Timestamps are no longer shifted by the examiner's own time zone and
+  labelled UTC; they are shown as the device's local clock, zone not recorded.
+- **Carver.** No integer overflow on objects over 2 GiB; headers are checked
+  before anything is extracted; output is streamed rather than buffered.
+- **Custody.** An entry is written to the case the work started under, not
+  whichever case is active when it finishes. A signature made with a key this
+  computer does not know is reported as such instead of "verifies". Deleting a
+  bookmark is scoped to its case. `cinder custody verify` now verifies (it
+  printed a note and exited 0).
+
+**Results that were wrong or silently incomplete**
+
+- **YARA and IOC.** Case-insensitive strings longer than eight letters were
+  never searched; two rules sharing a literal reported only the last; rule
+  conditions were not evaluated (any single string hit counted as a match);
+  tagged rules were dropped. Conditions are now evaluated, and a rule that
+  uses an unsupported feature is listed as skipped with the reason.
+- **Hex search.** Hex patterns are no longer case-folded (`4D 5A` matched
+  `6D 7A`); an invalid regex or odd-length hex string is reported as invalid
+  rather than "no matches"; the first find starts from the caret.
+- **Search index.** A query that cannot be parsed is an error, not "0 hits";
+  indexing a second folder in one session no longer fails; re-indexing a
+  folder updates its files instead of duplicating them.
+- **Parsers.** The ShimCache decoder read the wrong fields and returned nothing
+  on Windows 10 / 11; Amcache SHA-1 values lost leading zeros; Linux log times
+  were shifted and given an invented year; LNK target times were the shortcut
+  file's own; the UserAssist filter discarded every real entry; SRUM and
+  browser history truncated without saying so.
+- **Hard limits are stated.** Strings, YARA, Carver, Gallery and Search say
+  when they stopped at a limit and how far they got.
+- **Map and Graph.** A photo's time is its GPS fix or camera clock, labelled
+  with which, not its file-modified time; mail with no date no longer gets the
+  current time.
+
+**Stability and security**
+
+- Opening a file another program holds open no longer exits the app; a slow
+  regular expression in the Find dialog no longer does either.
+- Settings, recents and window layout are written atomically, and a settings
+  file that exists but cannot be read is never overwritten with defaults.
+- **Reports.** Text from evidence is escaped before it reaches a report: raw
+  HTML is disabled, header fields are encoded, a Content-Security-Policy is
+  set, and the PDF path cannot load local files or remote content. "PDF" now
+  writes PDF/A-2b.
+- **Plugins.** Approval moved from files in the plugin folder (which anything
+  able to drop a `.dll` there could forge) to a per-user store. Each plugin
+  and every assembly it loads is checked by SHA-256. Plugins are off until
+  turned on, and a file runs only after it is trusted in the Plugins tool.
+- **Mount.** The image path is no longer interpolated into the PowerShell
+  command (mounting always failed, and the path was one parse error away from
+  being executed). The Linux write blocker checks that `blockdev` succeeded.
+- **Documents.** Extraction runs off the UI thread with size limits; a crafted
+  HTML or archive file can no longer freeze or exhaust the app.
+- **Python sidecar.** UTF-8 I/O, serialised writes, an inactivity timeout,
+  imager seek and retry fixes, and parsers that skip a bad row instead of
+  failing the file. The scripting host's documentation no longer claims a
+  sandbox that does not exist.
+
+**Interface**
+
+- Every remaining tool view was rebuilt on one layout (toolbar, content, footer)
+  with one empty-state control: Map, Graph, Search, Hash sets, YARA,
+  VirusTotal, AI assistant, Shadow copies, Carver, Cloud, Cases, Reports,
+  Custody, Workflows, Plugins, Bookmarks, Strings, Documents, Gallery.
+- **Cases** now activates the case it opens or creates (it only said it had).
+  **Workflows** can be run (the view had no Run button). **Hash sets** can
+  create a database. **Custody** can check the open case and states the result
+  as intact or altered. **VirusTotal** shows its errors and is no longer marked
+  as a shell. **Search** is one flow: index a folder, then search.
+- Tables can be exported from every tool that shows one, and Map exports KML.
+  Double-clicking a search hit, a YARA match or a carved file opens it in the
+  Hex Viewer.
+- Folder-based tools (Prefetch, Jump lists, Recycle Bin, Browser history,
+  Linux artifacts, Mobile backup) have a "Pick folder…" button; long runs have
+  Stop buttons; a second pick while a parse is running no longer mixes two
+  files' rows.
+- **Settings** shows only settings that do something. Theme is now applied
+  and remembered. Density, Vim mode, Reduce motion, Check for updates and the
+  Python paths were stored but never read, and were removed from the dialog.
+- Hex Viewer shortcuts (`F3`, `Ctrl+G`, `Ctrl+D`, `Ctrl+C`, `Ctrl+W`,
+  `Alt+Left` / `Alt+Right`) act only while the Hex Viewer is on screen;
+  `Ctrl+F` goes to the current tool's search box. The inspector toggle is
+  `Ctrl+Shift+B` (`Ctrl+Alt+B` is AltGr+B on several European keyboards).
+- The rail scrolls to the selected tool; narrow table columns no longer clip
+  their headers; tool descriptions, empty states and help were rewritten for
+  examiners and now describe only what the code does.
+
+**Second round: gaps the first round left**
+
+- **Imaging refuses to overwrite.** An existing image, any segment of an
+  existing E01 chain, or the `.partial` left by a failed run stops a new
+  acquisition unless "Replace an existing image" is ticked. The E01 reader
+  ignores later segment files that belong to a different image and says when
+  a chain is incomplete; Verify reports both.
+- **Find continues past 1,000 hits.** Results are paged: "next" on the last
+  listed hit fetches the following page instead of wrapping to the first, and
+  the count gains a "+" until the end of the file has been reached.
+- **Hex Viewer.** The data inspector decodes from the start of a selection
+  rather than its last byte. The toolbar adapts to the window width instead of
+  cutting a chip in half, and the find field grows when there is room. The
+  control itself is now tested headlessly (selection, clicks, scrolling,
+  empty and over-4-GiB buffers).
+- **Filesystem.** Live files show their real MFT record number (the walker
+  discarded it, leaving a column of zeros). Columns that carried nothing were
+  removed and `Kind` / `Deleted` replace the True / False pair.
+- **Damaged containers are called out.** YARA and IOC results say when chunks
+  of the source image read as zeros, so "no match" is not taken as "not
+  present".
+- **Custody.** A custody entry that could not be written is reported in the
+  status bar (once per failure burst) instead of only in the log file.
+- **New commands.** "Hash a file…" and "Check for updates" in the command
+  palette. The update check runs only when asked; nothing calls out by itself.
+- **Mount** can unmount what it mounted. **Verify** can be stopped.
+- **Carver.** GIF and PDF are carved to their real end rather than the first
+  footer byte pattern.
+- **Tools.** IOC match logs the scanned folder as the evidence, clears stale
+  rows and can be stopped; Network says when Npcap / libpcap is missing; SRUM
+  and compressed Prefetch say they need Windows; folder walks no longer skip
+  hidden and system entries (which had hidden `$Recycle.Bin` contents) and
+  count subfolders they could not open.
+- **Sidebar.** Which groups are open is remembered with the window layout, and
+  clearing the filter restores the arrangement instead of leaving every group
+  open.
+- **Sidecar.** The C# wrappers use the paging, progress and error fields the
+  workers return, and the client has a test project (`Cinder.Sidecar.Tests`).
+- **Removed:** the unused crash-recovery and Python-bootstrap services. Cinder
+  never downloads or installs anything.
+
+**Changes that affect existing data**
+
+- Column renames in some parser tools (for example `KeyLastWrite`,
+  `VolumeSerial`, `Attachments`, and `Kind` / `Deleted` in Filesystem) change
+  CSV headers and the keys in newly stored bookmarks.
+- Plugins trusted through the old in-folder files must be trusted again.
+- Custody signatures made on another workstation show as "unknown key" until
+  that examiner's public key is placed in the trusted-keys folder.
+- Encrypted case bundles are written in a new format (version 2); version 1
+  still opens, but older builds cannot read version 2.
+- AFF4 containers that span several volumes now refuse to open instead of
+  reading as zeros.
+
 ### Redesign — shell and Hex Viewer
 
 The UI was rebuilt to the hex-viewer mockup: a custom title bar with case and

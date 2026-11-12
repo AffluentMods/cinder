@@ -44,6 +44,29 @@ public sealed class EwfWriter : IDisposable
         /// <summary>0x01 image file, 0x02 physical device (OR'd), 0x04 write-blocked.</summary>
         public byte MediaFlags { get; init; } = 0x02;
         public DateTimeOffset AcquisitionTime { get; init; } = DateTimeOffset.UtcNow;
+
+        /// <summary>
+        /// When set (for example <c>".partial"</c>), every segment is written as
+        /// <c>&lt;segment path&gt;&lt;suffix&gt;</c> and only renamed to its real name once
+        /// <see cref="Finish"/> has completed. A writer that is cancelled, fails or is disposed
+        /// early then never leaves a file at a segment path, where it would be taken for part of
+        /// a finished image. Null (the default) writes straight to the segment paths.
+        /// </summary>
+        public string? PartialSuffix { get; init; }
+
+        /// <summary>
+        /// False (the default): the writer refuses to start, with
+        /// <see cref="OutputExistsException"/>, if any file already sits at any segment name of
+        /// the target chain (<c>.E01</c> … <c>.EZZ</c>) or at its partial-suffixed name. An
+        /// existing image is never replaced by accident, and a new, shorter image can never be
+        /// left with the tail of an older one behind it.
+        ///
+        /// <para>True: existing segments are replaced, and when the image is finished any
+        /// higher-numbered segments still following it — the rest of the image that was
+        /// overwritten — are deleted and listed in <see cref="RemovedStaleSegments"/>, so that
+        /// no reader can stitch them onto the new image.</para>
+        /// </summary>
+        public bool Overwrite { get; init; }
     }
 
     private const int SegmentHeaderLength = 13;
@@ -89,10 +112,34 @@ public sealed class EwfWriter : IDisposable
         _chunkSize = checked((int)(_o.BytesPerSector * _o.SectorsPerChunk));
         _pending = new byte[_chunkSize];
         Directory.CreateDirectory(Path.GetDirectoryName(_firstPath)!);
+        if (!_o.Overwrite)
+        {
+            RefuseIfChainExists();
+        }
         OpenSegment();
     }
 
+    /// <summary>
+    /// The segment files of the finished container. With <see cref="Options.PartialSuffix"/>
+    /// set these names only exist on disk after <see cref="Finish"/>; until then the data is in
+    /// <see cref="WorkingPaths"/>.
+    /// </summary>
     public IReadOnlyList<string> SegmentPaths => _segmentPaths;
+
+    /// <summary>The files actually being written: the segment paths plus the partial suffix, if any.</summary>
+    public IReadOnlyList<string> WorkingPaths => [.. _segmentPaths.Select(WorkPath)];
+
+    /// <summary>
+    /// Bad sectors reported through <see cref="AddBadSectors"/> that the <c>error2</c> section
+    /// could not hold: its sector numbers are 32-bit, so a sector at or beyond 2^32 (2 TiB at
+    /// 512 bytes per sector) has no representation. They are left out rather than recorded at
+    /// a wrong location. Valid after <see cref="Finish"/>.
+    /// </summary>
+    public long BadSectorsNotRecorded { get; private set; }
+
+    private string WorkPath(string segmentPath) =>
+        string.IsNullOrEmpty(_o.PartialSuffix) ? segmentPath : segmentPath + _o.PartialSuffix;
+
     public long BytesWritten => _bytesWritten;
     public long ChunkCount => _chunkCount;
     public int ChunkSize => _chunkSize;
@@ -142,6 +189,11 @@ public sealed class EwfWriter : IDisposable
     /// sections and patches the geometry recorded at the start of every segment. The digests are
     /// the caller's — the writer does not hash, so the values the container records are the ones
     /// the imager computed over what it read.
+    ///
+    /// <para>The format stores whole sectors. If the bytes written do not end on a sector
+    /// boundary the last sector is zero-padded here, and a digest taken over the unpadded bytes
+    /// will then not match the stored media in any verifier. Callers with such a source must
+    /// write the padding themselves and hash it, as <see cref="InProcessImager"/> does.</para>
     /// </summary>
     public void Finish(byte[]? md5, byte[]? sha1)
     {
@@ -169,20 +221,32 @@ public sealed class EwfWriter : IDisposable
             RollSegment();
         }
 
-        var digest = new byte[80];
-        (md5 ?? new byte[16]).AsSpan(0, 16).CopyTo(digest);
-        (sha1 ?? new byte[20]).AsSpan(0, 20).CopyTo(digest.AsSpan(16));
-        WriteChecksum(digest, 76);
-        WriteSection("digest", digest);
-
-        var hash = new byte[36];
-        (md5 ?? new byte[16]).AsSpan(0, 16).CopyTo(hash);
-        WriteChecksum(hash, 32);
-        WriteSection("hash", hash);
-
-        if (_badRanges.Count > 0)
+        // A digest that was not computed is not written at all. A zero-filled field would be
+        // read back as a recorded hash of 00…00 and fail every verification. `digest` exists to
+        // carry the SHA-1 (its MD5 field stays zero when there is none, which readers treat as
+        // absent); `hash` carries the MD5.
+        if (sha1 is not null)
         {
-            WriteSection("error2", BuildErrorSection());
+            var digest = new byte[80];
+            (md5 ?? new byte[16]).AsSpan(0, 16).CopyTo(digest);
+            sha1.AsSpan(0, 20).CopyTo(digest.AsSpan(16));
+            WriteChecksum(digest, 76);
+            WriteSection("digest", digest);
+        }
+
+        if (md5 is not null)
+        {
+            var hash = new byte[36];
+            md5.AsSpan(0, 16).CopyTo(hash);
+            WriteChecksum(hash, 32);
+            WriteSection("hash", hash);
+        }
+
+        var errors = RepresentableBadRanges(out var notRecorded);
+        BadSectorsNotRecorded = notRecorded;
+        if (errors.Count > 0)
+        {
+            WriteSection("error2", BuildErrorSection(errors));
         }
 
         WriteTerminator("done");
@@ -191,6 +255,83 @@ public sealed class EwfWriter : IDisposable
         _seg = null;
 
         PatchGeometry();
+
+        // Only now do the segments take their real names.
+        if (!string.IsNullOrEmpty(_o.PartialSuffix))
+        {
+            foreach (var path in _segmentPaths)
+            {
+                File.Move(WorkPath(path), path, overwrite: _o.Overwrite);
+            }
+        }
+
+        if (_o.Overwrite)
+        {
+            RemoveStaleTail();
+        }
+    }
+
+    /// <summary>
+    /// Segments of an earlier image that followed the last segment of this one and were deleted
+    /// when it finished. Only ever non-empty with <see cref="Options.Overwrite"/> set.
+    /// </summary>
+    public IReadOnlyList<string> RemovedStaleSegments => _removedStale;
+
+    private readonly List<string> _removedStale = [];
+
+    /// <summary>Every existing file at a segment name of the target chain, or at its partial name.</summary>
+    private void RefuseIfChainExists()
+    {
+        var existing = new List<string>();
+        for (int n = 1; n <= MaxSegments; n++)
+        {
+            var path = SegmentPath(_firstPath, n);
+            if (File.Exists(path))
+            {
+                existing.Add(path);
+            }
+            var work = WorkPath(path);
+            if (work != path && File.Exists(work))
+            {
+                existing.Add(work);
+            }
+        }
+        if (existing.Count > 0)
+        {
+            throw new OutputExistsException(
+                $"EWF: {existing.Count} file(s) already exist at segment names of {_firstPath} (first: {existing[0]}). " +
+                "Nothing was written. Choose another name, move the existing image away, or ask for it to be overwritten.",
+                existing);
+        }
+    }
+
+    /// <summary>
+    /// Deletes the run of segment files that directly follows this image's last segment. They
+    /// belonged to the image the caller asked to overwrite; left in place they would be found
+    /// by name and read as part of this one. The run stops at the first missing name, so files
+    /// beyond a gap — which no reader would attach to this chain — are not touched.
+    /// </summary>
+    private void RemoveStaleTail()
+    {
+        for (int n = _segmentNumber + 1; n <= MaxSegments; n++)
+        {
+            var path = SegmentPath(_firstPath, n);
+            var work = WorkPath(path);
+            var found = false;
+            foreach (var candidate in work == path ? new[] { path } : new[] { path, work })
+            {
+                if (File.Exists(candidate))
+                {
+                    File.Delete(candidate);
+                    _removedStale.Add(candidate);
+                    found = true;
+                }
+            }
+            if (!found)
+            {
+                break;
+            }
+        }
     }
 
     public void Dispose()
@@ -309,17 +450,42 @@ public sealed class EwfWriter : IDisposable
         return t;
     }
 
-    private byte[] BuildErrorSection()
+    /// <summary>
+    /// The bad ranges an <c>error2</c> section can express. Both of its fields are 32-bit, so a
+    /// range is cut at sector 2^32 and whatever lies beyond is counted in
+    /// <paramref name="notRecorded"/> instead of being clamped onto sector 0xFFFFFFFF, which
+    /// would point an examiner at the wrong place on the disk.
+    /// </summary>
+    private List<(uint FirstSector, uint Count)> RepresentableBadRanges(out long notRecorded)
+    {
+        const long Limit = 1L << 32;
+        notRecorded = 0;
+        var result = new List<(uint, uint)>(_badRanges.Count);
+        foreach (var (first, count) in _badRanges)
+        {
+            if (first < 0 || first >= Limit)
+            {
+                notRecorded += count;
+                continue;
+            }
+            var fits = Math.Min(count, Math.Min(Limit - first, uint.MaxValue));
+            notRecorded += count - fits;
+            result.Add(((uint)first, (uint)fits));
+        }
+        return result;
+    }
+
+    private static byte[] BuildErrorSection(List<(uint FirstSector, uint Count)> ranges)
     {
         // header: entry count (4), unknown (512), checksum (4); entries: first sector (4), count (4); checksum (4)
-        var n = _badRanges.Count;
+        var n = ranges.Count;
         var e = new byte[520 + n * 8 + 4];
         BitConverter.TryWriteBytes(e.AsSpan(0), (uint)n);
         WriteChecksum(e, 516);
         for (int i = 0; i < n; i++)
         {
-            BitConverter.TryWriteBytes(e.AsSpan(520 + i * 8), (uint)Math.Min(uint.MaxValue, _badRanges[i].FirstSector));
-            BitConverter.TryWriteBytes(e.AsSpan(524 + i * 8), (uint)Math.Min(uint.MaxValue, _badRanges[i].Count));
+            BitConverter.TryWriteBytes(e.AsSpan(520 + i * 8), ranges[i].FirstSector);
+            BitConverter.TryWriteBytes(e.AsSpan(524 + i * 8), ranges[i].Count);
         }
         BitConverter.TryWriteBytes(e.AsSpan(520 + n * 8), Adler32(e.AsSpan(520, n * 8)));
         return e;
@@ -385,7 +551,7 @@ public sealed class EwfWriter : IDisposable
             throw new InvalidOperationException("EWF: more than 775 segments; raise the segment size.");
         }
         var path = SegmentPath(_firstPath, _segmentNumber);
-        _seg = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 1 << 20);
+        _seg = new FileStream(WorkPath(path), FileMode.Create, FileAccess.ReadWrite, FileShare.None, 1 << 20);
         _segmentPaths.Add(path);
 
         var header = new byte[SegmentHeaderLength];
@@ -426,7 +592,7 @@ public sealed class EwfWriter : IDisposable
         var geometry = BuildGeometry();
         foreach (var (path, offset) in _geometrySections)
         {
-            using var f = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None);
+            using var f = new FileStream(WorkPath(path), FileMode.Open, FileAccess.Write, FileShare.None);
             f.Position = offset + SectionHeaderLength;
             f.Write(geometry);
         }

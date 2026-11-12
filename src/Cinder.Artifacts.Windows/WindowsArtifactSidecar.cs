@@ -1,11 +1,10 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
+using Cinder.Core.Diagnostics;
 using Cinder.Sidecar;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Cinder.Core.Diagnostics;
 
 namespace Cinder.Artifacts.Windows;
 
@@ -13,15 +12,31 @@ namespace Cinder.Artifacts.Windows;
 /// Single dispatcher to <c>parsers/windows/win_worker.py</c> which routes per-artifact requests
 /// to regipy / python-evtx / direct .pf parsing / direct .lnk parsing / SQLite (browser) /
 /// libesedb (SRUM/Amcache when ese parsing is needed).
+/// <para>
+/// Values the worker could not determine arrive as null and are passed on as null: a timestamp
+/// is never replaced by a minimum date and a visit count is never replaced by 1. Where a parser
+/// reports what it left out (<see cref="LoadPrefetchAsync"/>, <see cref="LoadBrowserHistoryAsync"/>)
+/// that report is part of the result.
+/// </para>
 /// </summary>
 public sealed class WindowsArtifactSidecar
 {
-    private readonly Func<ProcessStartInfo> _factory;
+    private const int EvtxPageSize = 1000;
+
+    private readonly Func<ISidecarChannel> _open;
     private readonly ILogger _logger;
 
     public WindowsArtifactSidecar(Func<ProcessStartInfo> factory, ILogger? logger = null)
     {
-        _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        ArgumentNullException.ThrowIfNull(factory);
+        _logger = logger ?? NullLogger.Instance;
+        _open = () => new SidecarClient(factory(), _logger);
+    }
+
+    /// <summary>Uses an already-built channel factory (tests, or a host that pools sidecars).</summary>
+    public WindowsArtifactSidecar(Func<ISidecarChannel> channelFactory, ILogger? logger = null)
+    {
+        _open = channelFactory ?? throw new ArgumentNullException(nameof(channelFactory));
         _logger = logger ?? NullLogger.Instance;
     }
 
@@ -36,32 +51,43 @@ public sealed class WindowsArtifactSidecar
 
     private async Task<JsonObject> InvokeAsync(string method, JsonObject args, CancellationToken ct)
     {
-        await using var sc = new SidecarClient(_factory(), _logger);
-        var resp = await sc.InvokeAsync(method, args, ct).ConfigureAwait(false);
+        await using var sc = _open();
+        var resp = await sc.InvokeAsync(method, args, null, null, ct).ConfigureAwait(false);
         return (resp as JsonObject) ?? new JsonObject();
     }
 
-    private static DateTimeOffset? Ts(JsonNode? n)
+    // The worker derives every timestamp below from a FILETIME, an epoch or a registry key
+    // time and writes it with an explicit +00:00, so these are instants.
+    private static DateTimeOffset? Ts(JsonNode? n) => SidecarJson.Instant(n);
+
+    private static string Str(JsonNode? n, string fallback = "") => SidecarJson.String(n) ?? fallback;
+
+    private static TimeSpan? Milliseconds(JsonNode? n)
     {
-        var s = n?.GetValue<string?>();
-        return string.IsNullOrEmpty(s) ? null
-            : DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto) ? dto : null;
+        if (SidecarJson.Int64(n) is not { } ms)
+        {
+            return null;
+        }
+        try
+        {
+            return TimeSpan.FromMilliseconds(ms);
+        }
+        catch (Exception ex) when (ex is OverflowException or ArgumentException)
+        {
+            return null; // longer than a TimeSpan can hold: not a duration anyone measured
+        }
     }
 
     public async IAsyncEnumerable<UserAssistEntry> ReadUserAssistAsync(string ntuserPath, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("registry_userassist", new JsonObject { ["ntuser_path"] = ntuserPath }, ct).ConfigureAwait(false);
-        if (resp["entries"] is not JsonArray rows)
-        {
-            yield break;
-        }
-        foreach (var r in rows.OfType<JsonObject>())
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
             yield return new UserAssistEntry(
-                r["user"]?.GetValue<string>() ?? "",
-                r["program"]?.GetValue<string>() ?? "",
-                r["run_count"]?.GetValue<int>() ?? 0,
-                r["focus_ms"]?.GetValue<long?>() is long ms ? TimeSpan.FromMilliseconds(ms) : null,
+                Str(r["user"]),
+                Str(r["program"]),
+                SidecarJson.Int32(r["run_count"]) ?? 0,
+                Milliseconds(r["focus_ms"]),
                 Ts(r["last_executed"]));
         }
     }
@@ -69,87 +95,127 @@ public sealed class WindowsArtifactSidecar
     public async IAsyncEnumerable<ShimCacheEntry> ReadShimCacheAsync(string systemHive, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("registry_shimcache", new JsonObject { ["system_hive"] = systemHive }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
-            yield return new ShimCacheEntry(r["path"]?.GetValue<string>() ?? "", Ts(r["modified"]), r["executed"]?.GetValue<bool>() ?? false);
+            yield return new ShimCacheEntry(Str(r["path"]), Ts(r["modified"]), SidecarJson.Boolean(r["executed"]) ?? false);
         }
     }
 
     public async IAsyncEnumerable<AmcacheEntry> ReadAmcacheAsync(string amcacheHive, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("registry_amcache", new JsonObject { ["amcache_hive"] = amcacheHive }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
-            yield return new AmcacheEntry(r["path"]?.GetValue<string>() ?? "",
-                r["sha1"]?.GetValue<string?>(), Ts(r["first_seen"]), r["publisher"]?.GetValue<string?>());
+            yield return new AmcacheEntry(Str(r["path"]),
+                SidecarJson.String(r["sha1"]), Ts(r["first_seen"]), SidecarJson.String(r["publisher"]));
         }
     }
 
     public async IAsyncEnumerable<UsbDeviceArtifact> ReadUsbAsync(string systemHive, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("registry_usb", new JsonObject { ["system_hive"] = systemHive }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
             yield return new UsbDeviceArtifact(
-                r["device_id"]?.GetValue<string>() ?? "",
-                r["friendly_name"]?.GetValue<string>() ?? "",
+                Str(r["device_id"]),
+                Str(r["friendly_name"]),
                 Ts(r["first_connected"]), Ts(r["last_connected"]),
-                r["serial"]?.GetValue<string?>());
+                SidecarJson.String(r["serial"]));
         }
     }
 
     public async IAsyncEnumerable<WifiNetworkArtifact> ReadWifiAsync(string softwareHive, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("registry_wifi", new JsonObject { ["software_hive"] = softwareHive }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
             yield return new WifiNetworkArtifact(
-                r["ssid"]?.GetValue<string>() ?? "",
+                Str(r["ssid"]),
                 Ts(r["first_seen"]), Ts(r["last_seen"]),
-                r["auth"]?.GetValue<string?>());
+                SidecarJson.String(r["auth"]));
         }
     }
 
-    public async IAsyncEnumerable<PrefetchEntry> ReadPrefetchAsync(string prefetchDir, [EnumeratorCancellation] CancellationToken ct = default)
+    /// <summary>
+    /// Parses a Prefetch directory and reports the files that were not parsed alongside the
+    /// ones that were (see <see cref="PrefetchResult"/>).
+    /// </summary>
+    public async Task<PrefetchResult> LoadPrefetchAsync(string prefetchDir, CancellationToken ct = default)
     {
         var resp = await InvokeAsync("prefetch", new JsonObject { ["prefetch_dir"] = prefetchDir }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        var entries = new List<PrefetchEntry>();
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
-            var times = (r["all_run_times"] as JsonArray)?
-                .Select(t => Ts(t)).Where(t => t.HasValue).Select(t => t!.Value).ToList() ?? [];
-            var loaded = (r["loaded_files"] as JsonArray)?
-                .Select(t => t?.GetValue<string>() ?? "").ToList() ?? [];
-            yield return new PrefetchEntry(
-                r["executable"]?.GetValue<string>() ?? "",
-                r["hash"]?.GetValue<string>() ?? "",
-                r["run_count"]?.GetValue<int>() ?? 0,
+            var times = new List<DateTimeOffset>();
+            if (r["all_run_times"] is JsonArray runTimes)
+            {
+                foreach (var t in runTimes)
+                {
+                    if (Ts(t) is { } time)
+                    {
+                        times.Add(time);
+                    }
+                }
+            }
+            entries.Add(new PrefetchEntry(
+                Str(r["executable"]),
+                Str(r["hash"]),
+                SidecarJson.Int32(r["run_count"]) ?? 0,
                 Ts(r["last_run"]),
-                times, loaded);
+                times,
+                SidecarJson.Strings(r["loaded_files"]),
+                FormatVersion: SidecarJson.Int32(r["version"]),
+                SourceFile: SidecarJson.String(r["source_file"])));
+        }
+        var skipped = SidecarJson.Objects(resp["skipped"])
+            .Select(s => new SkippedPrefetchFile(Str(s["file"]), Str(s["reason"])))
+            .ToList();
+        var compressed = SidecarJson.Int32(resp["compressed_not_decoded"])
+            ?? skipped.Count(s => s.Reason.StartsWith("compressed", StringComparison.OrdinalIgnoreCase));
+        if (skipped.Count > 0)
+        {
+            _logger.LogWarning(
+                "Prefetch: {Parsed} file(s) parsed, {Skipped} not parsed ({Compressed} MAM-compressed, not decoded).",
+                entries.Count, skipped.Count, compressed);
+        }
+        return new PrefetchResult(entries, skipped, compressed);
+    }
+
+    /// <summary>
+    /// Rows only. Files the parser skipped (every MAM-compressed file, on Windows 10+) are
+    /// logged, not returned: use <see cref="LoadPrefetchAsync"/> wherever an empty or short
+    /// listing would otherwise be read as "nothing ran".
+    /// </summary>
+    public async IAsyncEnumerable<PrefetchEntry> ReadPrefetchAsync(string prefetchDir, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var entry in (await LoadPrefetchAsync(prefetchDir, ct).ConfigureAwait(false)).Entries)
+        {
+            yield return entry;
         }
     }
 
     public async IAsyncEnumerable<ShellbagEntry> ReadShellbagsAsync(string ntuserPath, string user, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("shellbags", new JsonObject { ["ntuser_path"] = ntuserPath, ["user"] = user }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
             yield return new ShellbagEntry(
-                r["user"]?.GetValue<string>() ?? user,
-                r["path"]?.GetValue<string>() ?? "",
+                Str(r["user"], user),
+                Str(r["path"]),
                 Ts(r["first_accessed"]), Ts(r["last_accessed"]),
-                r["access_count"]?.GetValue<int>() ?? 0);
+                SidecarJson.Int32(r["access_count"]) ?? 0);
         }
     }
 
     public async IAsyncEnumerable<JumplistEntry> ReadJumplistsAsync(string jumplistDir, string user, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("jumplists", new JsonObject { ["jumplist_dir"] = jumplistDir, ["user"] = user }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
             yield return new JumplistEntry(
-                r["user"]?.GetValue<string>() ?? user,
-                r["app_id"]?.GetValue<string>() ?? "",
-                r["target_path"]?.GetValue<string>() ?? "",
+                Str(r["user"], user),
+                Str(r["app_id"]),
+                Str(r["target_path"]),
                 Ts(r["access_time"]));
         }
     }
@@ -157,28 +223,28 @@ public sealed class WindowsArtifactSidecar
     public async Task<LnkEntry?> ReadLnkAsync(string path, CancellationToken ct = default)
     {
         var resp = await InvokeAsync("lnk", new JsonObject { ["path"] = path }, ct).ConfigureAwait(false);
-        if (resp["target_path"]?.GetValue<string?>() is not { } target)
+        if (SidecarJson.String(resp["target_path"]) is not { } target)
         {
             return null;
         }
         return new LnkEntry(
             path, target,
-            resp["arguments"]?.GetValue<string?>(),
-            resp["icon"]?.GetValue<string?>(),
-            resp["working_dir"]?.GetValue<string?>(),
+            SidecarJson.String(resp["arguments"]),
+            SidecarJson.String(resp["icon"]),
+            SidecarJson.String(resp["working_dir"]),
             Ts(resp["target_created"]), Ts(resp["target_modified"]), Ts(resp["target_accessed"]),
-            resp["volume_serial"]?.GetValue<string?>(),
-            resp["machine_id"]?.GetValue<string?>());
+            SidecarJson.String(resp["volume_serial"]),
+            SidecarJson.String(resp["machine_id"]));
     }
 
     public async IAsyncEnumerable<EventLogRecord> ReadEvtxAsync(string evtxPath, [EnumeratorCancellation] CancellationToken ct = default)
     {
-        await using var sc = new SidecarClient(_factory(), _logger);
+        await using var sc = _open();
         long cursor = 0;
         while (true)
         {
             var resp = await sc.InvokeAsync("evtx_page",
-                new JsonObject { ["path"] = evtxPath, ["cursor"] = cursor, ["limit"] = 1000 }, ct).ConfigureAwait(false);
+                new JsonObject { ["path"] = evtxPath, ["cursor"] = cursor, ["limit"] = EvtxPageSize }, null, null, ct).ConfigureAwait(false);
             if (resp is not JsonObject o || o["entries"] is not JsonArray rows)
             {
                 yield break;
@@ -186,17 +252,19 @@ public sealed class WindowsArtifactSidecar
             foreach (var r in rows.OfType<JsonObject>())
             {
                 yield return new EventLogRecord(
-                    r["record_id"]?.GetValue<long>() ?? 0,
-                    r["event_id"]?.GetValue<int>() ?? 0,
-                    r["provider"]?.GetValue<string>() ?? "",
-                    r["channel"]?.GetValue<string>() ?? "",
-                    r["computer"]?.GetValue<string>() ?? "",
-                    r["user"]?.GetValue<string?>(),
-                    Ts(r["timestamp"]) ?? DateTimeOffset.MinValue,
-                    r["level"]?.GetValue<string>() ?? "",
-                    r["summary"]?.GetValue<string>() ?? "");
+                    SidecarJson.Int64(r["record_id"]) ?? 0,
+                    SidecarJson.Int32(r["event_id"]) ?? 0,
+                    Str(r["provider"]),
+                    Str(r["channel"]),
+                    Str(r["computer"]),
+                    SidecarJson.String(r["user"]),
+                    // TimeCreated/@SystemTime is UTC by definition, though it is written without
+                    // an offset. Null when absent or unparseable: never a minimum date.
+                    SidecarJson.Instant(r["timestamp"], utcByDefinition: true),
+                    Str(r["level"]),
+                    Str(r["summary"]));
             }
-            if (rows.Count < 1000)
+            if (rows.Count < EvtxPageSize)
             {
                 yield break;
             }
@@ -204,35 +272,61 @@ public sealed class WindowsArtifactSidecar
         }
     }
 
-    public async IAsyncEnumerable<BrowserHistoryEntry> ReadBrowserHistoryAsync(string profilePath, string browser, string user, [EnumeratorCancellation] CancellationToken ct = default)
+    /// <summary>
+    /// Reads a browser history database and reports what could not be read from it
+    /// (see <see cref="BrowserHistoryResult"/>).
+    /// </summary>
+    public async Task<BrowserHistoryResult> LoadBrowserHistoryAsync(string profilePath, string browser, string user, CancellationToken ct = default)
     {
         var resp = await InvokeAsync("browser_history",
             new JsonObject { ["profile_path"] = profilePath, ["browser"] = browser, ["user"] = user }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        var entries = new List<BrowserHistoryEntry>();
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
-            yield return new BrowserHistoryEntry(
-                r["user"]?.GetValue<string>() ?? user,
-                r["browser"]?.GetValue<string>() ?? browser,
-                r["url"]?.GetValue<string>() ?? "",
-                r["title"]?.GetValue<string?>(),
-                r["visit_count"]?.GetValue<int>() ?? 1,
-                Ts(r["timestamp"]) ?? DateTimeOffset.MinValue,
-                r["visit_type"]?.GetValue<string?>());
+            entries.Add(new BrowserHistoryEntry(
+                Str(r["user"], user),
+                Str(r["browser"], browser),
+                Str(r["url"]),
+                SidecarJson.String(r["title"]),
+                SidecarJson.Int32(r["visit_count"]),
+                Ts(r["timestamp"]),
+                SidecarJson.String(r["visit_type"])));
+        }
+        var result = new BrowserHistoryResult(
+            entries,
+            RowErrors: SidecarJson.Int32(resp["row_errors"]) ?? 0,
+            TimestampErrors: SidecarJson.Int32(resp["timestamp_errors"]) ?? 0,
+            ReadError: SidecarJson.String(resp["read_error"]));
+        if (!result.IsComplete)
+        {
+            _logger.LogWarning(
+                "Browser history ({Browser}): {Rows} row(s) read, {RowErrors} unreadable, {TimestampErrors} with an invalid timestamp; read error: {ReadError}.",
+                browser, entries.Count, result.RowErrors, result.TimestampErrors, result.ReadError ?? "none");
+        }
+        return result;
+    }
+
+    /// <summary>Rows only; errors are logged. Prefer <see cref="LoadBrowserHistoryAsync"/>.</summary>
+    public async IAsyncEnumerable<BrowserHistoryEntry> ReadBrowserHistoryAsync(string profilePath, string browser, string user, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        foreach (var entry in (await LoadBrowserHistoryAsync(profilePath, browser, user, ct).ConfigureAwait(false)).Entries)
+        {
+            yield return entry;
         }
     }
 
     public async IAsyncEnumerable<SrumApplicationUsage> ReadSrumApplicationsAsync(string srudbPath, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resp = await InvokeAsync("srum_applications", new JsonObject { ["srudb_path"] = srudbPath }, ct).ConfigureAwait(false);
-        foreach (var r in (resp["entries"] as JsonArray)?.OfType<JsonObject>() ?? [])
+        foreach (var r in SidecarJson.Objects(resp["entries"]))
         {
             yield return new SrumApplicationUsage(
-                r["user"]?.GetValue<string>() ?? "",
-                r["application"]?.GetValue<string>() ?? "",
-                Ts(r["timestamp"]) ?? DateTimeOffset.MinValue,
-                r["fg_cpu_ms"]?.GetValue<long>() ?? 0,
-                r["bytes_read"]?.GetValue<long>() ?? 0,
-                r["bytes_written"]?.GetValue<long>() ?? 0);
+                Str(r["user"]),
+                Str(r["application"]),
+                Ts(r["timestamp"]),
+                SidecarJson.Int64(r["fg_cpu_ms"]) ?? 0,
+                SidecarJson.Int64(r["bytes_read"]) ?? 0,
+                SidecarJson.Int64(r["bytes_written"]) ?? 0);
         }
     }
 }

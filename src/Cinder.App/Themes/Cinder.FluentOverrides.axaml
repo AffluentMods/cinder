@@ -13,6 +13,12 @@
 
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
+            <!-- Watermarks: clearly a hint, not a value. The stock brush is the secondary text colour,
+                 which in a monospace field reads as something already typed in. -->
+            <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#6E7684" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#6E7684" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#6E7684" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="#6E7684" />
             <Color x:Key="ControlFillColorDefault">#171A21</Color>
             <Color x:Key="ControlFillColorSecondary">#1F232B</Color>
             <Color x:Key="ControlFillColorTertiary">#14171D</Color>
@@ -68,6 +74,12 @@
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Light">
+            <!-- Watermarks: clearly a hint, not a value. The stock brush is the secondary text colour,
+                 which in a monospace field reads as something already typed in. -->
+            <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#8A8F9A" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#8A8F9A" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#8A8F9A" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundDisabled" Color="#8A8F9A" />
             <Color x:Key="TextOnAccentFillColorPrimary">#FFFFFF</Color>
             <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFF" />
@@ -75,5 +87,9 @@
             <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFF" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
+
+    <!-- The stock header reserves 32 px for a sort arrow in every column, which clips the
+         caption of any narrow column ("Score" became "Sc"). 14 px fits the arrow. -->
+    <x:Double x:Key="DataGridSortIconMinWidth">14</x:Double>
 
 </ResourceDictionary>

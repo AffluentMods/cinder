@@ -254,6 +254,82 @@ public sealed class HexSearchTests
         HexSearch.Search(buf, new HexSearchOptions(HexSearchKind.Regex, "([unclosed")).Should().BeEmpty();
     });
 
+    // ---- a hit must be bytes that are really there ------------------------------------------
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task Hex_queries_match_exact_bytes_even_when_the_caller_asks_for_case_insensitivity() => Guarded(() =>
+    {
+        // The find bar passes CaseSensitive: false for every kind. Folding was applied to the
+        // raw pattern, so "4D 5A" also matched 6D 7A ("mz") — a hit for bytes that are not there.
+        using var buf = new ByteArrayHexBuffer(Encoding.ASCII.GetBytes("xx mz yy MZ zz Mz"));
+
+        var hits = HexSearch.Search(buf, new HexSearchOptions(HexSearchKind.Hex, "4D 5A", CaseSensitive: false)).ToList();
+
+        hits.Select(h => h.Offset).Should().Equal(9);
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task Utf16_folding_applies_to_ascii_letters_only_and_never_to_the_other_byte() => Guarded(() =>
+    {
+        // U+4E2D and U+6E2D differ only in a high byte that happens to be an ASCII letter
+        // (0x4E 'N' / 0x6E 'n'). Folding bytes rather than code units made them equal.
+        var le = Encoding.Unicode.GetBytes("a中b 渭 Admin ADMIN šdmin");
+        using var buf = new ByteArrayHexBuffer(le);
+
+        HexSearch.Search(buf, new HexSearchOptions(HexSearchKind.Utf16Le, "中", CaseSensitive: false))
+            .Select(h => h.Offset).Should().Equal(2);
+
+        // Ordinary text still folds: "admin" finds Admin and ADMIN. U+0161 (bytes 61 01) is
+        // not an "a": the high byte of a letter must be zero, and is compared exactly.
+        HexSearch.Search(buf, new HexSearchOptions(HexSearchKind.Utf16Le, "admin", CaseSensitive: false))
+            .Select(h => h.Offset).Should().Equal(12, 24);
+
+        var be = Encoding.BigEndianUnicode.GetBytes("渭 Admin 中");
+        using var bufBe = new ByteArrayHexBuffer(be);
+        HexSearch.Search(bufBe, new HexSearchOptions(HexSearchKind.Utf16Be, "中", CaseSensitive: false))
+            .Select(h => h.Offset).Should().Equal(16);
+        HexSearch.Search(bufBe, new HexSearchOptions(HexSearchKind.Utf16Be, "ADMIN", CaseSensitive: false))
+            .Select(h => h.Offset).Should().Equal(4);
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task A_non_ascii_character_in_an_ascii_query_is_rejected_not_searched_for_as_a_question_mark() => Guarded(() =>
+    {
+        using var buf = new ByteArrayHexBuffer(Encoding.ASCII.GetBytes("xx caf? yy"));
+
+        var act = () => HexSearch.Search(buf, new HexSearchOptions(HexSearchKind.Ascii, "café", CaseSensitive: false)).ToList();
+
+        act.Should().Throw<ArgumentException>().WithMessage("*non-ASCII*U+00E9*");
+
+        // The same text is searchable as UTF-16, where it has exactly one encoding.
+        using var wide = new ByteArrayHexBuffer(Encoding.Unicode.GetBytes("un café noir"));
+        HexSearch.Search(wide, new HexSearchOptions(HexSearchKind.Utf16Le, "café")).Should().ContainSingle()
+            .Which.Offset.Should().Be(6);
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task An_unpaired_surrogate_in_a_utf16_query_is_rejected_not_replaced() => Guarded(() =>
+    {
+        // Encoding.Unicode turns a lone surrogate into U+FFFD, so the search ran for FD FF.
+        using var buf = new ByteArrayHexBuffer([0x41, 0x00, 0xFD, 0xFF, 0x42, 0x00]);
+
+        var act = () => HexSearch.Search(buf, new HexSearchOptions(HexSearchKind.Utf16Le, "A\uD83DB")).ToList();
+
+        act.Should().Throw<ArgumentException>().WithMessage("*unpaired surrogate*");
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task Case_insensitive_ascii_still_finds_a_match_across_a_window_boundary() => Guarded(() =>
+    {
+        const int chunk = 1 << 20;
+        var data = new byte[chunk + 64];
+        Encoding.ASCII.GetBytes("CiNdEr").CopyTo(data, chunk - 3);
+        using var buf = new ByteArrayHexBuffer(data);
+
+        HexSearch.Search(buf, new HexSearchOptions(HexSearchKind.Ascii, "cinder", CaseSensitive: false))
+            .Select(h => h.Offset).Should().Equal(chunk - 3);
+    });
+
     /// <summary>
     /// An <see cref="IHexBuffer"/> that deliberately honours only part of each read, to exercise
     /// the short-read handling the real implementations don't happen to trigger.

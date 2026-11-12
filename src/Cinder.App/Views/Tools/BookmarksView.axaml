@@ -1,38 +1,52 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.BookmarksView"
              x:DataType="tools:BookmarksTool">
+    <!-- Everything flagged in this case, in one list. -->
     <Grid RowDefinitions="Auto,*,Auto">
-        <Border Grid.Row="0" Background="{DynamicResource CinderSurface2Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Refresh" Command="{Binding RefreshCommand}" />
-                <Button Content="Delete selected" Command="{Binding DeleteSelectedCommand}"
-                        ToolTip.Tip="Withdraws the finding; the deletion is written to the chain of custody." />
-                <Button Content="Export CSV" Command="{Binding ExportCommand}" CommandParameter="csv" IsVisible="{Binding Bookmarks.Count}" />
-                <Button Content="Export JSON" Command="{Binding ExportCommand}" CommandParameter="json" IsVisible="{Binding Bookmarks.Count}" />
-            </StackPanel>
+
+        <Border Grid.Row="0" Classes="toolbar">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="tb" Command="{Binding RefreshCommand}" ToolTip.Tip="Read the list again from the case file">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Swap}" Width="14" Height="14" />
+                            <TextBlock Text="Reload" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tb" Content="Remove selected" Command="{Binding DeleteSelectedCommand}"
+                            IsVisible="{Binding Bookmarks.Count}"
+                            ToolTip.Tip="Withdraws the finding. The removal itself is recorded in the custody log, so nothing disappears silently." />
+                </StackPanel>
+                <c:ExportButton Grid.Column="2" ExportCommand="{Binding ExportCommand}" VerticalAlignment="Center"
+                                IsVisible="{Binding Bookmarks.Count}" />
+            </Grid>
         </Border>
 
-        <DataGrid Grid.Row="1" ItemsSource="{Binding Bookmarks}" SelectedItem="{Binding Selected}"
-                  AutoGenerateColumns="False" IsReadOnly="True"
-                  Background="{DynamicResource CinderBackground0Brush}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="50" />
-                <DataGridTextColumn Header="Created (UTC)" Binding="{Binding CreatedUtc, StringFormat=u}" Width="170" />
-                <DataGridTextColumn Header="Examiner" Binding="{Binding Examiner}" Width="110" />
-                <DataGridTextColumn Header="Tool" Binding="{Binding Tool}" Width="110" />
-                <DataGridTextColumn Header="Title" Binding="{Binding Title}" Width="2*" />
-                <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="2*" />
-                <DataGridTextColumn Header="Evidence" Binding="{Binding EvidencePath}" Width="*" />
-            </DataGrid.Columns>
-        </DataGrid>
+        <Panel Grid.Row="1">
+            <DataGrid ItemsSource="{Binding Bookmarks}" SelectedItem="{Binding Selected}"
+                      AutoGenerateColumns="False" IsReadOnly="True" IsVisible="{Binding Bookmarks.Count}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="56"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Flagged (UTC)" Binding="{Binding CreatedUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" Width="170"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="By" Binding="{Binding Examiner}" Width="110" />
+                    <DataGridTextColumn Header="Tool" Binding="{Binding Tool}" Width="120" />
+                    <DataGridTextColumn Header="What" Binding="{Binding Title}" Width="2*" />
+                    <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="2*" />
+                    <DataGridTextColumn Header="Evidence" Binding="{Binding EvidencePath}" Width="*"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="No bookmarks yet" IsVisible="{Binding !Bookmarks.Count}"
+                          Message="When a row in any tool matters, select it and choose Bookmark. It is saved to the open case with your note, the tool and the evidence it came from, and appears here. Reports turns this list into numbered exhibits. Bookmarks need an open case." />
+        </Panel>
 
-        <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4">
-            <TextBlock Text="{Binding StatusLine, TargetNullValue='Open a case and click Refresh.'}"
-                       FontSize="{DynamicResource CinderFontSizeXs}"
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+        <Border Grid.Row="2" Classes="footer">
+            <TextBlock Text="{Binding StatusLine}" />
         </Border>
     </Grid>
 </UserControl>

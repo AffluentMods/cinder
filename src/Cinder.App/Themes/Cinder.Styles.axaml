@@ -211,9 +211,19 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="VerticalAlignment" Value="Bottom" />
     </Style>
+    <!-- The accent line on the active tab is a child element (Border.tab-accent), not an inset
+         BoxShadow. On screen both draw the same (checked at 150 %), but an off-screen render at
+         any scale other than 100 % lost the tab's content with the inset shadow, which made
+         high-resolution renders of the window unusable. -->
     <Style Selector="Border.tab.on">
         <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
-        <Setter Property="BoxShadow" Value="inset 0 2 0 0 #FF7A1B" />
+    </Style>
+    <Style Selector="Border.tab-accent">
+        <Setter Property="Height" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+        <Setter Property="CornerRadius" Value="6,6,0,0" />
+        <Setter Property="Background" Value="{DynamicResource CinderAccentBrush}" />
+        <Setter Property="IsHitTestVisible" Value="False" />
     </Style>
     <Style Selector="Border.tab Button.tabclose">
         <Setter Property="Opacity" Value="0" />
@@ -381,6 +391,49 @@
     </Style>
     <Style Selector="GridSplitter:pointerover">
         <Setter Property="Background" Value="{DynamicResource CinderAccentDimBrush}" />
+    </Style>
+
+    <!-- ===================== Tool chrome: toolbar, secondary bar, footer ===================== -->
+    <!-- Every tool view is toolbar / (optional sub-bar) / content / footer. These three classes
+         are that skeleton, so a tool cannot pick its own heights, paddings or separators. -->
+    <Style Selector="Border.toolbar">
+        <Setter Property="Height" Value="44" />
+        <Setter Property="Padding" Value="14,0,12,0" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.subbar">
+        <Setter Property="Padding" Value="14,8,12,8" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.footer">
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="0,1,0,0" />
+    </Style>
+    <Style Selector="Border.footer TextBlock">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <!-- Path / target shown beside the action that set it. -->
+    <Style Selector="TextBlock.path">
+        <Setter Property="FontFamily" Value="{DynamicResource CinderFontFamilyMono}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="PrefixCharacterEllipsis" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <!-- Label column in forms and inline add-rows. -->
+    <Style Selector="TextBlock.label">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
     </Style>
 
     <!-- ===================== DataGrid (shared by ~20 parser tools) ===================== -->

@@ -12,7 +12,8 @@ public sealed record WindowLayout(
     double RailWidth,
     double InspectorWidth,
     bool RailOpen,
-    bool InspectorOpen);
+    bool InspectorOpen,
+    IReadOnlyList<string>? ExpandedSections = null);
 
 /// <summary>
 /// Persists <see cref="WindowLayout"/> to <c>&lt;LocalAppData&gt;/Cinder/window.json</c>. Kept out of
@@ -47,8 +48,7 @@ public sealed class WindowLayoutStore(string? path = null)
     {
         try
         {
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, JsonSerializer.Serialize(layout));
+            AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(layout));
         }
         catch
         {

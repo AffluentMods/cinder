@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Cinder.Cloud;
@@ -49,7 +48,9 @@ public sealed class GoogleDriveConnector : ICloudConnector
         {
             ["client_id"] = ClientId,
             ["code"] = authorizationCode,
-            ["code_verifier"] = codeVerifier ?? _pendingVerifier ?? "",
+            // Empty means "use the one BeginAuthAsync generated", as in the other connectors;
+            // ?? alone let "" through and sent an empty verifier.
+            ["code_verifier"] = string.IsNullOrEmpty(codeVerifier) ? _pendingVerifier ?? "" : codeVerifier,
             ["grant_type"] = "authorization_code",
             ["redirect_uri"] = redirectLoopbackUri,
         });
@@ -71,7 +72,7 @@ public sealed class GoogleDriveConnector : ICloudConnector
         do
         {
             using var req = new HttpRequestMessage(HttpMethod.Get,
-                $"https://www.googleapis.com/drive/v3/files?fields=files(id,name,size,createdTime,modifiedTime,sha256Checksum),nextPageToken&pageSize=1000{(string.IsNullOrEmpty(pageToken) ? "" : "&pageToken=" + pageToken)}");
+                $"https://www.googleapis.com/drive/v3/files?fields=files(id,name,size,createdTime,modifiedTime,sha256Checksum),nextPageToken&pageSize=1000{(string.IsNullOrEmpty(pageToken) ? "" : "&pageToken=" + Uri.EscapeDataString(pageToken))}");
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.AccessToken);
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
@@ -94,30 +95,47 @@ public sealed class GoogleDriveConnector : ICloudConnector
         while (!string.IsNullOrEmpty(pageToken));
     }
 
+    /// <summary>
+    /// Drive Activity API v2, every page. The API returns at most <c>pageSize</c> activities
+    /// per call and a <c>nextPageToken</c> while there are more; reading only the first page
+    /// silently capped an account's history at 500 events.
+    /// </summary>
     public async IAsyncEnumerable<CloudActivity> ListActivityAsync(CloudAuthorization auth, DateTimeOffset since, [EnumeratorCancellation] CancellationToken ct)
     {
-        // Google Drive Activity API v2 — paginated; one round-trip pull.
-        using var req = new HttpRequestMessage(HttpMethod.Post, "https://driveactivity.googleapis.com/v2/activity:query")
+        var sinceUtc = since.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        var filter = "time >= \"" + sinceUtc + "\"";
+        string? pageToken = null;
+        do
         {
-            Content = new StringContent(JsonSerializer.Serialize(new
+            var body = new JsonObject { ["pageSize"] = 500, ["filter"] = filter };
+            if (!string.IsNullOrEmpty(pageToken))
             {
-                pageSize = 500,
-                filter = $"time >= \"{since:O}\""
-            }), System.Text.Encoding.UTF8, "application/json")
-        };
-        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.AccessToken);
-        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
-        var json = await resp.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct).ConfigureAwait(false);
-        foreach (var a in (json?["activities"] as JsonArray)?.OfType<JsonObject>() ?? [])
-        {
-            var t = a["timestamp"]?.GetValue<string?>() ?? a["timeRange"]?["startTime"]?.GetValue<string?>();
-            yield return new CloudActivity(
-                Provider: ProviderId, AccountId: auth.AccountId,
-                Action: (a["primaryActionDetail"] as JsonObject)?.FirstOrDefault().Key ?? "?",
-                Target: a["targets"]?[0]?["driveItem"]?["title"]?.GetValue<string?>() ?? "",
-                Timestamp: DateTimeOffset.TryParse(t, out var dto) ? dto : DateTimeOffset.MinValue,
-                IpAddress: null, UserAgent: null);
+                body["pageToken"] = pageToken;
+            }
+            using var req = new HttpRequestMessage(HttpMethod.Post, "https://driveactivity.googleapis.com/v2/activity:query")
+            {
+                Content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json")
+            };
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", auth.AccessToken);
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            var json = await resp.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct).ConfigureAwait(false);
+            foreach (var a in (json?["activities"] as JsonArray)?.OfType<JsonObject>() ?? [])
+            {
+                var t = a["timestamp"]?.GetValue<string?>() ?? (a["timeRange"] as JsonObject)?["startTime"]?.GetValue<string?>();
+                var firstTarget = (a["targets"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault();
+                yield return new CloudActivity(
+                    Provider: ProviderId, AccountId: auth.AccountId,
+                    Action: (a["primaryActionDetail"] as JsonObject)?.FirstOrDefault().Key ?? "?",
+                    Target: (firstTarget?["driveItem"] as JsonObject)?["title"]?.GetValue<string?>() ?? "",
+                    // A missing or unparseable time is "unknown" (null), not year 0001: a
+                    // made-up timestamp would sort to the very start of the timeline.
+                    Timestamp: DateTimeOffset.TryParse(t, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var dto) ? dto : null,
+                    IpAddress: null, UserAgent: null);
+            }
+            pageToken = json?["nextPageToken"]?.GetValue<string?>();
         }
+        while (!string.IsNullOrEmpty(pageToken));
     }
 }

@@ -1,44 +1,74 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
-             xmlns:srch="using:Cinder.Search"
              x:Class="Cinder.App.Views.Tools.MapView"
              x:DataType="tools:MapTool">
-    <Grid RowDefinitions="Auto,Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Ingest photos…"
-                        Command="{Binding IngestPhotosCommand}"
-                        ToolTip.Tip="Walk a folder of images, extract GPS coordinates from EXIF, add every geo-tagged photo as a point." />
-                <TextBlock Text="{Binding StatusLine}" VerticalAlignment="Center"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            </StackPanel>
+    <!-- A location list: fill it from photo EXIF or by hand, then export it to a mapping tool. -->
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <Border Grid.Row="0" Classes="toolbar">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="tb" Command="{Binding IngestPhotosCommand}"
+                            ToolTip.Tip="Reads the GPS position stored in each photo under a folder (subfolders included)">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Image}" Width="14" Height="14" />
+                            <TextBlock Text="Add photos from folder…" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tb" Content="Stop" Command="{Binding IngestPhotosCancelCommand}"
+                            IsVisible="{Binding IngestPhotosCommand.IsRunning}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                            IsVisible="{Binding Points.Count}">
+                    <c:ExportButton ExportCommand="{Binding ExportCommand}" Formats="csv,json,kml" />
+                    <Button Classes="tb" Content="Clear" Command="{Binding ClearCommand}"
+                            ToolTip.Tip="Remove every point from this list (the photos are not touched)" />
+                </StackPanel>
+            </Grid>
         </Border>
-        <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,8"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+
+        <Border Grid.Row="1" Classes="subbar">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBlock Text="Add manually:" VerticalAlignment="Center"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBox Width="110" Text="{Binding Latitude}" Watermark="lat" />
-                <TextBox Width="110" Text="{Binding Longitude}" Watermark="lng" />
-                <TextBox Width="180" Text="{Binding Label}" Watermark="label" />
-                <TextBox Width="120" Text="{Binding Source}" Watermark="source" />
-                <Button Content="Add point" Command="{Binding AddPointCommand}" />
-                <Button Content="Clear all" Command="{Binding ClearCommand}" />
+                <TextBlock Text="Add a point" Classes="label" Margin="0,0,4,0" />
+                <TextBox Width="120" Text="{Binding Latitude}" Watermark="Latitude" ToolTip.Tip="Decimal degrees, north positive (-90 to 90)"
+                         FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                <TextBox Width="120" Text="{Binding Longitude}" Watermark="Longitude" ToolTip.Tip="Decimal degrees, east positive (-180 to 180)"
+                         FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                <TextBox Width="220" Text="{Binding Label}" Watermark="What is at this location" />
+                <TextBox Width="140" Text="{Binding Source}" Watermark="Where it came from" />
+                <Button Classes="tb" Content="Add" Command="{Binding AddPointCommand}" />
             </StackPanel>
         </Border>
-        <DataGrid Grid.Row="2" ItemsSource="{Binding Points}" AutoGenerateColumns="False" IsReadOnly="True"
-                  Background="{DynamicResource CinderBackground0Brush}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="Latitude"  Binding="{Binding Latitude, StringFormat=F5}"  Width="120" />
-                <DataGridTextColumn Header="Longitude" Binding="{Binding Longitude, StringFormat=F5}" Width="120" />
-                <DataGridTextColumn Header="Source"    Binding="{Binding Source}" Width="160" />
-                <DataGridTextColumn Header="Label"     Binding="{Binding Label}"  Width="*" />
-                <DataGridTextColumn Header="Timestamp" Binding="{Binding Timestamp, StringFormat=u}" Width="200" />
-            </DataGrid.Columns>
-        </DataGrid>
+
+        <Panel Grid.Row="2">
+            <DataGrid ItemsSource="{Binding Points}" AutoGenerateColumns="False" IsReadOnly="True"
+                      IsVisible="{Binding Points.Count}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Latitude" Binding="{Binding Latitude, StringFormat=F6}" Width="120"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Longitude" Binding="{Binding Longitude, StringFormat=F6}" Width="120"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Time" Binding="{Binding TimeDisplay}" Width="230"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Time from" Binding="{Binding TimeSource}" Width="140" />
+                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="110" />
+                    <DataGridTextColumn Header="Label" Binding="{Binding Label}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="No locations yet" IsVisible="{Binding !Points.Count}"
+                          Message="Point Cinder at a folder of photos and it lists every one that carries a GPS position, with the time the camera recorded. Export the list as KML to see it on a map in Google Earth or QGIS.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="Add photos from folder…"
+                        Command="{Binding IngestPhotosCommand}" />
+            </c:EmptyState>
+        </Panel>
+
+        <Border Grid.Row="3" Classes="footer">
+            <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Text="{Binding Points.Count, StringFormat='{}{0:N0} points'}" Classes="mono" />
+                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Margin="16,0,0,0" />
+            </Grid>
+        </Border>
     </Grid>
 </UserControl>

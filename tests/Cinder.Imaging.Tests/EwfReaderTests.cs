@@ -117,7 +117,10 @@ public sealed class EwfReaderTests
         // contents do not produce. Reading the recorded value off a metadata panel would show
         // a plausible-looking digest and tell the examiner nothing.
         var media = EwfBuilder.Media(32 * 1024);
-        var container = EwfBuilder.Build(media, new EwfBuilder.Options { ForcedMd5 = new byte[16] });
+        // A wrong value, not a zeroed field: sixteen zero bytes are how a writer records "no
+        // MD5 computed", and the reader treats that as absent rather than as a mismatch.
+        var wrongMd5 = Enumerable.Repeat((byte)0xA5, 16).ToArray();
+        var container = EwfBuilder.Build(media, new EwfBuilder.Options { ForcedMd5 = wrongMd5 });
 
         using var reader = new EwfReader(new MemoryStream(container));
         var result = await reader.VerifyAsync();

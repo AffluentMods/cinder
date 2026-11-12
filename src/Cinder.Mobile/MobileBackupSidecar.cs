@@ -24,14 +24,38 @@ public sealed class MobileBackupSidecar : IMobileBackupReader
         _logger = logger ?? NullLogger.Instance;
     }
 
-    public static ProcessStartInfo DefaultSidecar(string parsersDir) => new()
+    /// <summary>Path of the worker module this wrapper launches, relative to the parsers directory.</summary>
+    public const string WorkerRelativePath = "mobile/mobile_worker.py";
+
+    /// <summary>
+    /// True when the worker this wrapper drives is actually present under
+    /// <paramref name="parsersDir"/>. It is not shipped in current builds, so callers should
+    /// check before offering mobile-backup parsing.
+    /// </summary>
+    public static bool IsAvailable(string parsersDir) =>
+        !string.IsNullOrEmpty(parsersDir) && File.Exists(Path.Combine(parsersDir, "mobile", "mobile_worker.py"));
+
+    /// <exception cref="SidecarException">
+    /// The worker module is not present. Launching <c>python -m mobile.mobile_worker</c> anyway
+    /// would die on import and surface as an opaque "Sidecar process ended."
+    /// </exception>
+    public static ProcessStartInfo DefaultSidecar(string parsersDir)
     {
-        FileName = ExecutableResolver.ResolveRequired(
-            OperatingSystem.IsWindows() ? "python.exe" : "python3",
-            "Install Python 3.12+ and make sure it is on PATH."),
-        ArgumentList = { "-m", "mobile.mobile_worker" },
-        WorkingDirectory = parsersDir,
-    };
+        if (!IsAvailable(parsersDir))
+        {
+            throw new SidecarException(
+                $"Mobile backup parsing is not available in this build: '{WorkerRelativePath}' " +
+                $"was not found under '{parsersDir}'.");
+        }
+        return new ProcessStartInfo
+        {
+            FileName = ExecutableResolver.ResolveRequired(
+                OperatingSystem.IsWindows() ? "python.exe" : "python3",
+                "Install Python 3.12+ and make sure it is on PATH."),
+            ArgumentList = { "-m", "mobile.mobile_worker" },
+            WorkingDirectory = parsersDir,
+        };
+    }
 
     private static DateTimeOffset Ts(JsonNode? n)
         => DateTimeOffset.TryParse(n?.GetValue<string?>(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto) ? dto : DateTimeOffset.MinValue;

@@ -63,7 +63,7 @@
     <PackageVersion Include="Blake3" Version="1.0.0" />
     <PackageVersion Include="System.IO.Hashing" Version="10.0.12" />
     <PackageVersion Include="BouncyCastle.Cryptography" Version="2.5.0" />
-    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.7" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
 
     <!-- Charts / Maps / Markdown -->
     <PackageVersion Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.0.0-rc5.4" />
@@ -153,5 +153,8 @@
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <PackageVersion Include="Bogus" Version="35.6.1" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <!-- Headless Avalonia host for control tests (Cinder.Hex.Tests). Keep in step with the Avalonia version above. -->
+    <PackageVersion Include="Avalonia.Headless" Version="11.2.1" />
+    <PackageVersion Include="Avalonia.Headless.XUnit" Version="11.2.1" />
   </ItemGroup>
 </Project>

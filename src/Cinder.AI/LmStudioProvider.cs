@@ -10,7 +10,9 @@ public sealed class LmStudioProvider : OpenAiCompatibleProvider
                apiKeyAccessor: () => null,
                capabilities: new AiProviderCapabilities(
                     SupportsStreaming: true, SupportsToolCalling: false, SupportsVision: false,
-                    MaxContextTokens: 8_192, LocalOnly: true))
+                    MaxContextTokens: 8_192,
+                    // LM Studio can serve the LAN; only a loopback endpoint keeps prompts on this machine.
+                    LocalOnly: endpoint is null || endpoint.IsLoopback))
     {
     }
 }

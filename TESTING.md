@@ -104,23 +104,25 @@ dotnet run --project src/Cinder.App
 - No exceptions in stdout / stderr.
 - No crash bundles written to `%LOCALAPPDATA%\Cinder\crashes\`.
 
-### 2.2 First-launch — Python bootstrap
+### 2.2 Optional Python components
 
-The first time a tool that needs a sidecar runs, `PythonBootstrap`
-auto-creates `%LOCALAPPDATA%\Cinder\venv` and pip-installs the pinned
-forensic dependencies. Trigger it once (the PST/OST email path is a good
-trigger) and verify:
+Cinder never downloads or installs anything. Two tools need Python that you
+provide: PST / OST mail (the `libpff-python` package) and Memory (Volatility 3).
+They use `%LOCALAPPDATA%\Cinder\venv` if that virtual environment exists,
+otherwise `python` on PATH. Verify:
 
-- A progress dialog appears explaining what's installing and why.
-- The venv lands at the expected path.
-- Subsequent launches don't re-run the bootstrap.
+- Without Python, each of the two tools says what is missing and how to get it;
+  every other tool works.
+- With the packages installed, a PST opens in Email and a memory image lists
+  its processes in Memory.
 
 ### 2.3 Re-launch — state persistence
 
 Quit, relaunch. Verify:
 
 - Recent cases / recent evidence persist (`%LOCALAPPDATA%\Cinder\recents.json`).
-- Last window position / size is restored.
+- Last window position / size is restored, along with the panel widths and
+  which sidebar groups were open.
 - Settings (theme, AI provider, etc.) survive.
 
 ---

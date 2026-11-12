@@ -22,24 +22,32 @@ public static class EvidenceOpener
         // Sniff first 8 bytes; if EVF magic, hand back the EWF-backed Stream.
         // Otherwise it's a raw file — return a FileStream so callers see byte-for-byte.
         var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (IsAff4Magic(fs))
+        try
         {
-            fs.Dispose();
-            return Aff4.Aff4Reader.Open(path).OpenOwningStream();
-        }
-        var vd = VirtualDiskKind(fs);
-        if (vd is not null)
-        {
-            // VHD / VHDX: hand back the disk contents, not the container bytes, so hashes,
-            // carving and filesystem parsing see the same media a mount would.
-            DiscUtils.VirtualDisk disk = vd == "vhdx"
-                ? new DiscUtils.Vhdx.Disk(fs, DiscUtils.Streams.Ownership.Dispose)
-                : new DiscUtils.Vhd.Disk(fs, DiscUtils.Streams.Ownership.Dispose);
-            return new VirtualDiskDisposingStream(disk);
-        }
-        if (IsEwfMagic(fs))
-        {
-            try
+            if (IsAff4Magic(fs))
+            {
+                fs.Dispose();
+                return Aff4.Aff4Reader.Open(path).OpenOwningStream();
+            }
+            var vd = VirtualDiskKind(fs);
+            if (vd is not null)
+            {
+                // VHD / VHDX: hand back the disk contents, not the container bytes, so hashes,
+                // carving and filesystem parsing see the same media a mount would.
+                DiscUtils.VirtualDisk disk = vd == "vhdx"
+                    ? new DiscUtils.Vhdx.Disk(fs, DiscUtils.Streams.Ownership.Dispose)
+                    : new DiscUtils.Vhd.Disk(fs, DiscUtils.Streams.Ownership.Dispose);
+                try
+                {
+                    return new VirtualDiskDisposingStream(disk);
+                }
+                catch
+                {
+                    disk.Dispose();
+                    throw;
+                }
+            }
+            if (IsEwfMagic(fs))
             {
                 // EwfReader.Open() globs sibling segments; we need to use that path so
                 // multi-segment chains work even when the caller hands us only the .E01.
@@ -47,13 +55,17 @@ public static class EvidenceOpener
                 var reader = EwfReader.Open(path);
                 return new EwfDisposingStream(reader);
             }
-            catch
-            {
-                fs.Dispose();
-                throw;
-            }
+            return fs;
         }
-        return fs;
+        catch
+        {
+            // Whatever went wrong while working out what the file is — a container with the
+            // right magic and a broken structure throws from deep inside its parser — the
+            // sniffing handle must not outlive the call: it would keep the evidence file locked
+            // until the finalizer got round to it.
+            fs.Dispose();
+            throw;
+        }
     }
 
     /// <summary>True for an AFF4 container (a ZIP volume with a <c>container.description</c>).</summary>
@@ -190,10 +202,12 @@ public static class EvidenceOpener
     /// EwfStream alone doesn't own the underlying <see cref="EwfReader"/> — wrap it so
     /// the caller's `using` properly tears down both the stream and the open segment files.
     /// </summary>
-    private sealed class EwfDisposingStream : Stream
+    private sealed class EwfDisposingStream : Stream, IEvidenceDamageSource
     {
         private readonly EwfReader _owner;
         private readonly Stream _inner;
+
+        public IReadOnlyList<int> DamagedChunks => _owner.DamagedChunks;
 
         public EwfDisposingStream(EwfReader owner)
         {

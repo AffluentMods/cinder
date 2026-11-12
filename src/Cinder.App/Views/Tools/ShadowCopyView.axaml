@@ -1,27 +1,42 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
-             xmlns:nat="using:Cinder.Native"
              x:Class="Cinder.App.Views.Tools.ShadowCopyView"
              x:DataType="tools:ShadowCopyTool">
-    <Grid RowDefinitions="Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Enumerate snapshots" Command="{Binding RefreshCommand}" />
-                <TextBlock VerticalAlignment="Center" Margin="14,0"
-                           Text="{Binding StatusLine}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            </StackPanel>
+    <Grid RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" Classes="toolbar">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <Button Classes="tb" VerticalAlignment="Center" Command="{Binding RefreshCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <c:CinderIcon Data="{x:Static c:Icons.Clock}" Width="14" Height="14" />
+                        <TextBlock Text="List snapshots" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <c:ExportButton Grid.Column="2" ExportCommand="{Binding ExportCommand}" VerticalAlignment="Center"
+                                IsVisible="{Binding Snapshots.Count}" />
+            </Grid>
         </Border>
-        <DataGrid Grid.Row="1" ItemsSource="{Binding Snapshots}" AutoGenerateColumns="False" IsReadOnly="True"
-                  Background="{DynamicResource CinderBackground0Brush}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="ID"      Binding="{Binding Id}" Width="*" />
-                <DataGridTextColumn Header="Origin"  Binding="{Binding Origin}" Width="*" />
-                <DataGridTextColumn Header="Created" Binding="{Binding CreatedUtc, StringFormat=u}" Width="200" />
-                <DataGridTextColumn Header="Notes"   Binding="{Binding Notes}" Width="*" />
-            </DataGrid.Columns>
-        </DataGrid>
+        <Panel Grid.Row="1">
+            <DataGrid ItemsSource="{Binding Snapshots}" AutoGenerateColumns="False" IsReadOnly="True"
+                      IsVisible="{Binding Snapshots.Count}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Snapshot" Binding="{Binding Id}" Width="*"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Volume" Binding="{Binding Origin}" Width="*"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Created (UTC)" Binding="{Binding CreatedUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" Width="170"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Notes" Binding="{Binding Notes}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="{Binding EmptyTitle}" IsVisible="{Binding !Snapshots.Count}"
+                          Message="Lists the point-in-time snapshots that exist on this computer right now: Volume Shadow Copies on Windows; btrfs, LVM and ZFS snapshots on Linux. Earlier versions of deleted or changed files often survive in them. Listing needs Administrator or root.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="List snapshots" Command="{Binding RefreshCommand}" />
+            </c:EmptyState>
+        </Panel>
+        <Border Grid.Row="2" Classes="footer">
+            <TextBlock Text="{Binding StatusLine}" />
+        </Border>
     </Grid>
 </UserControl>

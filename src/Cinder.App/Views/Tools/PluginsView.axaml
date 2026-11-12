@@ -1,31 +1,61 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
-             xmlns:plg="using:Cinder.Plugins"
              x:Class="Cinder.App.Views.Tools.PluginsView"
              x:DataType="tools:PluginsTool">
-    <Grid RowDefinitions="Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Pick plugins folder…" Command="{Binding PickFolderCommand}" />
-                <TextBlock VerticalAlignment="Center" Text="{Binding Folder, TargetNullValue='No folder selected'}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBlock VerticalAlignment="Center" Margin="14,0"
-                           Text="{Binding StatusLine}"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            </StackPanel>
+    <!-- Off by default. Turn plugins on, pick a folder, then trust files one at a time. -->
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <Border Grid.Row="0" Classes="toolbar" IsVisible="{Binding PluginsEnabled}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="tb" Command="{Binding PickFolderCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="14" Height="14" />
+                            <TextBlock Text="Plugin folder…" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="accent" Height="26" Padding="12,0" Content="Trust and load" Command="{Binding TrustSelectedCommand}"
+                            IsVisible="{Binding CanTrustSelected}"
+                            ToolTip.Tip="Records this exact file (by its SHA-256) as trusted in your profile, then runs it. If the file changes, it has to be trusted again." />
+                    <Button Classes="tb" Content="Remove trust" Command="{Binding RevokeSelectedCommand}"
+                            IsVisible="{Binding CanRevokeSelected}" />
+                </StackPanel>
+                <TextBlock Grid.Column="1" Classes="path" Margin="14,0" Text="{Binding Folder}" ToolTip.Tip="{Binding Folder}" />
+                <Button Grid.Column="2" Classes="tb" VerticalAlignment="Center" Content="Turn plugins off"
+                        Command="{Binding DisablePluginsCommand}" />
+            </Grid>
         </Border>
-        <DataGrid Grid.Row="1" ItemsSource="{Binding Loaded}" AutoGenerateColumns="False" IsReadOnly="True"
-                  Background="{DynamicResource CinderBackground0Brush}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="File"        Binding="{Binding FileName}" Width="200" />
-                <DataGridTextColumn Header="Status"      Binding="{Binding Status}" Width="100" />
-                <DataGridTextColumn Header="Signed by"   Binding="{Binding SignatureDisplay}" Width="200" />
-                <DataGridTextColumn Header="SHA-256"     Binding="{Binding Sha256}" Width="*" />
-                <DataGridTextColumn Header="Error"       Binding="{Binding Error}" Width="200" />
-            </DataGrid.Columns>
-        </DataGrid>
+
+        <Panel Grid.Row="1">
+            <DataGrid ItemsSource="{Binding Loaded}" SelectedItem="{Binding Selected}" AutoGenerateColumns="False" IsReadOnly="True"
+                      IsVisible="{Binding Loaded.Count}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="File" Binding="{Binding FileName}" Width="220" />
+                    <DataGridTextColumn Header="State" Binding="{Binding Status}" Width="110" />
+                    <DataGridTextColumn Header="Signed by" Binding="{Binding SignatureDisplay}" Width="240" />
+                    <DataGridTextColumn Header="SHA-256" Binding="{Binding Sha256}" Width="*"
+                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Problem" Binding="{Binding Error}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Plugins switched off (the default). -->
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="Plugins are off" IsVisible="{Binding !PluginsEnabled}"
+                          Message="A plugin is a .dll that adds a tool to Cinder. It runs with the same access to this computer and your evidence as Cinder itself, so plugins stay off until you turn them on, and even then nothing runs until you trust that specific file. Trust is stored in your user profile, not in the plugin folder.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="Turn plugins on" Command="{Binding EnablePluginsCommand}" />
+            </c:EmptyState>
+
+            <!-- On, but nothing listed yet. -->
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="No plugins listed" IsVisible="{Binding ShowPickFolder}"
+                          Message="Pick the folder your plugins are in. Each .dll is listed with its SHA-256 and who signed it. Files you have not trusted are shown as not trusted and are not run; select one and choose Trust and load when you have checked where it came from.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="Plugin folder…" Command="{Binding PickFolderCommand}" />
+            </c:EmptyState>
+        </Panel>
+
+        <Border Grid.Row="2" Classes="footer">
+            <TextBlock Text="{Binding StatusLine}" />
+        </Border>
     </Grid>
 </UserControl>

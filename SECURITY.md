@@ -83,10 +83,16 @@ The first public release was preceded by a security audit. The fixes that landed
   the PDF exporter. Without it, a malicious report template can no longer reach
   `file:///etc/shadow` (or equivalent) via embedded `<iframe>` / `<img>` and bake it into the
   PDF.
-- **Plugin loader.** `Cinder.Plugins.PluginLoader` now refuses to load anything unless the
-  user has placed a `.cinder-trusted` sentinel file in the plugin directory AND has listed
-  each plugin's SHA-256 in a `.cinder-plugins.sha256` manifest. Untrusted plugins are surfaced
-  in the Plugins tool with their hash for the user to approve.
+- **Plugin loader.** `Cinder.Plugins.PluginLoader` loads nothing unless the user has turned
+  plugins on and approved that exact file by SHA-256. Both the switch and the approved hashes
+  live in the per-user store (`%LOCALAPPDATA%\Cinder\plugin-trust.json`, `PluginTrustStore`),
+  not in the plugin folder: an earlier design kept a `.cinder-trusted` sentinel and a
+  `.cinder-plugins.sha256` manifest beside the plugins, which anything able to drop a `.dll`
+  there could also forge. Those files are now ignored and are not migrated. Each plugin loads
+  in its own `AssemblyLoadContext` from the bytes that were hashed, and every assembly it
+  pulls from the plugin folder, managed or native, must itself be an approved hash; a swapped
+  dependency fails the load. Untrusted files are listed in the Plugins tool with their hash
+  and signer, and are approved there one at a time.
 - **EncryptedBundle.** Hardened against zip-slip (manual entry walk + destination clamp),
   decompression bombs (8 GB ciphertext / 32 GB extracted caps), and post-decrypt memory
   hygiene (`CryptographicOperations.ZeroMemory` on the derived key, plaintext, and ciphertext
@@ -137,7 +143,7 @@ A second audit ahead of the public release. The findings that produced code chan
 Checked and found already correct: XXE closed on all five `XmlReader` sites; no
 `BinaryFormatter` anywhere; the zip-slip guard; `ArgumentList` used throughout with no shell
 string interpolation; PowerShell arguments passed via `$args[]`; the absent
-`--enable-local-file-access` on the PDF path; the plugin trust sentinel plus SHA-256 manifest;
+`--enable-local-file-access` on the PDF path; the per-user plugin trust store;
 PKCE S256; no secrets in the working tree or in git history; zero vulnerable NuGet packages.
 
 Still open from this audit, tracked below: the OAuth loopback flow carries no `state`
@@ -182,10 +188,15 @@ the open rather than leaving them implicit.
   libsecret / KeyChain integration on Linux / macOS remains tracked.
 - **Passphrases are passed as `string`.** Garbage-collected, immutable, not zeroable. Argon2id
   + `SecureString` / `byte[]` adapters are tracked for the Phase 8 case-management deepening.
-- **No Authenticode signature check on plugins.** The SHA-256 manifest is the current gate.
-  Authenticode verification on Windows + GPG signature verification on Linux are tracked.
-- **Plugins run in the host process.** The `[LoadIsolated]` attribute is declared but not yet
-  enforced; isolation via `AssemblyLoadContext` / sidecar process is on the Phase 9 roadmap.
+- **Plugin signatures are informational.** On Windows the signer shown beside a plugin is
+  verified with `WinVerifyTrust` (the signature must cover the file's current bytes and chain
+  to a trusted root; revocation is not checked online). It does not gate loading: the
+  per-user SHA-256 approval does. There is no signature check on Linux or macOS.
+- **Plugins run in the host process.** Each plugin gets its own `AssemblyLoadContext`, which
+  controls what it can load, not what it can do: a trusted plugin has the same access to the
+  machine and the evidence as Cinder. Process isolation is not implemented.
+- **Python scripts are not sandboxed.** The scripting host runs scripts with the examiner's
+  full rights (file system, network, process launch). Run only scripts you trust.
 - **Self-update.** Not implemented. Users are responsible for downloading new releases and
   verifying SHA-256 against `SHA256SUMS.txt` in the GitHub Release.
 - **OAuth loopback flow** — fixed: every connector now issues a `state` nonce,

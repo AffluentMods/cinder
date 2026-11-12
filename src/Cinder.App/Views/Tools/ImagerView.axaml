@@ -27,6 +27,8 @@
                 <TextBlock Text="Format" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
                 <ComboBox Grid.Column="1" ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" MinWidth="160" />
             </Grid>
+            <CheckBox Margin="120,0,0,0" IsChecked="{Binding Overwrite}" Content="Replace an existing image at this path"
+                      ToolTip.Tip="Off by default. Without it, imaging refuses to start if a file is already there, including what is left of an earlier failed run." />
             <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Command="{Binding StartCommand}"
                     Margin="120,0,0,0">
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -34,6 +36,9 @@
                     <TextBlock Text="Start imaging" VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
+            <Button Classes="tb" HorizontalAlignment="Left" Height="30" Margin="120,0,0,0" Content="Stop"
+                    Command="{Binding StartCancelCommand}" IsVisible="{Binding StartCommand.IsRunning}"
+                    ToolTip.Tip="Stops and deletes the unfinished output" />
             <ProgressBar IsIndeterminate="True" IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />
             <TextBlock Text="{Binding BytesRead, StringFormat='{}{0:N0} bytes read'}" Classes="mono dim" FontSize="12"
                        IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />

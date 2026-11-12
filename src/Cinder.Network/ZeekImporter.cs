@@ -58,18 +58,61 @@ public sealed class ZeekImporter
         {
             return null;
         }
-        var ts = DateTimeOffset.FromUnixTimeMilliseconds((long)(tsSec * 1000));
+        if (!TryFromEpochSeconds(tsSec, out var ts))
+        {
+            return null;
+        }
+
+        // Zeek's duration is the flow's length in seconds ("-" when unknown).
+        var last = ts;
+        if (double.TryParse(r.GetValueOrDefault("duration", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out var duration)
+            && duration > 0
+            && TryFromEpochSeconds(tsSec + duration, out var end))
+        {
+            last = end;
+        }
+
+        // Direction is from the originator's side, which is TcpFlow.Source: what the originator
+        // sent is "out" (rendered ↑), what the responder sent back is "in" (↓). These were
+        // passed the other way round, so an upload read as a download.
+        var packetsOut = long.TryParse(r.GetValueOrDefault("orig_pkts", "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var po) ? po : 0;
+        var packetsIn = long.TryParse(r.GetValueOrDefault("resp_pkts", "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var pi) ? pi : 0;
+        var bytesOut = long.TryParse(r.GetValueOrDefault("orig_bytes", "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bo) ? bo : 0;
+        var bytesIn = long.TryParse(r.GetValueOrDefault("resp_bytes", "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bi) ? bi : 0;
+
         return new TcpFlow(
-            r.GetValueOrDefault("id.orig_h", ""),
-            int.TryParse(r.GetValueOrDefault("id.orig_p", "0"), out var sp) ? sp : 0,
-            r.GetValueOrDefault("id.resp_h", ""),
-            int.TryParse(r.GetValueOrDefault("id.resp_p", "0"), out var dp) ? dp : 0,
-            ts, ts,
-            long.TryParse(r.GetValueOrDefault("orig_pkts", "0"), out var po) ? po : 0,
-            long.TryParse(r.GetValueOrDefault("resp_pkts", "0"), out var pi) ? pi : 0,
-            long.TryParse(r.GetValueOrDefault("orig_bytes", "0"), out var bo) ? bo : 0,
-            long.TryParse(r.GetValueOrDefault("resp_bytes", "0"), out var bi) ? bi : 0,
-            null, null, null);
+            Source: r.GetValueOrDefault("id.orig_h", ""),
+            SourcePort: int.TryParse(r.GetValueOrDefault("id.orig_p", "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var sp) ? sp : 0,
+            Destination: r.GetValueOrDefault("id.resp_h", ""),
+            DestinationPort: int.TryParse(r.GetValueOrDefault("id.resp_p", "0"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var dp) ? dp : 0,
+            First: ts,
+            Last: last,
+            PacketsIn: packetsIn,
+            PacketsOut: packetsOut,
+            BytesIn: bytesIn,
+            BytesOut: bytesOut,
+            Ja3: null, Ja4: null, ServerName: null);
+    }
+
+    /// <summary>
+    /// Epoch seconds to a timestamp, refusing NaN, infinities and values outside what
+    /// <see cref="DateTimeOffset"/> can hold. A log is evidence: one absurd <c>ts</c> must cost
+    /// that row, not throw out of the enumeration and take every later row with it.
+    /// </summary>
+    private static bool TryFromEpochSeconds(double seconds, out DateTimeOffset timestamp)
+    {
+        timestamp = default;
+        if (!double.IsFinite(seconds))
+        {
+            return false;
+        }
+        var ms = seconds * 1000d;
+        if (ms < DateTimeOffset.MinValue.ToUnixTimeMilliseconds() || ms > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
+        {
+            return false;
+        }
+        timestamp = DateTimeOffset.FromUnixTimeMilliseconds((long)ms);
+        return true;
     }
 
     private static DnsQuery? RowToDns(IReadOnlyDictionary<string, string> r)
@@ -78,8 +121,12 @@ public sealed class ZeekImporter
         {
             return null;
         }
+        if (!TryFromEpochSeconds(tsSec, out var ts))
+        {
+            return null;
+        }
         return new DnsQuery(
-            DateTimeOffset.FromUnixTimeMilliseconds((long)(tsSec * 1000)),
+            ts,
             r.GetValueOrDefault("id.orig_h", ""),
             r.GetValueOrDefault("id.resp_h", ""),
             r.GetValueOrDefault("query", ""),

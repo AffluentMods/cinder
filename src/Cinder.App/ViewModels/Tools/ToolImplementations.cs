@@ -70,6 +70,8 @@ public sealed partial class StringsTool
     [RelayCommand]
     private async Task ExportAsync(string format, CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         if (Hits.Count == 0) return;
         var ext = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase) ? "json" : "csv";
         var path = await ToolDialog.SaveFileAsync($"Export strings as {ext.ToUpperInvariant()}", $"strings-export.{ext}", ext);
@@ -89,7 +91,7 @@ public sealed partial class StringsTool
                 return Cinder.Core.Export.TabularExporter.WriteCsv(snapshot, w);
             }, ct);
             StatusLine = $"Exported {written:N0} strings → {path}";
-            await ActiveCaseContext.LogAsync(CustodyAction.DataExported, new
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.DataExported, new
             {
                 Tool = "strings",
                 Format = ext,
@@ -115,31 +117,53 @@ public sealed partial class StringsTool
         await RunAsync(ct);
     }
 
+    /// <summary>Strings kept per scan. Reaching it is reported with how far into the file the scan got.</summary>
+    private const int MaxStrings = 50_000;
+
+    /// <summary>Incremented per scan, so a slower earlier scan cannot add its strings to a newer file.</summary>
+    private int _scanSerial;
+
+    /// <summary>Set when the last scan stopped at <see cref="MaxStrings"/>: (offset reached, file length).</summary>
+    private (long Offset, long Length)? _stoppedAt;
+
     [RelayCommand]
     private async Task RunAsync(CancellationToken ct)
     {
         if (string.IsNullOrEmpty(Path)) return;
+        var serial = ++_scanSerial;
+        var path = Path;
         _all.Clear();
         Hits.Clear();
         ContainerHint = null;
+        _stoppedAt = null;
         IsLoading = true;
         StatusLine = "Scanning…";
         try
         {
-            ContainerHint = await Task.Run(() => DetectContainer(Path), ct);
+            var hint = await Task.Run(() => DetectContainer(path), ct);
             var minLen = Math.Max(3, MinLength);
-            var hits = await Task.Run(() => Extract(Path, minLen, ct), ct);
+            var (hits, stoppedAt) = await Task.Run(() => Extract(path, minLen, ct), ct);
+            if (serial != _scanSerial)
+            {
+                // Another file was picked (or a re-scan started) while this one ran.
+                return;
+            }
+            ContainerHint = hint;
+            _stoppedAt = stoppedAt;
             _all.AddRange(hits);
             Reproject();
-            StatusLine = BuildStatus();
+        }
+        catch (OperationCanceledException)
+        {
+            if (serial == _scanSerial) StatusLine = "Stopped.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            if (serial == _scanSerial) StatusLine = $"Could not read {System.IO.Path.GetFileName(path)}: {ex.Message}";
         }
         finally
         {
-            IsLoading = false;
+            if (serial == _scanSerial) IsLoading = false;
         }
     }
 
@@ -217,7 +241,7 @@ public sealed partial class StringsTool
                 continue;
             }
             Hits.Add(h);
-            if (++shown >= 50_000) break;
+            if (++shown >= MaxStrings) break;
         }
         StatusLine = BuildStatus();
     }
@@ -226,11 +250,18 @@ public sealed partial class StringsTool
     {
         if (_all.Count == 0)
         {
-            return Hits.Count == 0 ? "" : $"{Hits.Count:N0}";
+            return "No readable text of that length in this file. Try a smaller minimum length.";
         }
-        return Hits.Count == _all.Count
-            ? $"{_all.Count:N0} string{(_all.Count == 1 ? "" : "s")}"
-            : $"{Hits.Count:N0} of {_all.Count:N0} (filtered)";
+        var counts = Hits.Count == _all.Count
+            ? $"{_all.Count:N0} string{(_all.Count == 1 ? "" : "s")} found."
+            : $"{Hits.Count:N0} of {_all.Count:N0} strings match the filter.";
+        if (_stoppedAt is { } stop)
+        {
+            // Said every time: an unqualified "50,000 strings" reads as "that is all there is".
+            var percent = stop.Length > 0 ? 100.0 * stop.Offset / stop.Length : 0;
+            counts += $" The scan stopped at the {MaxStrings:N0}-string limit, at offset 0x{stop.Offset:X} ({percent:0.#}% of the file); the rest was not scanned. Raise the minimum length to reach further.";
+        }
+        return counts;
     }
 
     /// <summary>
@@ -331,7 +362,7 @@ public sealed partial class StringsTool
         return null;
     }
 
-    private static IEnumerable<StringHit> Extract(string path, int minLen, CancellationToken ct)
+    private static (List<StringHit> Hits, (long Offset, long Length)? StoppedAt) Extract(string path, int minLen, CancellationToken ct)
     {
         var results = new List<StringHit>();
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
@@ -344,7 +375,7 @@ public sealed partial class StringsTool
         bool utf16High = false;
 
         int read;
-        while ((read = fs.Read(buf)) > 0 && results.Count < 50_000)
+        while ((read = fs.Read(buf)) > 0 && results.Count < MaxStrings)
         {
             ct.ThrowIfCancellationRequested();
             for (int i = 0; i < read; i++)
@@ -404,7 +435,9 @@ public sealed partial class StringsTool
         }
         if (asciiSb.Length >= minLen) results.Add(new StringHit(asciiStart, "ASCII", asciiSb.ToString()));
         if (utf16Sb.Length >= minLen) results.Add(new StringHit(utf16Start, "UTF-16LE", utf16Sb.ToString()));
-        return results;
+        // Stopped early only if the limit was hit with file still unread.
+        (long, long)? stoppedAt = results.Count >= MaxStrings && pos < fs.Length ? (pos, fs.Length) : null;
+        return (results, stoppedAt);
     }
 }
 
@@ -474,82 +507,90 @@ public sealed partial class DocumentsTool
 
 public sealed partial class CasesTool
 {
-    private readonly Workspace _workspace = Workspace.LoadOrCreate();
+    private readonly DashboardTool? _dashboard;
 
-    public ObservableCollection<WorkspaceCase> Recents { get; } = new();
+    /// <summary>
+    /// The same recent-case list Home shows. This tool used to keep its own list in a separate
+    /// file and its own idea of the "active case", so creating or opening a case here said
+    /// "Active case: X" while the title bar, the custody log and every tool still had no case.
+    /// It now drives the shell's real open / create paths and only reflects their state.
+    /// </summary>
+    public ObservableCollection<RecentCaseRow> Recents { get; }
 
-    [ObservableProperty] private WorkspaceCase? _activeCase;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasActiveCase), nameof(ShowEmpty))]
+    private string? _activeCaseName;
+
+    [ObservableProperty] private string? _activeCasePath;
+    [ObservableProperty] private string? _activeCaseExaminer;
     [ObservableProperty] private string? _statusLine;
 
-    public CasesTool()
+    public bool HasActiveCase => ActiveCaseName is not null;
+
+    /// <summary>Nothing open and nothing to go back to: show the "what is a case" explanation.</summary>
+    public bool ShowEmpty => !HasActiveCase && Recents.Count == 0;
+
+    public CasesTool() : this(null)
     {
-        Refresh();
     }
 
-    private void Refresh()
+    public CasesTool(DashboardTool? dashboard)
     {
-        Recents.Clear();
-        foreach (var c in _workspace.RecentCases)
-        {
-            Recents.Add(c);
-        }
-        ActiveCase = _workspace.ActiveCaseId is { } id
-            ? Recents.FirstOrDefault(c => c.Id == id)
-            : null;
+        _dashboard = dashboard;
+        Recents = dashboard?.RecentCases ?? new ObservableCollection<RecentCaseRow>();
+        Recents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowEmpty));
+        ActiveCaseContext.Changed += OnActiveCaseChanged;
+        OnActiveCaseChanged(ActiveCaseContext.Current);
+    }
+
+    private void OnActiveCaseChanged(Cinder.App.ViewModels.CaseSession? session)
+    {
+        ActiveCaseName = session?.Name;
+        ActiveCasePath = session?.Path;
+        ActiveCaseExaminer = session?.Examiner;
     }
 
     [RelayCommand]
     private async Task CreateAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.SaveFileAsync("Create case", "case.cinder", "cinder");
-        if (string.IsNullOrEmpty(path)) return;
-        try
+        if (AppNavigator.CreateCase is { } create)
         {
-            var store = new CaseStore(path);
-            var custody = new CustodyLog(store);
-            var svc = new CaseService(store, custody);
-            var name = System.IO.Path.GetFileNameWithoutExtension(path);
-            var c = await svc.CreateAsync(name, Environment.UserName, null, ct);
-            _workspace.RecordOpen(c.Id, path, name);
-            _workspace.Save();
-            Refresh();
-            StatusLine = $"Created {name}.";
+            await create();
         }
-        catch (Exception ex)
-        {
-            StatusLine = $"Failed: {ex.Message}";
-        }
+        _ = ct;
     }
 
     [RelayCommand]
     private async Task OpenAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Open case", "Cinder case", "*.cinder");
-        if (string.IsNullOrEmpty(path)) return;
-        try
+        if (AppNavigator.OpenCase is { } open)
         {
-            var store = new CaseStore(path);
-            store.Migrate();
-            var name = System.IO.Path.GetFileNameWithoutExtension(path);
-            _workspace.RecordOpen(Guid.NewGuid(), path, name);
-            _workspace.Save();
-            Refresh();
-            StatusLine = $"Opened {name}.";
-            _ = ct;
+            await open();
         }
-        catch (Exception ex)
+        _ = ct;
+    }
+
+    [RelayCommand]
+    private async Task OpenRecentAsync(RecentCaseRow? row)
+    {
+        if (row?.Path is not { Length: > 0 } path)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            return;
+        }
+        if (!File.Exists(path))
+        {
+            StatusLine = $"{path} is no longer there. It may have been moved, renamed or be on a drive that is not connected.";
+            return;
+        }
+        StatusLine = null;
+        if (AppNavigator.OpenCaseAtPath is { } open)
+        {
+            await open(path);
         }
     }
 
     [RelayCommand]
-    private void OpenRecent(WorkspaceCase? c)
-    {
-        if (c is null) return;
-        ActiveCase = c;
-        StatusLine = $"Active case: {c.DisplayName}";
-    }
+    private void CloseActive() => AppNavigator.CloseActiveCase?.Invoke();
 }
 
 // =====================================================================================
@@ -558,9 +599,30 @@ public sealed partial class CasesTool
 
 public sealed partial class CustodyTool
 {
-    [ObservableProperty] private string? _casePath;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCaseFile))]
+    private string? _casePath;
+
     [ObservableProperty] private string? _verdict;
+
+    /// <summary>True = chain intact, false = broken, null = nothing checked (or nothing to check).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(VerdictIsOk), nameof(VerdictIsBroken))]
+    private bool? _verdictOk;
+
     [ObservableProperty] private string? _statusLine;
+
+    /// <summary>A case is open in the title bar, so "check the open case" has something to check.</summary>
+    [ObservableProperty] private bool _hasOpenCase = ActiveCaseContext.Current?.Path is not null;
+
+    public bool HasCaseFile => !string.IsNullOrEmpty(CasePath);
+    public bool VerdictIsOk => VerdictOk == true;
+    public bool VerdictIsBroken => VerdictOk == false;
+
+    public CustodyTool()
+    {
+        ActiveCaseContext.Changed += session => HasOpenCase = session?.Path is not null;
+    }
 
     public ObservableCollection<CustodyEntry> Entries { get; } = new();
 
@@ -583,7 +645,7 @@ public sealed partial class CustodyTool
     {
         if (string.IsNullOrEmpty(CasePath) || _loadedCaseId is not { } caseId)
         {
-            StatusLine = "Open + verify a case first.";
+            StatusLine = "Open a case file here first.";
             return;
         }
         try
@@ -591,7 +653,7 @@ public sealed partial class CustodyTool
             var signer = new CustodySigner(new CaseStore(CasePath));
             var a = await signer.SignTipAsync(caseId, Environment.UserName, ct);
             KeyFingerprint = a.KeyFingerprint;
-            StatusLine = $"Signed tip: sequence {a.Sequence}, hash {a.EntryHash[..16]}…, key {a.KeyFingerprint}. Export it to anchor the chain outside this file.";
+            StatusLine = $"Signed: the log up to entry {a.Sequence} is now covered by your key ({a.KeyFingerprint}). Export the signature and send it somewhere you cannot edit afterwards.";
 
             // Countersign with a Time-Stamp Authority when one is configured: the examiner
             // key says who, the TSA says no later than when, from a clock that is not ours.
@@ -602,18 +664,18 @@ public sealed partial class CustodyTool
                 {
                     using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
                     var stamped = await signer.TimestampAsync(a.Id, new Uri(tsaUrl), http, ct);
-                    StatusLine += $" Timestamped by {tsaUrl} at {stamped.TsaTime:u}.";
+                    StatusLine += $" Countersigned by the time-stamp service {tsaUrl} at {stamped.TsaTime:yyyy-MM-dd HH:mm:ss} UTC.";
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    StatusLine += $" Timestamp request to {tsaUrl} failed ({ex.Message}); the attestation is signed but not timestamped.";
+                    StatusLine += $" The time-stamp service {tsaUrl} could not be reached ({ex.Message}); the log is signed but carries no independent time.";
                 }
             }
             await ReloadAttestationsAsync(signer, caseId, ct);
         }
         catch (Exception ex)
         {
-            StatusLine = $"Signing failed: {ex.Message}";
+            StatusLine = $"Could not sign the log: {ex.Message}";
         }
     }
 
@@ -623,7 +685,7 @@ public sealed partial class CustodyTool
         var latest = Attestations.LastOrDefault()?.Attestation;
         if (latest is null)
         {
-            StatusLine = "No attestation to export — sign the chain tip first.";
+            StatusLine = "Nothing to export yet. Sign the log first.";
             return;
         }
         var path = await ToolDialog.SaveFileAsync("Export custody attestation", $"attestation-seq{latest.Sequence}.json", "json");
@@ -631,7 +693,7 @@ public sealed partial class CustodyTool
         try
         {
             await File.WriteAllTextAsync(path, CustodySigner.ExportAttestation(latest), ct);
-            StatusLine = $"Attestation written to {path}. Mail it, ticket it, or drop it on a WORM share — anywhere you cannot edit later.";
+            StatusLine = $"Attestation written to {path}. Send it somewhere you cannot edit afterwards, such as an email or a ticket.";
         }
         catch (Exception ex)
         {
@@ -648,73 +710,153 @@ public sealed partial class CustodyTool
         }
         if (Attestations.Count == 0)
         {
-            AttestationVerdict = "No signed attestations — the chain is self-checking only. Sign the tip to anchor it.";
+            AttestationVerdict = "Not signed yet. The log can detect an edit, but not a complete rewrite; signing it closes that gap.";
             return;
         }
-        var bad = Attestations.Where(a => !a.Ok).ToList();
+        // Three different answers, never merged: a signature that is wrong, a signature that
+        // is right but from a key nobody here vouches for, and a signature that holds.
+        var broken = Attestations.Where(a => !a.Ok && !a.SignedByUnknownKey).ToList();
+        var unknown = Attestations.Where(a => a.SignedByUnknownKey).ToList();
         var stamped = Attestations.Count(a => a.Timestamp is { SignatureValid: true });
-        var untrusted = Attestations.Count(a => a.Timestamp is { SignatureValid: true, ChainTrusted: false });
-        AttestationVerdict = bad.Count == 0
-            ? $"✓ {Attestations.Count} attestation(s) verify; latest covers sequence {Attestations[^1].Attestation.Sequence}"
-              + (stamped > 0 ? $"; {stamped} carry an RFC 3161 timestamp" : "")
-              + (untrusted > 0 ? $" ({untrusted} from a TSA whose root this machine does not trust — check the issuer)" : "")
-            : $"✗ attestation at sequence {bad[0].Attestation.Sequence} fails: {bad[0].Reason}";
+        var untrustedTsa = Attestations.Count(a => a.Timestamp is { SignatureValid: true, ChainTrusted: false });
+        if (broken.Count > 0)
+        {
+            AttestationVerdict = $"Signature for entry {broken[0].Attestation.Sequence} does NOT verify: {broken[0].Reason}";
+            return;
+        }
+        if (unknown.Count > 0)
+        {
+            AttestationVerdict =
+                $"{unknown.Count} signature{(unknown.Count == 1 ? " is" : "s are")} mathematically valid but made with a key this computer does not know "
+                + $"({unknown[0].Attestation.KeyFingerprint}), so {(unknown.Count == 1 ? "it proves" : "they prove")} nothing yet: anyone able to edit the case file could have made {(unknown.Count == 1 ? "it" : "them")}. "
+                + $"If that is a colleague's key, get their public key file (.pub) directly from them and put it in {signer.TrustedKeysDirectory}, then check again.";
+            return;
+        }
+        var unbound = Attestations.Count(a => !a.ExaminerBound);
+        AttestationVerdict =
+            $"{Attestations.Count} signature{(Attestations.Count == 1 ? "" : "s")} verify; the latest covers the log up to entry {Attestations[^1].Attestation.Sequence}"
+            + (stamped > 0 ? $"; {stamped} carry an independent RFC 3161 timestamp" : "")
+            + (untrustedTsa > 0 ? $" ({untrustedTsa} from a time-stamp service this computer does not trust; check who issued it)" : "")
+            + (unbound > 0 ? $". {unbound} older signature{(unbound == 1 ? " does" : "s do")} not cover the examiner name, so treat that name as a label." : ".");
     }
 
     [RelayCommand]
     private async Task PickAndVerifyAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Open Cinder case", "Cinder case", "*.cinder");
-        if (string.IsNullOrEmpty(path)) return;
+        var path = await ToolDialog.PickFileAsync("Open a case file to check", "Cinder case", "*.cinder");
+        if (!string.IsNullOrEmpty(path))
+        {
+            await VerifyFileAsync(path, ct);
+        }
+    }
+
+    /// <summary>Checks the case that is open in the title bar, without asking for the file again.</summary>
+    [RelayCommand]
+    private async Task VerifyOpenCaseAsync(CancellationToken ct)
+    {
+        if (ActiveCaseContext.Current?.Path is not { Length: > 0 } path)
+        {
+            StatusLine = "No case is open. Open one, or pick a case file to check.";
+            return;
+        }
+        await VerifyFileAsync(path, ct);
+    }
+
+    private async Task VerifyFileAsync(string path, CancellationToken ct)
+    {
         CasePath = path;
         Entries.Clear();
         Attestations.Clear();
         AttestationVerdict = null;
+        Verdict = null;
+        VerdictOk = null;
+        KeyFingerprint = null;
         _loadedCaseId = null;
+        StatusLine = "Checking…";
         try
         {
             var store = new CaseStore(path);
             store.Migrate();
             var log = new CustodyLog(store);
-            // List & verify across every case in the file.
-            using var conn = store.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT DISTINCT case_id FROM custody_entries;";
-            using var r = cmd.ExecuteReader();
-            var allOk = true;
-            long total = 0;
-            while (r.Read())
+
+            // A case file normally holds one case; verify every chain it contains.
+            var caseIds = new List<Guid>();
+            using (var conn = store.Open())
+            using (var cmd = conn.CreateCommand())
             {
-                var caseId = Guid.Parse(r.GetString(0));
-                var entries = await log.ListAsync(caseId, ct);
-                foreach (var e in entries)
+                cmd.CommandText = "SELECT DISTINCT case_id FROM custody_entries;";
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    caseIds.Add(Guid.Parse(r.GetString(0)));
+                }
+            }
+
+            string? broken = null;
+            long total = 0;
+            foreach (var caseId in caseIds)
+            {
+                foreach (var e in await log.ListAsync(caseId, ct))
                 {
                     Entries.Add(e);
                     total++;
                 }
                 var v = await log.VerifyAsync(caseId, ct);
-                if (!v.Ok)
+                if (!v.Ok && broken is null)
                 {
-                    allOk = false;
-                    Verdict = $"⚠ chain broken at sequence {v.FirstBrokenSequence} ({v.Reason})";
+                    broken = $"Log altered: the chain breaks at entry {v.FirstBrokenSequence} ({v.Reason}). Entries from there on cannot be relied on.";
                 }
-
-                // Attestations catch what the chain cannot: a full rewrite that re-hashes
-                // consistently. Verified with nothing but the file — the public key travels
-                // inside each attestation.
                 _loadedCaseId = caseId;
+            }
+
+            if (_loadedCaseId is { } last)
+            {
+                // Attestations catch what the chain cannot: a full rewrite that re-hashes
+                // consistently. The public key travels inside each attestation.
                 var signer = new CustodySigner(store);
-                await ReloadAttestationsAsync(signer, caseId, ct);
+                await ReloadAttestationsAsync(signer, last, ct);
                 try { KeyFingerprint = File.Exists(signer.KeyPath) ? signer.KeyFingerprint() : null; } catch { KeyFingerprint = null; }
             }
-            if (allOk) Verdict = $"✓ chain intact across {total:N0} entries";
-            StatusLine = $"{Entries.Count:N0} entries shown.";
+
+            if (total == 0)
+            {
+                Verdict = "This case file has no log entries yet.";
+                VerdictOk = null;
+            }
+            else
+            {
+                VerdictOk = broken is null;
+                Verdict = broken ?? $"Log intact: all {total:N0} entries are present, in order and unaltered.";
+            }
+            StatusLine = caseIds.Count > 1
+                ? $"{total:N0} entries across {caseIds.Count} cases in this file. Attestations are shown for the last case only."
+                : null;
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Stopped.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
             Verdict = null;
+            VerdictOk = null;
+            StatusLine = $"Could not read {System.IO.Path.GetFileName(path)}: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Entries.Select(e => (object)new
+        {
+            e.Sequence,
+            TimestampUtc = e.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            e.Examiner,
+            e.Action,
+            Details = e.DetailsJson,
+            e.EntryHash,
+        }).ToList();
+        if (await ToolExport.SaveRowsAsync(Id, "custody-log", format, rows, ct) is { } status) StatusLine = status;
     }
 }
 
@@ -726,9 +868,23 @@ public sealed partial class HashSetsTool
 {
     private HashSetService? _service;
 
-    [ObservableProperty] private string? _databasePath;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDatabase))]
+    private string? _databasePath;
+
     [ObservableProperty] private string _query = "";
     [ObservableProperty] private string _algorithm = "sha1";
+
+    public bool HasDatabase => !string.IsNullOrEmpty(DatabasePath);
+
+    /// <summary>Hex digits a digest of each algorithm has, to catch a paste of the wrong thing.</summary>
+    private static readonly Dictionary<string, int> DigestHexLength = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["md5"] = 32,
+        ["sha1"] = 40,
+        ["sha256"] = 64,
+        ["blake3"] = 64,
+    };
     [ObservableProperty] private string? _verdictLine;
     [ObservableProperty] private string? _statusLine;
 
@@ -745,7 +901,7 @@ public sealed partial class HashSetsTool
             {
                 _service = new HashSetService(saved);
                 DatabasePath = saved;
-                StatusLine = $"DB ready: {saved}";
+                StatusLine = "Hash set open.";
             }
         }
         catch { /* first launch or unreadable settings — pick manually */ }
@@ -754,23 +910,44 @@ public sealed partial class HashSetsTool
     [RelayCommand]
     private async Task PickDatabaseAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick or create the hash-set DB", "SQLite DB", "*.db");
-        if (string.IsNullOrEmpty(path)) return;
+        var path = await ToolDialog.PickFileAsync("Open a hash set", "Hash-set database", "*.db");
+        if (!string.IsNullOrEmpty(path)) OpenDatabase(path, created: false);
+        _ = ct;
+    }
+
+    /// <summary>
+    /// Creating needs a save dialog: an open dialog only lists files that already exist, so the
+    /// old single "Open / create" button could never create anything.
+    /// </summary>
+    [RelayCommand]
+    private async Task NewDatabaseAsync(CancellationToken ct)
+    {
+        var path = await ToolDialog.SaveFileAsync("Create a hash set", "hashsets.db", "db");
+        if (!string.IsNullOrEmpty(path)) OpenDatabase(path, created: true);
+        _ = ct;
+    }
+
+    private void OpenDatabase(string path, bool created)
+    {
         try
         {
             _service?.Dispose();
             _service = new HashSetService(path);
             DatabasePath = path;
-            StatusLine = $"DB ready: {path}";
+            VerdictLine = null;
+            StatusLine = created
+                ? "Empty hash set created. Import a list to fill it."
+                : "Hash set open.";
 
             // Remember it: the Filesystem tool reads this to hand out Known / Unknown verdicts.
             var store = new SettingsStore();
             store.Save(store.Load() with { HashSetDatabase = path });
-            _ = ct;
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            _service = null;
+            DatabasePath = null;
+            StatusLine = $"Could not open {path}: {ex.Message}";
         }
     }
 
@@ -779,19 +956,20 @@ public sealed partial class HashSetsTool
     {
         if (_service is null)
         {
-            StatusLine = "Pick a DB first.";
+            StatusLine = "Open or create a hash set first.";
             return;
         }
-        var path = await ToolDialog.PickFileAsync("Pick NSRL minimal CSV", "NSRL minimal", "*.csv");
+        var path = await ToolDialog.PickFileAsync("Pick the NSRL minimal list (NSRLFile.txt or .csv)", "NSRL list", "*.txt;*.csv");
         if (string.IsNullOrEmpty(path)) return;
+        StatusLine = "Importing… this can take several minutes for the full NSRL list.";
         try
         {
             var n = await Task.Run(() => _service.ImportNsrlMinimalCsv(path, $"NSRL_{DateTime.UtcNow:yyyyMMdd}"), ct);
-            StatusLine = $"Imported {n:N0} rows.";
+            StatusLine = $"Imported {n:N0} hashes from {System.IO.Path.GetFileName(path)}.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Import failed: {ex.Message}";
         }
     }
 
@@ -800,21 +978,34 @@ public sealed partial class HashSetsTool
     {
         if (_service is null)
         {
-            VerdictLine = "Pick a DB first.";
+            StatusLine = "Open or create a hash set first.";
             return;
         }
-        if (string.IsNullOrWhiteSpace(Query))
+        var digest = Query.Trim().ToLowerInvariant();
+        if (digest.Length == 0)
         {
+            return;
+        }
+        if (!digest.All(Uri.IsHexDigit))
+        {
+            VerdictLine = "That is not a hash: a hash contains only the characters 0-9 and a-f.";
+            return;
+        }
+        if (DigestHexLength.TryGetValue(Algorithm, out var expected) && digest.Length != expected)
+        {
+            VerdictLine = $"A {Algorithm.ToUpperInvariant()} hash is {expected} characters; this one is {digest.Length}. Check the algorithm, or that the whole hash was pasted.";
             return;
         }
         try
         {
-            var match = _service.Lookup(Algorithm, Query.Trim().ToLowerInvariant());
-            VerdictLine = match is null ? "no match." : $"{match.Verdict} · {match.SetName} · {match.Label}";
+            var match = _service.Lookup(Algorithm, digest);
+            VerdictLine = match is null
+                ? "Not in this hash set. That does not make the file suspicious, only unlisted."
+                : $"Match: {match.Verdict}\nList: {match.SetName}\n{match.Label}".TrimEnd();
         }
         catch (Exception ex)
         {
-            VerdictLine = $"Failed: {ex.Message}";
+            VerdictLine = $"Lookup failed: {ex.Message}";
         }
     }
 }
@@ -854,17 +1045,24 @@ rule example_strings {
         try
         {
             Rules = await File.ReadAllTextAsync(path, ct);
-            StatusLine = $"Loaded {path}";
+            StatusLine = $"Rules loaded from {System.IO.Path.GetFileName(path)}.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed to read {path}: {ex.Message}";
+            StatusLine = $"Could not read {System.IO.Path.GetFileName(path)}: {ex.Message}";
         }
     }
 
-    [RelayCommand]
+    /// <summary>Matches kept per scan. Reaching it is reported, never passed off as "that was all".</summary>
+    private const int MaxHits = 25_000;
+
+    [ObservableProperty] private YaraHitRow? _selectedHit;
+
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task PickAndScanAsync(CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         var path = await ToolDialog.PickFileAsync("Pick a file to scan");
         if (string.IsNullOrEmpty(path)) return;
         ScanTarget = path;
@@ -872,52 +1070,113 @@ rule example_strings {
         RuleSummary.Clear();
         IsScanning = true;
         StatusLine = "Scanning…";
+        var found = new List<YaraHitRow>();
+        var capped = false;
+        var scan = new YaraLiteScanInfo();
         try
         {
+            // Parsing, compiling and the scan itself all run off the UI thread: a large image
+            // otherwise freezes the window for the length of the scan.
             var parsed = await Task.Run(() => YaraLiteParser.Parse(Rules), ct);
             if (parsed.Count == 0)
             {
-                StatusLine = "No rules parsed from the editor. Check the syntax.";
+                StatusLine = "No rules found in the editor. A rule starts with: rule name { strings: … condition: … }";
                 return;
             }
-            var ruleset = await Task.Run(() => YaraLiteRuleset.Compile(parsed), ct);
-            await foreach (var hit in ruleset.ScanAsync(path, ct))
+            var progress = new Progress<int>(n => StatusLine = $"Scanning… {n:N0} matches so far");
+            capped = await Task.Run(async () =>
             {
-                Hits.Add(new YaraHitRow(
-                    Rule: hit.RuleName,
-                    Identifier: hit.Identifier,
-                    OffsetHex: $"0x{hit.Offset:X12}",
-                    Matched: hit.MatchedString));
-                if (Hits.Count >= 25_000) break;
+                var ruleset = YaraLiteRuleset.Compile(parsed);
+                await foreach (var hit in ruleset.ScanAsync(path, scan, ct).ConfigureAwait(false))
+                {
+                    if (found.Count >= MaxHits)
+                    {
+                        return true;
+                    }
+                    found.Add(new YaraHitRow(hit.RuleName, hit.Identifier, $"0x{hit.Offset:X12}", hit.MatchedString, hit.Offset));
+                    if (found.Count % 500 == 0)
+                    {
+                        ((IProgress<int>)progress).Report(found.Count);
+                    }
+                }
+                return false;
+            }, ct);
+
+            foreach (var row in found)
+            {
+                Hits.Add(row);
             }
-            // Per-rule summary including skip reasons.
+            var perRule = found.GroupBy(h => h.Rule).ToDictionary(g => g.Key, g => g.Count());
             foreach (var r in parsed)
             {
-                var ruleHits = Hits.Count(h => h.Rule == r.Name);
+                var ruleHits = perRule.GetValueOrDefault(r.Name);
                 RuleSummary.Add(new RuleSummaryRow(
                     Name: r.Name,
                     Status: r.SkipReason is not null ? "skipped"
                           : ruleHits > 0 ? "matched"
+                          // A scan that stopped at the limit has not finished looking.
+                          : capped ? "not finished"
                           : "no match",
                     Hits: ruleHits,
-                    Note: r.SkipReason ?? (r.Strings.Count == 0 ? "no strings" : "")));
+                    Note: r.SkipReason ?? (r.Strings.Count == 0 ? "This rule has no strings to search for." : "")));
             }
-            StatusLine = Hits.Count == 0
-                ? $"No matches in {System.IO.Path.GetFileName(path)} across {parsed.Count} rule(s)."
-                : $"{Hits.Count} match(es) across {RuleSummary.Count(r => r.Status == "matched")} rule(s).";
+            var name = System.IO.Path.GetFileName(path);
+            var skipped = RuleSummary.Count(r => r.Status == "skipped");
+            StatusLine = capped
+                ? $"Stopped at the first {MaxHits:N0} matches in {name}; the file was not scanned to the end. Tighten the rules and scan again."
+                : found.Count == 0
+                    ? $"No matches in {name} for {parsed.Count:N0} rule{(parsed.Count == 1 ? "" : "s")}."
+                    : $"{found.Count:N0} match{(found.Count == 1 ? "" : "es")} from {perRule.Count:N0} rule{(perRule.Count == 1 ? "" : "s")} in {name}.";
+            if (skipped > 0)
+            {
+                StatusLine += $" {skipped:N0} rule{(skipped == 1 ? " was" : "s were")} skipped; see the rule summary for why.";
+            }
+            if (scan.DamagedChunks > 0)
+            {
+                StatusLine += $" WARNING: {scan.DamagedChunks:N0} damaged chunk{(scan.DamagedChunks == 1 ? "" : "s")} in this image read as zeros, so a match there could have been missed.";
+            }
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.ParserRan,
+                new { Tool = Id, Evidence = path, Rules = parsed.Count, Matches = found.Count, StoppedEarly = capped, SourceDamagedChunks = scan.DamagedChunks }, CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            foreach (var row in found)
+            {
+                Hits.Add(row);
+            }
+            StatusLine = $"Stopped. {found.Count:N0} matches found before stopping; the file was not scanned to the end.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not scan {System.IO.Path.GetFileName(path)}: {ex.Message}";
         }
         finally
         {
             IsScanning = false;
         }
     }
+
+    /// <summary>Show the selected match in the Hex Viewer, at its offset.</summary>
+    [RelayCommand]
+    private void OpenHit(YaraHitRow? hit)
+    {
+        hit ??= SelectedHit;
+        if (hit is null || string.IsNullOrEmpty(ScanTarget) || !File.Exists(ScanTarget))
+        {
+            return;
+        }
+        AppNavigator.OpenInHex?.Invoke(ScanTarget, hit.Offset);
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Hits.Select(h => (object)new { h.Rule, String = h.Identifier, Offset = h.OffsetHex, h.Matched, File = ScanTarget ?? "" }).ToList();
+        if (await ToolExport.SaveRowsAsync(Id, "yara-matches", format, rows, ct) is { } status) StatusLine = status;
+    }
 }
 
-public sealed record YaraHitRow(string Rule, string Identifier, string OffsetHex, string Matched);
+public sealed record YaraHitRow(string Rule, string Identifier, string OffsetHex, string Matched, long Offset = 0);
 public sealed record RuleSummaryRow(string Name, string Status, int Hits, string Note);
 
 // =====================================================================================
@@ -936,41 +1195,59 @@ public sealed partial class VirusTotalTool
     [RelayCommand]
     private async Task LookupAsync(CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(ApiKey))
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
+        ResultText = null;
+        if (string.IsNullOrWhiteSpace(ApiKey))
         {
-            StatusLine = "Set your VirusTotal API key first.";
+            StatusLine = "Enter your VirusTotal API key first. You can create a free one at virustotal.com under your profile.";
             return;
         }
-        if (string.IsNullOrWhiteSpace(Hash))
+        var hash = Hash.Trim().ToLowerInvariant();
+        // Only a well-formed digest may leave the machine: the value goes into the request
+        // path, and anything else (a file name, a path) would disclose it to a third party.
+        if (hash.Length is not (32 or 40 or 64) || !hash.All(Uri.IsHexDigit))
         {
+            StatusLine = "Enter an MD5 (32 characters), SHA-1 (40) or SHA-256 (64) hash. Nothing was sent.";
             return;
         }
+        StatusLine = "Asking VirusTotal…";
         try
         {
-            var client = new VirusTotalClient(_http, () => ApiKey);
-            var report = await client.LookupAsync(Hash.Trim().ToLowerInvariant(), ct);
+            var client = new VirusTotalClient(_http, () => ApiKey.Trim());
+            var report = await client.LookupAsync(hash, ct);
             if (report is null)
             {
-                ResultText = "No record / not seen.";
-                StatusLine = client.QuotaExceeded ? "Quota exceeded." : "OK.";
+                StatusLine = client.QuotaExceeded
+                    ? "VirusTotal refused the request: your API key has used up its quota. Try again later."
+                    : "VirusTotal has no record of this hash. That means nobody has submitted the file, not that it is safe.";
             }
             else
             {
+                var total = report.Malicious + report.Suspicious + report.Harmless + report.Undetected;
                 ResultText = $"""
-                    Hash: {report.Hash}
-                    Malicious: {report.Malicious}
-                    Suspicious: {report.Suspicious}
-                    Harmless: {report.Harmless}
-                    Undetected: {report.Undetected}
-                    First seen: {report.FirstSubmissionUtc}
-                    Last analyzed: {report.LastAnalysisUtc}
+                    Hash            {report.Hash}
+                    Flagged by      {report.Malicious} of {total} engines as malicious, {report.Suspicious} as suspicious
+                    Not flagged by  {report.Harmless + report.Undetected} engines
+                    First seen      {report.FirstSubmissionUtc:yyyy-MM-dd HH:mm:ss} UTC
+                    Last analysed   {report.LastAnalysisUtc:yyyy-MM-dd HH:mm:ss} UTC
                     """;
-                StatusLine = "OK.";
+                StatusLine = "Lookup complete. The query is recorded in the custody log when a case is open.";
+                await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.Annotation,
+                    new { Kind = "virustotal-lookup", Hash = hash, report.Malicious, report.Suspicious, Engines = total }, ct);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Lookup cancelled.";
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        {
+            StatusLine = "VirusTotal rejected the API key. Check that it was pasted in full.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not reach VirusTotal: {ex.Message}";
         }
     }
 }
@@ -981,8 +1258,11 @@ public sealed partial class VirusTotalTool
 
 public sealed partial class MapTool
 {
+    /// <summary>Hard stop for one ingest, so a huge photo share cannot grow the list without bound.</summary>
+    private const int MaxPointsPerIngest = 25_000;
+
     public GeoIndex Index { get; } = new();
-    public ObservableCollection<GeoPoint> Points { get; } = new();
+    public ObservableCollection<MapRow> Points { get; } = new();
 
     [ObservableProperty] private double _latitude;
     [ObservableProperty] private double _longitude;
@@ -993,10 +1273,17 @@ public sealed partial class MapTool
     [RelayCommand]
     private void AddPoint()
     {
-        var p = new GeoPoint(Latitude, Longitude, DateTimeOffset.UtcNow, Label, Source, null);
-        Index.Add(p);
-        Points.Add(p);
+        if (Latitude is < -90 or > 90 || Longitude is < -180 or > 180 || double.IsNaN(Latitude) || double.IsNaN(Longitude))
+        {
+            StatusLine = "Not added: latitude must be between -90 and 90, longitude between -180 and 180.";
+            return;
+        }
+        // A hand-entered point has no event time. Recording "now" would put the moment the
+        // examiner typed it into a column that otherwise holds evidence timestamps.
+        Add(new MapRow(Latitude, Longitude, null, "", "not recorded",
+            Label.Trim(), string.IsNullOrWhiteSpace(Source) ? "manual" : Source.Trim()));
         Latitude = 0; Longitude = 0; Label = "";
+        StatusLine = "Point added.";
     }
 
     [RelayCommand]
@@ -1004,13 +1291,20 @@ public sealed partial class MapTool
     {
         Points.Clear();
         Index.Clear();
+        StatusLine = "List cleared.";
+    }
+
+    private void Add(MapRow row)
+    {
+        Index.Add(new GeoPoint(row.Latitude, row.Longitude, row.Timestamp, row.Label, row.Source, null));
+        Points.Add(row);
     }
 
     /// <summary>
-    /// Walk a folder of images, extract GPS coordinates from EXIF, and add every geo-tagged
-    /// photo as a point. Pure C# via MetadataExtractor — no Python, no shell-outs.
+    /// Walk a folder of images, read the GPS position from EXIF, and add every geo-tagged photo
+    /// as a point. Pure C# via MetadataExtractor: no Python, no shell-outs.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task IngestPhotosAsync(CancellationToken ct)
     {
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
@@ -1018,24 +1312,43 @@ public sealed partial class MapTool
         if (owner is null) return;
         var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Pick a folder of photos to map",
+            Title = "Pick a folder of photos",
         });
         var root = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(root)) return;
 
-        StatusLine = "Scanning photos…";
-        var added = await Task.Run(() => ScanFolderForExifGps(root, Index, Points, ct), ct);
-        StatusLine = $"Added {added:N0} GPS point{(added == 1 ? "" : "s")} from {root}.";
+        StatusLine = "Reading photos…";
+        var progress = new Progress<(int Scanned, int Found)>(p =>
+            StatusLine = $"Reading photos… {p.Scanned:N0} read, {p.Found:N0} with a GPS position");
+        try
+        {
+            var (rows, scanned, capped) = await Task.Run(() => ScanFolderForExifGps(root, progress, ct), ct);
+            foreach (var row in rows)
+            {
+                Add(row);
+            }
+            StatusLine = rows.Count == 0
+                ? $"None of the {scanned:N0} photos under {root} carries a GPS position."
+                : $"Added {rows.Count:N0} of {scanned:N0} photos from {root}."
+                  + (capped ? $" Stopped at the {MaxPointsPerIngest:N0}-point limit; ingest subfolders separately for the rest." : "");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Stopped. Nothing from this folder was added.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not read {root}: {ex.Message}";
+        }
     }
 
-    private static int ScanFolderForExifGps(
-        string root,
-        GeoIndex index,
-        ObservableCollection<GeoPoint> points,
-        CancellationToken ct)
+    private static readonly string[] PhotoExtensions = [".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".png", ".webp", ".dng"];
+
+    private static (List<MapRow> Rows, int Scanned, bool Capped) ScanFolderForExifGps(
+        string root, IProgress<(int, int)> progress, CancellationToken ct)
     {
-        int added = 0;
-        var exts = new[] { ".jpg", ".jpeg", ".heic", ".heif", ".tiff", ".tif", ".png", ".webp" };
+        var rows = new List<MapRow>();
+        var scanned = 0;
         foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
         {
             RecurseSubdirectories = true,
@@ -1043,36 +1356,133 @@ public sealed partial class MapTool
         }))
         {
             ct.ThrowIfCancellationRequested();
-            if (added >= 25_000) break;
-            if (!exts.Contains(System.IO.Path.GetExtension(path).ToLowerInvariant())) continue;
+            if (!PhotoExtensions.Contains(System.IO.Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)) continue;
+            if (rows.Count >= MaxPointsPerIngest)
+            {
+                return (rows, scanned, true);
+            }
+            scanned++;
+            if (scanned % 50 == 0)
+            {
+                progress.Report((scanned, rows.Count));
+            }
             try
             {
                 var dirs = MetadataExtractor.ImageMetadataReader.ReadMetadata(path);
                 var gps = dirs.OfType<MetadataExtractor.Formats.Exif.GpsDirectory>().FirstOrDefault();
-                if (gps is null) continue;
-                var maybeLoc = gps.GetGeoLocation();
-                if (maybeLoc is not MetadataExtractor.GeoLocation loc || loc.IsZero) continue;
-                // Use file mtime as a proxy for the photo's timestamp — pulling DateTimeOriginal
-                // out of EXIF requires the extension-method path which varies across
-                // MetadataExtractor versions; mtime is good enough for plotting.
-                var ts = new DateTimeOffset(new FileInfo(path).LastWriteTimeUtc, TimeSpan.Zero);
-                var p = new GeoPoint(loc.Latitude, loc.Longitude, ts,
-                    System.IO.Path.GetFileName(path), "exif", null);
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                {
-                    index.Add(p);
-                    points.Add(p);
-                });
-                added++;
+                if (gps?.GetGeoLocation() is not { IsZero: false } loc) continue;
+                var (ts, display, origin) = PhotoTime(path, dirs, gps);
+                rows.Add(new MapRow(loc.Latitude, loc.Longitude, ts, display, origin, System.IO.Path.GetFileName(path), "photo EXIF"));
             }
             catch
             {
-                // unreadable image — skip
+                // Unreadable or truncated image: it simply contributes no point.
             }
         }
-        return added;
+        return (rows, scanned, false);
+    }
+
+    /// <summary>
+    /// The best available time for a photo, and where it came from. The GPS fix is UTC by
+    /// definition. The camera clock has no time zone unless the camera wrote an offset, so it is
+    /// shown as recorded rather than passed off as UTC. File modified time is the last resort
+    /// and is labelled as such, because copying a file can change it.
+    /// </summary>
+    private static (DateTimeOffset? Utc, string Display, string Origin) PhotoTime(
+        string path, IReadOnlyList<MetadataExtractor.Directory> dirs, MetadataExtractor.Formats.Exif.GpsDirectory gps)
+    {
+        const string Format = "yyyy-MM-dd HH:mm:ss";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (gps.TryGetGpsDate(out var gpsUtc))
+        {
+            var t = new DateTimeOffset(DateTime.SpecifyKind(gpsUtc, DateTimeKind.Utc));
+            return (t, t.ToString(Format, inv) + " UTC", "GPS fix");
+        }
+        var exif = dirs.OfType<MetadataExtractor.Formats.Exif.ExifSubIfdDirectory>().FirstOrDefault();
+        if (exif is not null && MetadataExtractor.DirectoryExtensions.TryGetDateTime(
+                exif, MetadataExtractor.Formats.Exif.ExifDirectoryBase.TagDateTimeOriginal, out var taken))
+        {
+            return (null, taken.ToString(Format, inv) + " (no time zone)", "camera clock");
+        }
+        var modified = new DateTimeOffset(new FileInfo(path).LastWriteTimeUtc, TimeSpan.Zero);
+        return (modified, modified.ToString(Format, inv) + " UTC", "file modified time");
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
+        if (Points.Count == 0) return;
+        if (!string.Equals(format, "kml", StringComparison.OrdinalIgnoreCase))
+        {
+            var rows = Points.Select(p => (object)new
+            {
+                p.Latitude,
+                p.Longitude,
+                Time = p.TimeDisplay,
+                p.TimeSource,
+                p.Source,
+                p.Label,
+            }).ToList();
+            if (await ToolExport.SaveRowsAsync(Id, "locations", format, rows, ct) is { } status) StatusLine = status;
+            return;
+        }
+
+        var path = await ToolDialog.SaveFileAsync("Export as KML", "locations.kml", "kml");
+        if (string.IsNullOrEmpty(path)) return;
+        var snapshot = Points.ToList();
+        try
+        {
+            await Task.Run(() => WriteKml(path, snapshot), ct);
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.DataExported, new { Tool = Id, Format = "kml", Path = path, Rows = snapshot.Count }, ct);
+            StatusLine = $"Exported {snapshot.Count:N0} point{(snapshot.Count == 1 ? "" : "s")} to {path}";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Export failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>KML 2.2, one Placemark per point. XmlWriter does the escaping: labels are evidence-controlled.</summary>
+    internal static void WriteKml(string path, IReadOnlyList<MapRow> points)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        using var xml = System.Xml.XmlWriter.Create(path, new System.Xml.XmlWriterSettings { Indent = true, Encoding = new System.Text.UTF8Encoding(false) });
+        xml.WriteStartDocument();
+        xml.WriteStartElement("kml", "http://www.opengis.net/kml/2.2");
+        xml.WriteStartElement("Document");
+        xml.WriteElementString("name", "Cinder locations");
+        foreach (var p in points)
+        {
+            xml.WriteStartElement("Placemark");
+            xml.WriteElementString("name", string.IsNullOrEmpty(p.Label) ? p.Source : p.Label);
+            xml.WriteElementString("description", $"{p.TimeDisplay} ({p.TimeSource}); source: {p.Source}".Trim());
+            if (p.Timestamp is { } t)
+            {
+                xml.WriteStartElement("TimeStamp");
+                xml.WriteElementString("when", t.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", inv));
+                xml.WriteEndElement();
+            }
+            xml.WriteStartElement("Point");
+            // KML order is longitude,latitude.
+            xml.WriteElementString("coordinates", $"{p.Longitude.ToString("R", inv)},{p.Latitude.ToString("R", inv)},0");
+            xml.WriteEndElement();
+            xml.WriteEndElement();
+        }
+        xml.WriteEndElement();
+        xml.WriteEndElement();
+        xml.WriteEndDocument();
     }
 }
+
+/// <summary>
+/// One row of the location list. <see cref="Timestamp"/> is set only when the time is known in
+/// UTC; <see cref="TimeDisplay"/> is what the examiner reads and <see cref="TimeSource"/> says
+/// which clock it came from.
+/// </summary>
+public sealed record MapRow(
+    double Latitude, double Longitude, DateTimeOffset? Timestamp, string TimeDisplay, string TimeSource, string Label, string Source);
 
 // =====================================================================================
 // GRAPH — communication graph builder.
@@ -1080,9 +1490,12 @@ public sealed partial class MapTool
 
 public sealed partial class GraphTool
 {
+    /// <summary>Hard stop for one ingest, so a huge mail store cannot grow the graph without bound.</summary>
+    private const int MaxInteractionsPerIngest = 25_000;
+
     public CommunicationGraph Graph { get; } = new();
     public ObservableCollection<GraphNode> Nodes { get; } = new();
-    public ObservableCollection<GraphEdge> Edges { get; } = new();
+    public ObservableCollection<GraphEdgeRow> Edges { get; } = new();
 
     [ObservableProperty] private string _from = "";
     [ObservableProperty] private string _to = "";
@@ -1090,13 +1503,33 @@ public sealed partial class GraphTool
     [ObservableProperty] private string? _subject;
     [ObservableProperty] private string? _statusLine;
 
+    /// <summary>The person picked in the left list; the message list narrows to them.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EdgesHeading), nameof(HasSelectedNode))]
+    private GraphNode? _selectedNode;
+
+    public bool HasSelectedNode => SelectedNode is not null;
+
+    public string EdgesHeading => SelectedNode is { } n ? $"MESSAGES TO OR FROM {n.Identity.ToUpperInvariant()}" : "ALL MESSAGES";
+
+    partial void OnSelectedNodeChanged(GraphNode? value) => RefreshEdges();
+
+    [RelayCommand]
+    private void ShowAll() => SelectedNode = null;
+
     [RelayCommand]
     private void AddEdge()
     {
-        if (string.IsNullOrWhiteSpace(From) || string.IsNullOrWhiteSpace(To)) return;
-        Graph.AddInteraction(From, To, Source, DateTimeOffset.UtcNow, Subject);
+        if (string.IsNullOrWhiteSpace(From) || string.IsNullOrWhiteSpace(To))
+        {
+            StatusLine = "Not added: fill in both who sent it and who received it.";
+            return;
+        }
+        // No timestamp: a hand-entered link has no event time, and "now" would look like one.
+        Graph.AddInteraction(From.Trim(), To.Trim(), string.IsNullOrWhiteSpace(Source) ? "manual" : Source.Trim(), null, Subject);
         Refresh();
         From = ""; To = ""; Subject = "";
+        StatusLine = "Link added.";
     }
 
     [RelayCommand]
@@ -1104,13 +1537,14 @@ public sealed partial class GraphTool
     {
         Graph.Clear();
         Refresh();
+        StatusLine = "Graph cleared.";
     }
 
     /// <summary>
-    /// Walk a folder of email files (.eml / .msg / .mbox) and auto-build the communication
-    /// graph from From / To / Cc headers. Pure C# via MsgReader and an in-house MBOX scanner.
+    /// Walk a folder of email files (.eml / .msg / .mbox) and build the graph from the
+    /// From / To / Cc headers. Pure C# via MsgReader and an in-house MBOX header scanner.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task IngestEmailFolderAsync(CancellationToken ct)
     {
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
@@ -1123,15 +1557,41 @@ public sealed partial class GraphTool
         var root = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(root)) return;
 
-        StatusLine = "Ingesting…";
-        var n = await Task.Run(() => ScanFolderForEmail(root, Graph, ct), ct);
+        StatusLine = "Reading mail…";
+        var progress = new Progress<(int Files, int Links)>(p =>
+            StatusLine = $"Reading mail… {p.Files:N0} files, {p.Links:N0} sender-recipient links");
+        var result = new IngestResult();
+        try
+        {
+            await Task.Run(() => ScanFolderForEmail(root, Graph, result, progress, ct), ct);
+            StatusLine = result.Links == 0
+                ? $"No readable .eml, .msg or .mbox mail found under {root}."
+                : $"Added {result.Links:N0} links from {result.Files:N0} files under {root}."
+                  + (result.Unreadable > 0 ? $" {result.Unreadable:N0} files could not be read." : "")
+                  + (result.Capped ? $" Stopped at the {MaxInteractionsPerIngest:N0}-link limit; ingest subfolders separately for the rest." : "");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = $"Stopped. {result.Links:N0} links read before stopping were kept.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not read {root}: {ex.Message}";
+        }
         Refresh();
-        StatusLine = $"Added {n:N0} interaction{(n == 1 ? "" : "s")} from {root}.";
     }
 
-    private static int ScanFolderForEmail(string root, CommunicationGraph graph, CancellationToken ct)
+    private sealed class IngestResult
     {
-        int added = 0;
+        public int Files;
+        public int Links;
+        public int Unreadable;
+        public bool Capped;
+    }
+
+    private static void ScanFolderForEmail(
+        string root, CommunicationGraph graph, IngestResult result, IProgress<(int, int)> progress, CancellationToken ct)
+    {
         foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
         {
             RecurseSubdirectories = true,
@@ -1139,29 +1599,39 @@ public sealed partial class GraphTool
         }))
         {
             ct.ThrowIfCancellationRequested();
-            if (added >= 25_000) break;
+            if (result.Links >= MaxInteractionsPerIngest)
+            {
+                result.Capped = true;
+                return;
+            }
             var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+            if (ext is not (".msg" or ".eml" or ".mbox")) continue;
+            result.Files++;
             try
             {
                 switch (ext)
                 {
                     case ".msg":
-                        IngestMsg(path, graph, ref added);
+                        IngestMsg(path, graph, ref result.Links);
                         break;
                     case ".eml":
-                        IngestEml(path, graph, ref added);
+                        IngestEml(path, graph, ref result.Links);
                         break;
-                    case ".mbox":
-                        IngestMbox(path, graph, ref added, ct);
+                    default:
+                        IngestMbox(path, graph, ref result.Links, ct);
                         break;
                 }
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch
             {
-                // unreadable / parse error — skip
+                result.Unreadable++;
             }
+            progress.Report((result.Files, result.Links));
         }
-        return added;
     }
 
     private static void IngestMsg(string path, CommunicationGraph graph, ref int added)
@@ -1169,11 +1639,8 @@ public sealed partial class GraphTool
         using var msg = new MsgReader.Outlook.Storage.Message(path);
         var from = msg.GetEmailSender(false, false) ?? "";
         var to = msg.GetEmailRecipients(MsgReader.Outlook.RecipientType.To, false, false) ?? "";
-        var subject = msg.Subject ?? "";
-        // MsgReader's SentOn surface varies — coerce whatever DateTime/DateTimeOffset it
-        // hands us into a DateTimeOffset.
-        DateTimeOffset ts = CoerceToUtcOffset(msg.SentOn);
-        AddFromHeader(graph, from, to, "msg", ts, subject, ref added);
+        var cc = msg.GetEmailRecipients(MsgReader.Outlook.RecipientType.Cc, false, false) ?? "";
+        AddFromHeader(graph, from, JoinRecipients(to, cc), "msg", ToUtc(msg.SentOn), msg.Subject ?? "", ref added);
     }
 
     private static void IngestEml(string path, CommunicationGraph graph, ref int added)
@@ -1181,114 +1648,122 @@ public sealed partial class GraphTool
         using var fs = File.OpenRead(path);
         var msg = MsgReader.Mime.Message.Load(fs);
         var from = msg.Headers.From?.Address ?? "";
-        var to = string.Join(", ", msg.Headers.To?.Select(t => t.Address) ?? Array.Empty<string>());
-        var subject = msg.Headers.Subject ?? "";
-        DateTimeOffset ts = CoerceToUtcOffset(msg.Headers.DateSent);
-        AddFromHeader(graph, from, to, "eml", ts, subject, ref added);
+        var recipients = (msg.Headers.To ?? []).Concat(msg.Headers.Cc ?? []).Select(t => t.Address);
+        // DateSent is DateTime.MinValue when the header is absent or unparseable.
+        AddFromHeader(graph, from, string.Join(", ", recipients), "eml", ToUtc(msg.Headers.DateSent), msg.Headers.Subject ?? "", ref added);
     }
 
+    private static string JoinRecipients(string to, string cc) =>
+        string.IsNullOrWhiteSpace(cc) ? to : string.IsNullOrWhiteSpace(to) ? cc : to + ", " + cc;
+
     /// <summary>
-    /// Normalise whatever shape (DateTime, DateTime?, DateTimeOffset, DateTimeOffset?) a third
-    /// party hands us into a UTC DateTimeOffset, defaulting to now if null/empty.
+    /// A sent time as UTC, or null when the message does not carry one. Never "now": an
+    /// invented time in an evidence column is worse than a blank.
     /// </summary>
-    private static DateTimeOffset CoerceToUtcOffset(object? value)
+    private static DateTimeOffset? ToUtc(object? value) => value switch
     {
-        return value switch
-        {
-            DateTimeOffset dto => dto.ToUniversalTime(),
-            DateTime dt when dt != default =>
-                new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero),
-            _ => DateTimeOffset.UtcNow,
-        };
-    }
+        DateTimeOffset dto when dto != default => dto.ToUniversalTime(),
+        DateTime dt when dt != default => dt.Kind == DateTimeKind.Local
+            ? new DateTimeOffset(dt).ToUniversalTime()
+            : new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero),
+        _ => null,
+    };
 
     private static void IngestMbox(string path, CommunicationGraph graph, ref int added, CancellationToken ct)
     {
+        // One header reader for the Email tool, the timeline and this graph: it handles folded
+        // lines, repeated headers and body lines that begin "From ".
         using var sr = new StreamReader(path);
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        string? line;
-        bool inHeaders = false;
-        while ((line = sr.ReadLine()) is not null)
+        foreach (var headers in MboxHeaderReader.ReadMessages(sr, ct))
         {
-            ct.ThrowIfCancellationRequested();
-            if (added >= 25_000) break;
-
-            if (line.StartsWith("From ", StringComparison.Ordinal))
-            {
-                FlushMboxHeaders(graph, headers, ref added);
-                inHeaders = true;
-                continue;
-            }
-            if (inHeaders && string.IsNullOrEmpty(line))
-            {
-                inHeaders = false;
-                continue;
-            }
-            if (inHeaders)
-            {
-                var colon = line.IndexOf(':');
-                if (colon > 0)
-                {
-                    headers[line[..colon]] = line[(colon + 1)..].Trim();
-                }
-            }
+            if (added >= MaxInteractionsPerIngest) break;
+            var from = MboxHeaderReader.Get(headers, "From");
+            var to = JoinRecipients(MboxHeaderReader.Get(headers, "To"), MboxHeaderReader.Get(headers, "Cc"));
+            var date = MboxHeaderReader.Get(headers, "Date");
+            DateTimeOffset? ts = !string.IsNullOrWhiteSpace(date)
+                && DateTimeOffset.TryParse(StripTrailingComment(date), CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsed)
+                ? parsed.ToUniversalTime()
+                : null;
+            AddFromHeader(graph, from, to, "mbox", ts, MboxHeaderReader.Get(headers, "Subject"), ref added);
         }
-        FlushMboxHeaders(graph, headers, ref added);
     }
 
-    private static void FlushMboxHeaders(CommunicationGraph graph, Dictionary<string, string> headers, ref int added)
+    /// <summary>"… +0000 (UTC)" is a valid RFC 5322 date that .NET will not parse with the comment attached.</summary>
+    private static string StripTrailingComment(string date)
     {
-        if (headers.Count == 0) return;
-        var from = headers.GetValueOrDefault("From", "");
-        var to = headers.GetValueOrDefault("To", "");
-        var subject = headers.GetValueOrDefault("Subject", "");
-        DateTimeOffset ts = DateTimeOffset.UtcNow;
-        if (headers.TryGetValue("Date", out var d) && DateTimeOffset.TryParse(d, out var parsed))
-        {
-            ts = parsed.ToUniversalTime();
-        }
-        AddFromHeader(graph, from, to, "mbox", ts, subject, ref added);
-        headers.Clear();
+        var open = date.LastIndexOf('(');
+        return open > 0 && date.TrimEnd().EndsWith(')') ? date[..open].TrimEnd() : date;
     }
 
     private static void AddFromHeader(CommunicationGraph graph, string from, string to,
-                                       string source, DateTimeOffset ts, string subject, ref int added)
+                                       string source, DateTimeOffset? ts, string subject, ref int added)
     {
         if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) return;
-        // To header can be a comma-separated list — emit one edge per recipient.
+        var sender = ExtractAddress(from);
+        // One link per recipient.
         foreach (var recipient in to.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            graph.AddInteraction(
-                ExtractAddress(from),
-                ExtractAddress(recipient),
-                source,
-                ts,
-                subject);
+            var address = ExtractAddress(recipient);
+            if (address.Length == 0) continue;
+            graph.AddInteraction(sender, address, source, ts, subject);
             added++;
         }
     }
 
-    private static string ExtractAddress(string headerValue)
+    internal static string ExtractAddress(string headerValue)
     {
         // Headers come in two shapes: "Name <foo@bar>" and "foo@bar". Pull just the address.
         var s = headerValue.Trim();
-        var lt = s.IndexOf('<');
-        var gt = s.IndexOf('>');
+        var lt = s.LastIndexOf('<');
+        var gt = s.LastIndexOf('>');
         if (lt >= 0 && gt > lt)
         {
             return s[(lt + 1)..gt].Trim();
         }
-        return s;
+        return s.Trim('"', ' ');
     }
 
     private void Refresh()
     {
+        var keep = SelectedNode?.Identity;
         Nodes.Clear();
-        foreach (var n in Graph.Nodes) Nodes.Add(n);
+        // Most-connected first: that is the question the examiner is asking of this list.
+        foreach (var n in Graph.Nodes.OrderByDescending(n => n.InCount + n.OutCount).ThenBy(n => n.Identity, StringComparer.OrdinalIgnoreCase))
+        {
+            Nodes.Add(n);
+        }
+        SelectedNode = keep is null ? null : Nodes.FirstOrDefault(n => string.Equals(n.Identity, keep, StringComparison.OrdinalIgnoreCase));
+        RefreshEdges();
+    }
+
+    private void RefreshEdges()
+    {
         Edges.Clear();
-        foreach (var e in Graph.Edges) Edges.Add(e);
+        var who = SelectedNode?.Identity;
+        foreach (var e in Graph.Edges)
+        {
+            if (who is not null
+                && !string.Equals(e.From, who, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(e.To, who, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            Edges.Add(new GraphEdgeRow(e.From, e.To, e.Source,
+                e.Timestamp?.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "",
+                e.Subject ?? ""));
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Edges.Select(e => (object)new { e.From, e.To, SentUtc = e.SentUtc, e.Source, e.Subject }).ToList();
+        if (await ToolExport.SaveRowsAsync(Id, "communications", format, rows, ct) is { } status) StatusLine = status;
     }
 }
+
+/// <summary>One sender-to-recipient link as shown in the message list. <see cref="SentUtc"/> is blank when the message carries no date.</summary>
+public sealed record GraphEdgeRow(string From, string To, string Source, string SentUtc, string Subject);
 
 // =====================================================================================
 // ACQUIRE — Imager / Verify / Mount / Convert / VSS / RAM / Carver / Cloud
@@ -1302,7 +1777,20 @@ public sealed partial class ImagerTool
     [ObservableProperty] private string? _statusLine;
     [ObservableProperty] private long _bytesRead;
 
-    public IReadOnlyList<string> Formats { get; } = ["Raw", "Ewf", "Aff4", "Vhd", "Vhdx"];
+    /// <summary>Off by default: an existing image (or the remains of a failed run) is never replaced silently.</summary>
+    [ObservableProperty] private bool _overwrite;
+
+    /// <summary>Names as examiners write them, the same list the Convert tool shows.</summary>
+    public IReadOnlyList<string> Formats { get; } = ["Raw", "E01", "AFF4", "VHD", "VHDX"];
+
+    private ImageFormat SelectedFormat => Format switch
+    {
+        "E01" => ImageFormat.Ewf,
+        "AFF4" => ImageFormat.Aff4,
+        "VHD" => ImageFormat.Vhd,
+        "VHDX" => ImageFormat.Vhdx,
+        _ => ImageFormat.Raw,
+    };
 
     [RelayCommand]
     private async Task PickSourceAsync(CancellationToken ct)
@@ -1314,20 +1802,22 @@ public sealed partial class ImagerTool
     [RelayCommand]
     private async Task PickOutputAsync(CancellationToken ct)
     {
-        var ext = Format switch { "Ewf" => ".E01", "Aff4" => ".af4", "Vhd" => ".vhd", "Vhdx" => ".vhdx", _ => ".dd" };
+        var ext = Format switch { "E01" => ".E01", "AFF4" => ".aff4", "VHD" => ".vhd", "VHDX" => ".vhdx", _ => ".dd" };
         var path = await ToolDialog.SaveFileAsync("Output image", $"image{ext}", ext.TrimStart('.'));
         if (!string.IsNullOrEmpty(path)) Output = path;
     }
 
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task StartAsync(CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         if (string.IsNullOrEmpty(Source) || string.IsNullOrEmpty(Output))
         {
-            StatusLine = "Pick a source and an output path.";
+            StatusLine = "Choose what to image and where to save the image.";
             return;
         }
-        var fmt = Enum.Parse<ImageFormat>(Format);
+        var fmt = SelectedFormat;
         BytesRead = 0;
         try
         {
@@ -1342,35 +1832,82 @@ public sealed partial class ImagerTool
             var job = new ImageJob(Source, Output, fmt,
                 ExaminerName: Environment.UserName,
                 CaseNumber: ActiveCaseContext.Current?.Name,
-                Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : EvidenceOpener.IsAff4(Source) ? "Decoded from AFF4" : null);
+                Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : EvidenceOpener.IsAff4(Source) ? "Decoded from AFF4" : null,
+                Overwrite: Overwrite);
             var result = await new InProcessImager().ImageAsync(job, progress, ct);
 
-            StatusLine = $"Done. {result.BytesWritten:N0} bytes → {Output} · MD5 {result.Md5} · SHA-256 {result.Sha256} · {result.BadSectors} bad sector(s)" +
-                         (result.BadSectors > 0 ? " — offsets in the .log.json beside the image" + (fmt == ImageFormat.Ewf ? " and in the container's error section" : "") : "");
-            await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
+            var lines = new List<string>
+            {
+                $"Image complete: {result.BytesWritten:N0} bytes written to {Output}",
+                $"MD5      {result.Md5}",
+                $"SHA-256  {result.Sha256}",
+            };
+            if (result.PaddingBytes > 0)
+            {
+                lines.Add($"The source is not a whole number of sectors, so {result.PaddingBytes:N0} zero bytes were added to fill the last one. The hashes above cover the image as stored, padding included; the acquisition log also records the hashes of the source bytes alone.");
+            }
+            if (result.BadSectors > 0)
+            {
+                lines.Add($"WARNING: {result.BadSectors:N0} sector{(result.BadSectors == 1 ? "" : "s")} could not be read and {(result.BadSectors == 1 ? "was" : "were")} filled with zeros. Their offsets are in the .log.json beside the image"
+                    + (fmt == ImageFormat.Ewf ? " and in the E01's own error list." : "."));
+            }
+            if (result.SourceDamagedChunks > 0)
+            {
+                lines.Add($"WARNING: the source container had {result.SourceDamagedChunks:N0} damaged chunk{(result.SourceDamagedChunks == 1 ? "" : "s")}; those regions are zeros in this image, and the hashes above describe the image, not the original media.");
+            }
+            StatusLine = string.Join(Environment.NewLine, lines);
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceImaged, new
             {
                 Source,
                 Output,
                 Format = fmt.ToString(),
                 result.BytesWritten,
+                result.PaddingBytes,
                 result.Md5,
                 result.Sha1,
                 result.Sha256,
                 result.BadSectors,
+                result.SourceDamagedChunks,
                 ElapsedSeconds = result.Elapsed.TotalSeconds,
-            }, ct);
+            }, CancellationToken.None);
+        }
+        catch (OutputExistsException ex)
+        {
+            // Nothing was created or changed. An image is never replaced unless asked.
+            StatusLine = "Not started: there is already a file where the image would go ("
+                + string.Join(", ", ex.ExistingPaths.Select(p => System.IO.Path.GetFileName(p)))
+                + "). A name ending in .partial is what is left of an earlier run that failed. "
+                + "Choose another output name, or tick \"Replace an existing image\" if you are sure it is not needed.";
         }
         catch (OperationCanceledException)
         {
-            StatusLine = "Cancelled.";
+            StatusLine = "Stopped. The unfinished image was deleted; nothing was left at the output path.";
+        }
+        catch (AcquisitionAbortedException ex)
+        {
+            // The source kept failing. What was read is kept, clearly named as incomplete.
+            StatusLine = $"Imaging stopped: {ex.Message}{Environment.NewLine}"
+                + $"{ex.BytesAcquired:N0} bytes were acquired before it stopped. They are kept as an INCOMPLETE image: "
+                + string.Join(", ", ex.PartialPaths)
+                + ". The log beside it is marked incomplete. Do not treat it as a full image.";
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceImaged, new
+            {
+                Source,
+                Output,
+                Format = fmt.ToString(),
+                Complete = false,
+                ex.BytesAcquired,
+                Partial = ex.PartialPaths,
+                Error = ex.Message,
+            }, CancellationToken.None);
         }
         catch (UnauthorizedAccessException ex)
         {
-            StatusLine = $"Access denied: {ex.Message}. Imaging a device needs Administrator (Windows) or root (Linux).";
+            StatusLine = $"Access denied: {ex.Message} Imaging a disk needs Cinder to be started as Administrator (Windows) or root (Linux).";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Imaging failed: {ex.Message}";
+            StatusLine = $"Imaging failed: {ex.Message}{Environment.NewLine}Anything written so far is at {Output}.partial and is not a complete image.";
         }
     }
 }
@@ -1394,15 +1931,15 @@ public sealed partial class VerifyTool
     /// tool ends up showing a red ✗ for an image that is merely missing a recorded hash — or,
     /// worse, a green ✓ for one that was never actually checked.</para>
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task PickAndRunAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick image to verify");
+        var path = await ToolDialog.PickFileAsync("Pick the image to verify");
         if (string.IsNullOrEmpty(path)) return;
 
         ImagePath = path;
         ResultText = null;
-        StatusLine = "Verifying — re-reading the whole image…";
+        StatusLine = "Verifying: reading the whole image again. Large images take a while.";
         try
         {
             if (EvidenceOpener.IsEwf(path))
@@ -1420,23 +1957,26 @@ public sealed partial class VerifyTool
         }
         catch (OperationCanceledException)
         {
-            StatusLine = "Cancelled.";
+            ResultText = null;
+            StatusLine = "Stopped before the whole image was read. Nothing was verified.";
         }
         catch (Exception ex)
         {
             ResultText = null;
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not verify {System.IO.Path.GetFileName(path)}: {ex.Message}";
         }
     }
 
     private async Task VerifyEwfAsync(string path, CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         using var reader = Cinder.Imaging.Ewf.EwfReader.Open(path);
-        var progress = new Progress<long>(b => StatusLine = $"Verifying — {b:N0} bytes read…");
+        var progress = new Progress<long>(b => StatusLine = $"Verifying: {b:N0} bytes read so far");
         var r = await reader.VerifyAsync(progress, ct);
 
         ResultText = $"""
-            Source            : EWF container, {reader.SegmentCount} segment(s)
+            Source            : E01 image, {reader.SegmentCount} segment file{(reader.SegmentCount == 1 ? "" : "s")}
             Bytes verified    : {r.BytesVerified:N0}
             Damaged chunks    : {r.DamagedChunkCount:N0}
 
@@ -1449,12 +1989,22 @@ public sealed partial class VerifyTool
             """;
 
         StatusLine = r.Md5Match is null && r.Sha1Match is null
-            ? "⚠ unverifiable — container records no acquisition hash"
-            : r.Verified ? "✓ verified against the acquisition hash" : "✗ VERIFICATION FAILED";
+            ? "Cannot be verified: this image records no acquisition hash to compare against."
+            : r.Verified ? "Verified: the image matches the hash recorded when it was acquired."
+            : "VERIFICATION FAILED: the image does not match the hash recorded when it was acquired.";
+        if (!reader.EndsWithDone)
+        {
+            StatusLine += " WARNING: the last segment file expects another one after it. The image is incomplete; a segment is missing.";
+        }
+        if (reader.IgnoredSegments.Count > 0)
+        {
+            StatusLine += $" Note: {reader.IgnoredSegments.Count} file{(reader.IgnoredSegments.Count == 1 ? "" : "s")} beside the image look like later segments but belong to a different image and were not read: "
+                + string.Join("; ", reader.IgnoredSegments) + ".";
+        }
 
         // A verification is the custody event that matters most — record the digests and the
         // verdict, not just that the tool ran.
-        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceHashed, new
         {
             Image = path,
             Container = "ewf",
@@ -1475,6 +2025,8 @@ public sealed partial class VerifyTool
     /// </summary>
     private async Task VerifyAff4Async(string path, CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         using var reader = Cinder.Imaging.Aff4.Aff4Reader.Open(path);
         await using var stream = reader.OpenStream();
         using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
@@ -1491,7 +2043,7 @@ public sealed partial class VerifyTool
             sha1.AppendData(buffer, 0, n);
             sha256.AppendData(buffer, 0, n);
             total += n;
-            StatusLine = $"Verifying — {total:N0} bytes read…";
+            StatusLine = $"Verifying: {total:N0} bytes read so far";
         }
         var cMd5 = Convert.ToHexStringLower(md5.GetHashAndReset());
         var cSha1 = Convert.ToHexStringLower(sha1.GetHashAndReset());
@@ -1518,10 +2070,11 @@ public sealed partial class VerifyTool
             {(!any ? "UNVERIFIABLE: the container records no hash." : verified ? "VERIFIED: every recorded digest reproduces." : "FAILED: a recorded digest does not reproduce, or chunks were damaged.")}
             """;
         StatusLine = !any
-            ? "⚠ unverifiable — container records no acquisition hash"
-            : verified ? "✓ verified against the acquisition hash" : "✗ VERIFICATION FAILED";
+            ? "Cannot be verified: this image records no acquisition hash to compare against."
+            : verified ? "Verified: the image matches the hash recorded when it was acquired."
+            : "VERIFICATION FAILED: the image does not match the hash recorded when it was acquired.";
 
-        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceHashed, new
         {
             Image = path,
             Container = "aff4",
@@ -1540,8 +2093,10 @@ public sealed partial class VerifyTool
 
     private async Task VerifyRawAsync(string path, CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         var hashes = new HashService();
-        var progress = new Progress<long>(b => StatusLine = $"Verifying — {b:N0} bytes read…");
+        var progress = new Progress<long>(b => StatusLine = $"Verifying: {b:N0} bytes read so far");
         var virtualDisk = EvidenceOpener.VirtualDiskKind(path);
         var computed = virtualDisk is null
             ? await hashes.ComputeFileAsync(path, [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256], progress, ct)
@@ -1554,7 +2109,7 @@ public sealed partial class VerifyTool
         {
             verdict = "Unverifiable — no .sha256 / .md5 companion file found next to the image. " +
                       "The digests above are this run's measurement, not a check against a reference.";
-            StatusLine = "⚠ unverifiable — no reference digest available";
+            StatusLine = "Cannot be verified: there is no hash file beside the image to compare against.";
         }
         else
         {
@@ -1566,7 +2121,9 @@ public sealed partial class VerifyTool
             verdict = match
                 ? $"Verified — matches the digest in {referenceSource}."
                 : $"VERIFICATION FAILED — {referenceSource} expects {reference}, which matches none of the computed digests.";
-            StatusLine = match ? "✓ verified against companion digest" : "✗ VERIFICATION FAILED";
+            StatusLine = match
+                ? "Verified: the image matches the hash file beside it."
+                : "VERIFICATION FAILED: the image does not match the hash file beside it.";
         }
 
         ResultText = $"""
@@ -1581,7 +2138,7 @@ public sealed partial class VerifyTool
             {verdict}
             """;
 
-        await ActiveCaseContext.LogAsync(CustodyAction.EvidenceHashed, new
+        await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceHashed, new
         {
             Image = path,
             Container = "raw",
@@ -1663,32 +2220,95 @@ public sealed partial class VerifyTool
 public sealed partial class MountTool
 {
     [ObservableProperty] private string? _imagePath;
-    [ObservableProperty] private string? _mountedAt;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMounted))]
+    private string? _mountedAt;
+
     [ObservableProperty] private string? _statusLine;
+
+    private IImageMounter? _mounter;
+    private MountedImage? _handle;
+
+    public bool IsMounted => MountedAt is not null;
+
+    /// <summary>
+    /// The folder of helper scripts some mounters use. Beside the program when installed, a few
+    /// levels up when run from the source tree; the old code only knew the source-tree layout,
+    /// so an installed copy looked in a folder that did not exist.
+    /// </summary>
+    private static string ParsersDirectory()
+    {
+        var beside = System.IO.Path.Combine(AppContext.BaseDirectory, "parsers");
+        return Directory.Exists(beside)
+            ? beside
+            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers"));
+    }
 
     [RelayCommand]
     private async Task PickAndMountAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick image to mount");
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
+        if (IsMounted)
+        {
+            StatusLine = "Unmount the current image first.";
+            return;
+        }
+        var path = await ToolDialog.PickFileAsync("Pick the image to mount read-only");
         if (string.IsNullOrEmpty(path)) return;
         ImagePath = path;
+        StatusLine = "Mounting…";
         try
         {
-            var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
-            var m = ImageMounterFactory.ForCurrentPlatform(parsers);
-            var handle = await m.MountReadOnlyAsync(path, ct);
-            MountedAt = handle.MountPoint;
-            StatusLine = $"Mounted at {handle.MountPoint}";
-            await ActiveCaseContext.LogAsync(CustodyAction.EvidenceMounted, new
+            _mounter = ImageMounterFactory.ForCurrentPlatform(ParsersDirectory());
+            _handle = await _mounter.MountReadOnlyAsync(path, ct);
+            MountedAt = _handle.MountPoint;
+            StatusLine = "Mounted read-only. It stays mounted, even after Cinder closes, until you unmount it here.";
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceMounted, new
             {
                 Image = path,
-                handle.MountPoint,
+                _handle.MountPoint,
                 ReadOnly = true,
-            }, ct);
+            }, CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Stopped.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            _handle = null;
+            MountedAt = null;
+            StatusLine = $"Could not mount {System.IO.Path.GetFileName(path)}: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task UnmountAsync(CancellationToken ct)
+    {
+        var custodyCase = ActiveCaseContext.Current;
+        if (_mounter is null || _handle is null)
+        {
+            return;
+        }
+        var handle = _handle;
+        StatusLine = "Unmounting…";
+        try
+        {
+            await _mounter.UnmountAsync(handle, ct);
+            _handle = null;
+            MountedAt = null;
+            StatusLine = "Unmounted.";
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceUnmounted, new
+            {
+                Image = ImagePath,
+                handle.MountPoint,
+            }, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not unmount {handle.MountPoint}: {ex.Message} Close any program that has files open on it and try again.";
         }
     }
 }
@@ -1697,11 +2317,14 @@ public sealed partial class ConvertTool
 {
     [ObservableProperty] private string? _source;
     [ObservableProperty] private string? _output;
-    [ObservableProperty] private string _format = "raw";
+    [ObservableProperty] private string _format = "Raw";
     [ObservableProperty] private string? _statusLine;
 
+    /// <summary>Off by default: an existing image (or the remains of a failed run) is never replaced silently.</summary>
+    [ObservableProperty] private bool _overwrite;
+
     /// <summary>Every target is written in-process; the source can be raw, E01, AFF4, VHD or VHDX.</summary>
-    public IReadOnlyList<string> Formats { get; } = ["raw", "E01", "AFF4", "VHD", "VHDX"];
+    public IReadOnlyList<string> Formats { get; } = ["Raw", "E01", "AFF4", "VHD", "VHDX"];
 
     [ObservableProperty] private long _bytesConverted;
 
@@ -1736,35 +2359,56 @@ public sealed partial class ConvertTool
     /// recorded acquisition hash, that is compared too — so the conversion is also a
     /// verification of both ends.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task RunAsync(CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         if (string.IsNullOrEmpty(Source) || string.IsNullOrEmpty(Output))
         {
-            StatusLine = "Pick a source and an output path.";
+            StatusLine = "Choose the image to convert and where to save the result.";
             return;
         }
         BytesConverted = 0;
-        StatusLine = $"Converting to {Format} — hashing as it streams, then re-reading the output to verify…";
+        StatusLine = $"Converting to {Format}. The output is read back afterwards to check it.";
         try
         {
             var progress = new Progress<ImageJobProgress>(p => BytesConverted = p.BytesRead);
-            var r = await ImageConverter.ConvertAsync(Source, Output, TargetFormat, Environment.UserName, progress: progress, ct: ct);
+            var r = await ImageConverter.ConvertAsync(Source, Output, TargetFormat, Environment.UserName, progress: progress, ct: ct, overwrite: Overwrite);
 
-            var outputVerdict = r.MatchesRecorded switch
+            var lines = new List<string>
             {
-                true => "✓ output re-read and hashes back to what was written",
-                false => $"✗ output re-read does NOT reproduce the digest ({r.DamagedChunks} damaged chunk(s)) — do not use it",
-                null => "⚠ output could not be re-read for verification",
+                $"Converted: {r.Image.BytesWritten:N0} bytes written to {Output}",
+                $"MD5      {r.Image.Md5}",
+                $"SHA-256  {r.Image.Sha256}",
             };
-            var sourceVerdict = r.SourceMatchesRecorded switch
+            if (r.SourceDamagedChunks > 0)
             {
-                true => "; source matched its recorded acquisition hash",
-                false => "; ✗ source did NOT match its recorded acquisition hash",
-                null => r.RecordedMd5 is null ? "" : "",
-            };
-            StatusLine = $"Done. {r.Image.BytesWritten:N0} bytes → {Output} · MD5 {r.Image.Md5} · SHA-256 {r.Image.Sha256} · {outputVerdict}{sourceVerdict}";
-            await ActiveCaseContext.LogAsync(CustodyAction.EvidenceImaged, new
+                // The flags are false in this case because the source itself was damaged,
+                // not because the conversion went wrong: say which.
+                lines.Add($"WARNING: the source had {r.SourceDamagedChunks:N0} damaged chunk{(r.SourceDamagedChunks == 1 ? "" : "s")}. Those regions are zeros in the output, so the output is a faithful copy of a damaged image, not of the original media.");
+            }
+            else
+            {
+                lines.Add(r.SourceMatchesRecorded switch
+                {
+                    true => "Source check: passed. The source matches the hash recorded when it was acquired.",
+                    false => "Source check: FAILED. The source does not match the hash recorded when it was acquired; it has changed since acquisition.",
+                    null => "Source check: not possible. The source carries no recorded hash to compare against.",
+                });
+            }
+            lines.Add(r.OutputDamagedChunks > 0
+                ? $"Output check: FAILED. {r.OutputDamagedChunks:N0} chunk{(r.OutputDamagedChunks == 1 ? "" : "s")} of the output could not be read back. Do not use this file."
+                : r.SourceDamagedChunks > 0
+                    ? "Output check: the output reads back exactly as written."
+                    : r.MatchesRecorded switch
+                    {
+                        true => "Output check: passed. The output was read back and matches what was written.",
+                        false => "Output check: FAILED. The output does not read back as written. Do not use this file.",
+                        null => "Output check: not possible. The output could not be read back.",
+                    });
+            StatusLine = string.Join(Environment.NewLine, lines);
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceImaged, new
             {
                 Operation = "convert",
                 Source,
@@ -1779,15 +2423,25 @@ public sealed partial class ConvertTool
                 SourceRecordedMd5 = r.RecordedMd5,
                 SourceRecordedSha1 = r.RecordedSha1,
                 SourceVerified = r.SourceMatchesRecorded,
-            }, ct);
+                r.SourceDamagedChunks,
+                r.OutputDamagedChunks,
+            }, CancellationToken.None);
+        }
+        catch (OutputExistsException ex)
+        {
+            // Nothing was created or changed. An image is never replaced unless asked.
+            StatusLine = "Not started: there is already a file where the image would go ("
+                + string.Join(", ", ex.ExistingPaths.Select(p => System.IO.Path.GetFileName(p)))
+                + "). A name ending in .partial is what is left of an earlier run that failed. "
+                + "Choose another output name, or tick \"Replace an existing image\" if you are sure it is not needed.";
         }
         catch (OperationCanceledException)
         {
-            StatusLine = "Cancelled.";
+            StatusLine = "Stopped. The unfinished output was deleted.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Conversion failed: {ex.Message}";
+            StatusLine = $"Conversion failed: {ex.Message}{Environment.NewLine}Anything written so far is at {Output}.partial and is not a complete image.";
         }
     }
 }
@@ -1795,25 +2449,48 @@ public sealed partial class ConvertTool
 public sealed partial class ShadowCopyTool
 {
     [ObservableProperty] private string? _statusLine;
+
+    /// <summary>"Nothing listed yet" and "listed, and there are none" are different answers.</summary>
+    [ObservableProperty] private string _emptyTitle = "Snapshots on this computer";
+
     public ObservableCollection<Cinder.Native.ShadowCopy> Snapshots { get; } = new();
 
     [RelayCommand]
-    private void Refresh()
+    private async Task RefreshAsync(CancellationToken ct)
     {
         Snapshots.Clear();
+        StatusLine = "Listing snapshots…";
         try
         {
-            var enumr = ShadowCopyService.ForCurrentPlatform();
-            foreach (var s in enumr.Enumerate())
+            // Enumeration shells out to the OS snapshot tools; keep it off the UI thread.
+            var found = await Task.Run(() => ShadowCopyService.ForCurrentPlatform().Enumerate().ToList(), ct);
+            foreach (var s in found)
             {
                 Snapshots.Add(s);
             }
-            StatusLine = $"{Snapshots.Count} snapshot{(Snapshots.Count == 1 ? "" : "s")} found.";
+            EmptyTitle = "No snapshots found";
+            StatusLine = found.Count == 0
+                ? "This computer has no snapshots, or Cinder is not running as Administrator / root."
+                : $"{found.Count:N0} snapshot{(found.Count == 1 ? "" : "s")} found.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            EmptyTitle = "Could not list snapshots";
+            StatusLine = $"Could not list snapshots: {ex.Message}";
         }
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Snapshots.Select(s => (object)new
+        {
+            Snapshot = s.Id,
+            Volume = s.Origin,
+            CreatedUtc = s.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+            s.Notes,
+        }).ToList();
+        if (await ToolExport.SaveRowsAsync(Id, "snapshots", format, rows, ct) is { } status) StatusLine = status;
     }
 }
 
@@ -1825,27 +2502,31 @@ public sealed partial class RamCaptureTool
     [RelayCommand]
     private async Task PickAndCaptureAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.SaveFileAsync("RAM dump output", "memory.raw", "raw");
-        if (string.IsNullOrEmpty(path)) return;
-        Output = path;
-        StatusLine = "RAM capture: Cinder's signed kernel driver is source-only today. Drop winpmem.exe alongside Cinder for the Windows fallback. Linux: use LiME (see drivers/cinder-ram-linux/README.md).";
+        // Nothing is captured in this build, so do not ask where to save a dump that will not exist.
+        StatusLine = "RAM capture is not available in this build. Capture with WinPmem (Windows) or LiME (Linux), then open the dump in the Memory tool.";
+        await Task.CompletedTask;
         _ = ct;
     }
 }
 
 public sealed partial class CarverTool
 {
+    /// <summary>Files recovered per run. Reaching it is reported, never passed off as "that was all".</summary>
+    private const int MaxHits = 10_000;
+
     [ObservableProperty] private string? _source;
     [ObservableProperty] private string? _outputDir;
     [ObservableProperty] private string? _statusLine;
+    [ObservableProperty] private Cinder.Carving.CarveHit? _selectedHit;
 
     public ObservableCollection<Cinder.Carving.CarveHit> Hits { get; } = new();
 
     [RelayCommand]
     private async Task PickSourceAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.PickFileAsync("Source to carve");
+        var p = await ToolDialog.PickFileAsync("Pick the image or file to carve");
         if (!string.IsNullOrEmpty(p)) Source = p;
+        _ = ct;
     }
 
     [RelayCommand]
@@ -1854,36 +2535,124 @@ public sealed partial class CarverTool
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
             as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (owner is null) return;
-        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Output folder" });
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pick an empty folder for the recovered files" });
         var path = folders.FirstOrDefault()?.TryGetLocalPath();
         if (!string.IsNullOrEmpty(path)) OutputDir = path;
+        _ = ct;
     }
 
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task RunAsync(CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(Source) || string.IsNullOrEmpty(OutputDir))
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
+        var source = Source?.Trim();
+        var output = OutputDir?.Trim();
+        if (string.IsNullOrEmpty(source) || string.IsNullOrEmpty(output))
         {
-            StatusLine = "Pick a source and an output folder.";
+            StatusLine = "Choose what to carve and a folder for the recovered files.";
             return;
         }
+        // Recovered files must never land beside, or inside, the evidence they came from.
+        var sourceDir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(source));
+        if (sourceDir is not null && string.Equals(
+                System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(output)),
+                System.IO.Path.TrimEndingDirectorySeparator(sourceDir),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            StatusLine = "Pick a different output folder: recovered files should not be written next to the evidence.";
+            return;
+        }
+
         Hits.Clear();
         StatusLine = "Carving…";
+        var found = new List<Cinder.Carving.CarveHit>();
+        var capped = false;
+        var damagedChunks = 0;
+        var progress = new Progress<int>(n => StatusLine = $"Carving… {n:N0} files recovered so far");
         try
         {
-            var carver = new Cinder.Carving.FileCarver();
-            await using var fs = Cinder.Imaging.EvidenceOpener.Open(Source);
-            await foreach (var hit in carver.CarveAsync(fs, OutputDir, ct: ct))
+            capped = await Task.Run(async () =>
             {
-                Hits.Add(hit);
-                if (Hits.Count >= 10_000) break;
+                Directory.CreateDirectory(output);
+                var carver = new Cinder.Carving.FileCarver();
+                await using var fs = Cinder.Imaging.EvidenceOpener.Open(source);
+                var stoppedEarly = false;
+                await foreach (var hit in carver.CarveAsync(fs, output, ct: ct).ConfigureAwait(false))
+                {
+                    if (found.Count >= MaxHits)
+                    {
+                        stoppedEarly = true;
+                        break;
+                    }
+                    found.Add(hit);
+                    if (found.Count % 50 == 0)
+                    {
+                        ((IProgress<int>)progress).Report(found.Count);
+                    }
+                }
+                // A damaged E01 / AFF4 chunk reads as zeros: nothing can be carved from it.
+                damagedChunks = fs is Cinder.Imaging.IEvidenceDamageSource d ? d.DamagedChunks.Count : 0;
+                return stoppedEarly;
+            }, ct);
+            var saved = found.Count(h => h.OutputPath is not null);
+            var rejected = found.Count - saved;
+            StatusLine = capped
+                ? $"Stopped at {MaxHits:N0} results; the source was not carved to the end."
+                : found.Count == 0
+                    ? "Nothing recovered: no known file headers were found in the source."
+                    : $"Recovered {saved:N0} file{(saved == 1 ? "" : "s")} into {output}.";
+            if (rejected > 0)
+            {
+                StatusLine += $" {rejected:N0} more looked like a file header but failed the structure check and {(rejected == 1 ? "was" : "were")} not saved; see the Note column.";
             }
-            StatusLine = $"{Hits.Count:N0} carved.";
+            if (damagedChunks > 0)
+            {
+                StatusLine += $" WARNING: {damagedChunks:N0} damaged chunk{(damagedChunks == 1 ? "" : "s")} in the source image read as zeros, so files in those regions could not be recovered.";
+            }
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.ParserRan,
+                new { Tool = Id, Evidence = source, Output = output, Recovered = found.Count(h => h.OutputPath is not null), Recognised = found.Count, StoppedEarly = capped, SourceDamagedChunks = damagedChunks }, CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = $"Stopped. The {found.Count(h => h.OutputPath is not null):N0} files recovered so far are in {output}; the source was not carved to the end.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not carve {System.IO.Path.GetFileName(source)}: {ex.Message}";
         }
+        foreach (var hit in found)
+        {
+            Hits.Add(hit);
+        }
+    }
+
+    /// <summary>Open the selected recovered file in the Hex Viewer.</summary>
+    [RelayCommand]
+    private void OpenHit(Cinder.Carving.CarveHit? hit)
+    {
+        hit ??= SelectedHit;
+        if (hit?.OutputPath is { Length: > 0 } path && File.Exists(path))
+        {
+            AppNavigator.OpenInHex?.Invoke(path, null);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportAsync(string format, CancellationToken ct)
+    {
+        var rows = Hits.Select(h => (object)new
+        {
+            Type = h.Label,
+            h.Extension,
+            Offset = $"0x{h.Offset:X}",
+            h.Length,
+            h.Validated,
+            File = h.OutputPath ?? "",
+            Note = h.Note ?? "",
+            Source = Source ?? "",
+        }).ToList();
+        if (await ToolExport.SaveRowsAsync(Id, "carved-files", format, rows, ct) is { } status) StatusLine = status;
     }
 }
 
@@ -1917,8 +2686,7 @@ public sealed partial class CloudPullTool
         {
             AuthorizeUrl = null;
             RedirectUri = null;
-            Instructions = $"Set the OAuth client_id for {Provider} in Settings → Cloud first.\n" +
-                           "See docs/cloud-setup.md for how to create one in your own Google / Microsoft / Dropbox dev console — Cinder doesn't ship shared client_ids on purpose, so each examiner's cloud pulls are auditable as their own account.";
+            Instructions = "No sign-in application is configured for this provider yet. Create one in your own Google, Microsoft or Dropbox developer console and enter its client ID in Settings (docs/cloud-setup.md walks through it). Cinder does not ship a shared one, so that every cloud request is attributable to the examiner who made it.";
             return;
         }
 
@@ -1960,13 +2728,8 @@ public sealed partial class CloudPullTool
         };
         var query = string.Join("&", q.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
         AuthorizeUrl = $"{authBase}?{query}";
-        Instructions =
-            "1. Click 'Copy URL', paste it in your browser, complete consent.\n" +
-            "2. After consent the browser redirects to 127.0.0.1:48127 — the page won't load\n" +
-            "   (no local listener yet), but the URL bar shows ?code=<long-string>.\n" +
-            "3. Paste that code back into Cinder via the 'Submit code' button (next pass).\n" +
-            "Token exchange + actual file pull will land in v0.3.";
-        StatusLine = "Authorize URL ready.";
+        Instructions = "The sign-in link below is valid: opening it in a browser shows the provider's consent page for read-only access. That is as far as this build goes. It cannot yet receive the sign-in result or download files.";
+        StatusLine = null;
     }
 
     [RelayCommand]
@@ -1974,7 +2737,7 @@ public sealed partial class CloudPullTool
     {
         if (string.IsNullOrEmpty(AuthorizeUrl))
         {
-            StatusLine = "No authorize URL — set the client_id in Settings → Cloud first.";
+            StatusLine = "There is no sign-in link yet: enter the provider's client ID in Settings first.";
             return;
         }
         try
@@ -1982,11 +2745,11 @@ public sealed partial class CloudPullTool
             var top = (Avalonia.Application.Current?.ApplicationLifetime
                 as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
             top?.Clipboard?.SetTextAsync(AuthorizeUrl);
-            StatusLine = "Copied — paste into your browser.";
+            StatusLine = "Sign-in link copied.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Copy failed: {ex.Message}";
+            StatusLine = $"Could not copy the link: {ex.Message}";
         }
     }
 
@@ -2006,47 +2769,60 @@ public sealed partial class WorkflowsTool
 {
     public ObservableCollection<Cinder.Workflow.WorkflowNode> Nodes { get; } = new();
 
-    /// <summary>One row of execution output per node, populated by the Run command.</summary>
+    /// <summary>One row of execution output per step, filled in by Run.</summary>
     public ObservableCollection<WorkflowExecutionRow> Outputs { get; } = new();
 
-    [ObservableProperty] private string? _path;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasWorkflow))]
+    private string? _path;
+
     [ObservableProperty] private string? _statusLine;
     [ObservableProperty] private bool _isRunning;
 
     private Cinder.Workflow.Workflow? _loaded;
 
+    /// <summary>A workflow is loaded and ready to run (the path alone is not enough: the file may have failed to parse).</summary>
+    public bool HasWorkflow => _loaded is not null;
+
     [RelayCommand]
     private async Task LoadAsync(CancellationToken ct)
     {
-        var p = await ToolDialog.PickFileAsync("Open workflow", "Workflow JSON", "*.json");
+        var p = await ToolDialog.PickFileAsync("Open a workflow file", "Workflow", "*.json");
         if (string.IsNullOrEmpty(p)) return;
-        Path = p;
+        // Forget the previous workflow first. Otherwise a file that fails to load leaves the
+        // old steps in memory under the new file's name, and Run executes the wrong thing.
+        _loaded = null;
         Nodes.Clear();
         Outputs.Clear();
+        Path = p;
         try
         {
             var json = await File.ReadAllTextAsync(p, ct);
-            _loaded = Cinder.Workflow.Workflow.FromJson(json);
-            foreach (var n in _loaded.TopologicalOrder()) Nodes.Add(n);
-            StatusLine = $"{Nodes.Count} step{(Nodes.Count == 1 ? "" : "s")} loaded.";
+            var workflow = Cinder.Workflow.Workflow.FromJson(json);
+            foreach (var n in workflow.TopologicalOrder()) Nodes.Add(n);
+            _loaded = workflow;
+            StatusLine = Nodes.Count == 0
+                ? "This workflow has no steps."
+                : $"{Nodes.Count:N0} step{(Nodes.Count == 1 ? "" : "s")} loaded, in the order they will run.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            Nodes.Clear();
+            StatusLine = $"Could not read {System.IO.Path.GetFileName(p)} as a workflow: {ex.Message}";
         }
+        OnPropertyChanged(nameof(HasWorkflow));
     }
 
     /// <summary>
-    /// Execute the loaded workflow. Each step's handler runs in topological order; results
-    /// land in <see cref="Outputs"/> for the user to inspect. Failed steps abort the run with
-    /// a status message but don't crash the tool.
+    /// Run the loaded workflow. Each step's handler runs in order; results land in
+    /// <see cref="Outputs"/>. A step that throws stops the run and is reported as failed.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task RunAsync(CancellationToken ct)
     {
-        if (_loaded is null)
+        if (_loaded is not { } workflow)
         {
-            StatusLine = "Load a workflow first.";
+            StatusLine = "Open a workflow file first.";
             return;
         }
         Outputs.Clear();
@@ -2055,13 +2831,20 @@ public sealed partial class WorkflowsTool
         try
         {
             var runner = WorkflowHandlers.BuildRunner(Outputs);
-            await Task.Run(() => runner.RunAsync(_loaded, ct), ct);
-            StatusLine = $"Done · {Outputs.Count} step{(Outputs.Count == 1 ? "" : "s")}.";
+            await Task.Run(() => runner.RunAsync(workflow, ct), ct);
+            var failed = Outputs.Count(o => string.Equals(o.Status, "failed", StringComparison.OrdinalIgnoreCase));
+            StatusLine = failed > 0
+                ? $"Finished with {failed:N0} failed step{(failed == 1 ? "" : "s")} out of {Outputs.Count:N0}. See the Result column."
+                : $"Finished: {Outputs.Count:N0} step{(Outputs.Count == 1 ? "" : "s")} ran.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = $"Stopped after {Outputs.Count:N0} step{(Outputs.Count == 1 ? "" : "s")}.";
         }
         catch (Exception ex)
         {
-            Outputs.Add(new WorkflowExecutionRow("(error)", "—", "failed", ex.Message));
-            StatusLine = $"Failed at step: {ex.Message}";
+            Outputs.Add(new WorkflowExecutionRow("", "", "failed", ex.Message));
+            StatusLine = ex.Message;
         }
         finally
         {
@@ -2079,10 +2862,72 @@ public sealed record WorkflowExecutionRow(string NodeId, string Kind, string Sta
 
 public sealed partial class PluginsTool
 {
+    private readonly Cinder.Plugins.PluginTrustStore _trust = Cinder.Plugins.PluginTrustStore.Default;
+
     public ObservableCollection<Cinder.Plugins.PluginLoadResult> Loaded { get; } = new();
 
     [ObservableProperty] private string? _folder;
     [ObservableProperty] private string? _statusLine;
+
+    /// <summary>The master switch, stored in the examiner's profile. Off until they turn it on.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowPickFolder))]
+    private bool _pluginsEnabled;
+
+    /// <summary>Plugins are on but the list is empty: ask for the folder.</summary>
+    public bool ShowPickFolder => PluginsEnabled && Loaded.Count == 0;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanTrustSelected), nameof(CanRevokeSelected))]
+    private Cinder.Plugins.PluginLoadResult? _selected;
+
+    public bool CanTrustSelected => Selected is { Status: "untrusted", Sha256: not null };
+    public bool CanRevokeSelected => Selected is { Status: "loaded", Sha256: not null };
+
+    public PluginsTool()
+    {
+        Loaded.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowPickFolder));
+        try
+        {
+            PluginsEnabled = _trust.PluginsEnabled;
+        }
+        catch
+        {
+            PluginsEnabled = false;
+        }
+    }
+
+    [RelayCommand]
+    private void EnablePlugins()
+    {
+        try
+        {
+            _trust.SetPluginsEnabled(true);
+            PluginsEnabled = true;
+            StatusLine = "Plugins are on. Nothing runs until you trust a specific file.";
+            Reload();
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not turn plugins on: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void DisablePlugins()
+    {
+        try
+        {
+            _trust.SetPluginsEnabled(false);
+            PluginsEnabled = false;
+            Loaded.Clear();
+            StatusLine = "Plugins are off. Plugins already loaded stay in memory until Cinder is restarted.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not turn plugins off: {ex.Message}";
+        }
+    }
 
     [RelayCommand]
     private async Task PickFolderAsync(CancellationToken ct)
@@ -2090,28 +2935,86 @@ public sealed partial class PluginsTool
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
             as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (owner is null) return;
-        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Plugins folder" });
+        var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Pick the folder that holds your plugins" });
         var path = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
         Folder = path;
-        Loaded.Clear();
+        Reload();
+        _ = ct;
+    }
+
+    /// <summary>
+    /// Trusts the selected file by its SHA-256 and reloads. Trust is recorded in the examiner's
+    /// profile, not in the plugin folder: anything able to drop a .dll into that folder could
+    /// equally drop an "it is trusted" marker beside it.
+    /// </summary>
+    [RelayCommand]
+    private void TrustSelected()
+    {
+        if (Selected is not { Status: "untrusted", Sha256: { } hash } row)
+        {
+            return;
+        }
         try
         {
-            var loader = new Cinder.Plugins.PluginLoader();
-            foreach (var p in loader.LoadFromDirectory(path))
-            {
-                Loaded.Add(p);
-            }
-            var loadedCount = Loaded.Count(r => r.Status == "loaded");
-            var untrustedCount = Loaded.Count(r => r.Status == "untrusted");
-            var failedCount = Loaded.Count(r => r.Status == "failed");
-            StatusLine = $"{loadedCount} loaded · {untrustedCount} untrusted · {failedCount} failed";
+            _trust.Trust(hash, row.FileName);
+            Reload();
+            StatusLine = $"{row.FileName} is now trusted and was loaded. " + StatusLine;
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not trust {row.FileName}: {ex.Message}";
         }
-        _ = ct;
+    }
+
+    [RelayCommand]
+    private void RevokeSelected()
+    {
+        if (Selected is not { Sha256: { } hash } row)
+        {
+            return;
+        }
+        try
+        {
+            _trust.Revoke(hash);
+            Reload();
+            StatusLine = $"{row.FileName} is no longer trusted. It stays in memory until Cinder is restarted.";
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not remove trust from {row.FileName}: {ex.Message}";
+        }
+    }
+
+    private void Reload()
+    {
+        Loaded.Clear();
+        Selected = null;
+        if (string.IsNullOrEmpty(Folder) || !PluginsEnabled)
+        {
+            return;
+        }
+        try
+        {
+            foreach (var p in new Cinder.Plugins.PluginLoader(_trust).LoadFromDirectory(Folder))
+            {
+                Loaded.Add(p);
+            }
+            var loaded = Loaded.Count(r => r.Status == "loaded");
+            var untrusted = Loaded.Count(r => r.Status == "untrusted");
+            var failed = Loaded.Count(r => r.Status == "failed");
+            StatusLine = Loaded.Count == 0
+                ? "No .dll files in that folder."
+                : $"{loaded:N0} loaded, {untrusted:N0} not trusted, {failed:N0} failed."
+                  + (untrusted > 0 ? " Select a file that is not trusted and choose Trust to load it." : "")
+                  + (Cinder.Plugins.PluginLoader.HasLegacyTrustFiles(Folder)
+                      ? " This folder has trust files from an older Cinder; they are ignored now, so trust each plugin again here."
+                      : "");
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not read {Folder}: {ex.Message}";
+        }
     }
 }
 

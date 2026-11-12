@@ -15,7 +15,9 @@ public sealed class NtfsLogFileTests
 {
     private const int PageSize = 4096;
     private const int DataOffset = 0x40;
-    private const int SeqBits = 44;
+    private const int HomePage0 = 4;                 // restart, restart, tail copy, tail copy, then the circular area
+    private const long FileSizeField = 64L << 20;    // the default $LogFile size
+    private const int SeqBits = 41;                  // 67 - log2(64 MiB): what NTFS writes for that size
     private const ushort Usn = 0x1234;
 
     [Fact]
@@ -71,7 +73,136 @@ public sealed class NtfsLogFileTests
         stale.Should().Contain(r => r.FileName == "secret-plan.docx");
 
         records.Select(r => r.Lsn).Should().OnlyHaveUniqueItems("buffer pages mirror record pages and must not double-count");
+        records.Where(r => r.Lsn == lsnInit || r.Lsn == lsnAdd || r.Lsn == lsnLong || r.Lsn == lsnDel || r.Lsn == lsnCommit)
+            .Should().OnlyContain(r => !r.IsStale, "live records are not slack, wherever they were read from");
     }
+
+    [Fact]
+    public void Restart_area_fields_are_read_at_their_on_disk_offsets()
+    {
+        // The restart area the builder writes follows the documented RESTART_AREA layout with a
+        // 64 MiB file_size. The parser used to read the data offset from +0x1A, which is the
+        // middle of file_size: 64 MiB reads there as 0x400, so every page was walked from
+        // 0x400 and a default-sized log parsed to nothing.
+        var log = new LogBuilder();
+        var lsn = log.Add(0x21, redoOp: 0x02, undoOp: 0x03, redo: FileRecord(77, "first.txt", 5), targetVcn: 3, clusterBlock: 0);
+        var bytes = log.Build();
+
+        var restartArea = bytes.AsSpan(0x30);
+        BinaryPrimitives.ReadInt64LittleEndian(restartArea[0x18..]).Should().Be(64L << 20, "the fixture must exercise the default log size");
+        BinaryPrimitives.ReadUInt16LittleEndian(restartArea[0x1A..]).Should().Be(0x400, "that is what the old offset read as the data offset");
+
+        using var ms = new MemoryStream(bytes);
+        var records = NtfsLogFile.Parse(ms).ToList();
+
+        var r = records.Should().ContainSingle().Subject;
+        r.Lsn.Should().Be(lsn);
+        r.FileName.Should().Be("first.txt");
+        r.IsStale.Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_record_whose_lsn_does_not_encode_its_position_is_flagged_stale()
+    {
+        // Proves the sequence-number bits are really read: with them the parser can tell that
+        // a header's LSN points somewhere else. It read them from +0x0C before (two unrelated
+        // 16-bit fields), got 0 or 0x20000, and silently skipped this check on every log.
+        var log = new LogBuilder();
+        var good = log.Add(1, 0x02, 0x03, FileRecord(7, "a.txt", 5), 0, 0);
+        var elsewhere = LogBuilder.LsnFor(HomePage0 * (long)PageSize + 0x800);
+        var bad = log.Add(1, 0x02, 0x03, FileRecord(8, "b.txt", 5), 0, 0, lsnOverride: elsewhere);
+
+        using var ms = new MemoryStream(log.Build());
+        var records = NtfsLogFile.Parse(ms).ToList();
+
+        records.Single(r => r.Lsn == good).IsStale.Should().BeFalse();
+        records.Single(r => r.Lsn == bad).IsStale.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Newest_records_that_exist_only_in_a_tail_copy_page_are_reported_and_not_stale()
+    {
+        var log = new LogBuilder();
+        var older = log.Add(1, 0x02, 0x03, FileRecord(7, "older.txt", 5), 0, 0);
+        var newest = log.Add(1, 0x0E, 0x0F, IndexEntry(9, "newest.txt", 5), 900, 0);
+        var bytes = log.Build();
+
+        // The home page has not been written yet — only the tail copy at page 2 holds these
+        // records, at an LSN that names the home position.
+        bytes.AsSpan(HomePage0 * PageSize, PageSize).Clear();
+
+        using var ms = new MemoryStream(bytes);
+        var records = NtfsLogFile.Parse(ms).ToList();
+
+        records.Select(r => r.Lsn).Should().BeEquivalentTo([older, newest]);
+        records.Should().OnlyContain(r => !r.IsStale, "a tail copy's LSNs point at its home page, which is not a mismatch");
+        records.Single(r => r.Lsn == newest).FileName.Should().Be("newest.txt");
+        records.Should().OnlyContain(r => r.FileOffset < HomePage0 * PageSize, "these rows were read from the tail copy");
+    }
+
+    [Fact]
+    public void A_spanning_record_seen_first_in_a_tail_copy_is_completed_from_its_home_pages()
+    {
+        var log = new LogBuilder();
+        var spanning = log.Add(1, redoOp: 0x08, undoOp: 0x08, redo: Enumerable.Repeat((byte)0x5A, 6000).ToArray(), targetVcn: 42, clusterBlock: 0);
+
+        using var ms = new MemoryStream(log.Build());
+        var records = NtfsLogFile.Parse(ms).ToList();
+
+        var r = records.Single(x => x.Lsn == spanning);
+        r.IsTruncated.Should().BeFalse("the tail copy cannot be followed, but the home pages can");
+        r.IsStale.Should().BeFalse();
+        r.TargetVcn.Should().Be(42);
+    }
+
+    [Fact]
+    public void A_hostile_log_page_data_offset_is_ignored()
+    {
+        var log = new LogBuilder();
+        var lsn = log.Add(1, 0x02, 0x03, FileRecord(7, "a.txt", 5), 0, 0);
+
+        // 0xFD0 leaves 48 bytes of payload per page: one megabyte of claimed client data
+        // would then need ~21,000 continuation pages.
+        using var ms = new MemoryStream(log.Build(dataOffsetField: 0xFD0));
+        NtfsLogFile.Parse(ms).ToList().Should().ContainSingle().Which.Lsn.Should().Be(lsn);
+    }
+
+    [Fact(Timeout = 120_000)]
+    public Task Spanning_records_that_can_never_be_completed_do_not_make_the_parse_quadratic() => Task.Run(() =>
+    {
+        // Every record page claims a 1 MiB record (260 pages of continuation), and every 250th
+        // page is not a record page, so no continuation can ever finish. Without a budget each
+        // page re-reads everything up to the next bad page: ~125 page reads per page.
+        const int pages = 3000;
+        var bytes = new byte[(HomePage0 + pages) * PageSize];
+        LogBuilder.WriteRestart(bytes.AsSpan(0, PageSize), DataOffset);
+        bytes.AsSpan(0, PageSize).CopyTo(bytes.AsSpan(PageSize));
+        var recordPages = 0;
+        for (int i = 0; i < pages; i++)
+        {
+            if (i % 250 == 249)
+            {
+                continue;
+            }
+            var page = bytes.AsSpan((HomePage0 + i) * PageSize, PageSize);
+            "RCRD"u8.CopyTo(page);
+            BinaryPrimitives.WriteUInt16LittleEndian(page[0x18..], PageSize);
+            var h = page[DataOffset..];
+            BinaryPrimitives.WriteInt64LittleEndian(h, LogBuilder.LsnFor((HomePage0 + i) * (long)PageSize + DataOffset));
+            BinaryPrimitives.WriteUInt32LittleEndian(h[0x18..], 1 << 20);
+            BinaryPrimitives.WriteUInt32LittleEndian(h[0x20..], 1);
+            LogBuilder.Fixup(page, 0x28);
+            recordPages++;
+        }
+
+        using var counting = new CountingStream(bytes);
+        var records = NtfsLogFile.Parse(counting).ToList();
+
+        records.Should().HaveCount(recordPages, "every page's record is still reported");
+        records.Should().OnlyContain(r => r.IsTruncated);
+        counting.BytesRead.Should().BeLessThan(5L * bytes.Length,
+            "continuation reads are budgeted, so total I/O stays linear in the size of the log");
+    });
 
     [Fact]
     public void Torn_page_fixups_are_not_applied_and_garbage_does_not_throw()
@@ -164,10 +295,14 @@ public sealed class NtfsLogFileTests
             return p;
         }
 
-        private long CurrentFileOffset => (2 + _pages.Count) * (long)PageSize + _pos;
-        private static long LsnFor(long fileOffset) => (fileOffset / 8) | (1L << SeqBits);
+        // Records live at their home position in the circular area, which starts after the
+        // two restart pages and the two tail-copy pages.
+        private long CurrentFileOffset => (HomePage0 + _pages.Count) * (long)PageSize + _pos;
 
-        public long Add(uint txn, ushort redoOp, ushort undoOp, byte[] redo, long targetVcn, ushort clusterBlock, byte[]? undo = null)
+        /// <summary>An LSN is a sequence number above the record's file offset in 8-byte units.</summary>
+        internal static long LsnFor(long fileOffset) => (fileOffset / 8) | (7L << (64 - SeqBits));
+
+        public long Add(uint txn, ushort redoOp, ushort undoOp, byte[] redo, long targetVcn, ushort clusterBlock, byte[]? undo = null, long? lsnOverride = null)
         {
             undo ??= [];
             var body = new byte[0x20 + Pad8(redo.Length) + Pad8(undo.Length)];
@@ -186,7 +321,7 @@ public sealed class NtfsLogFileTests
             {
                 Flush();
             }
-            var lsn = LsnFor(CurrentFileOffset);
+            var lsn = lsnOverride ?? LsnFor(CurrentFileOffset);
             var header = new byte[0x30];
             BinaryPrimitives.WriteInt64LittleEndian(header, lsn);
             BinaryPrimitives.WriteInt64LittleEndian(header.AsSpan(8), _prevLsn);
@@ -224,7 +359,7 @@ public sealed class NtfsLogFileTests
             _pos = DataOffset;
         }
 
-        public byte[] Build(string? staleName = null)
+        public byte[] Build(string? staleName = null, ushort dataOffsetField = DataOffset)
         {
             if (staleName is not null)
             {
@@ -244,7 +379,8 @@ public sealed class NtfsLogFileTests
                 BinaryPrimitives.WriteUInt16LittleEndian(body.AsSpan(6), (ushort)entry.Length);
                 entry.CopyTo(body, 0x20);
                 var header = new byte[0x30];
-                BinaryPrimitives.WriteInt64LittleEndian(header, LsnFor(1_000_000));   // wrong offset: an old cycle
+                // An earlier cycle wrote this at the same offset under a lower sequence number.
+                BinaryPrimitives.WriteInt64LittleEndian(header, (CurrentFileOffset / 8) | (3L << (64 - SeqBits)));
                 BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x18), (uint)body.Length);
                 BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x20), 1);
                 BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x24), 0x0A);
@@ -254,43 +390,78 @@ public sealed class NtfsLogFileTests
             _pages.Add(_page);
 
             var restart = new byte[PageSize];
-            "RSTR"u8.CopyTo(restart);
-            BinaryPrimitives.WriteUInt16LittleEndian(restart.AsSpan(4), 0x1E);
-            BinaryPrimitives.WriteUInt16LittleEndian(restart.AsSpan(6), 9);
-            BinaryPrimitives.WriteUInt32LittleEndian(restart.AsSpan(0x10), PageSize);
-            BinaryPrimitives.WriteUInt32LittleEndian(restart.AsSpan(0x14), PageSize);
-            BinaryPrimitives.WriteUInt16LittleEndian(restart.AsSpan(0x18), 0x30);
-            BinaryPrimitives.WriteUInt32LittleEndian(restart.AsSpan(0x30 + 0x0C), SeqBits);
-            BinaryPrimitives.WriteUInt16LittleEndian(restart.AsSpan(0x30 + 0x1A), DataOffset);
-            Fixup(restart, 0x1E);
+            WriteRestart(restart, dataOffsetField);
 
-            var all = new List<byte[]> { restart, (byte[])restart.Clone() };
             foreach (var p in _pages)
             {
                 Fixup(p, 0x28);
-                all.Add(p);
             }
-            // Pages 2 and 3 in a real log are buffer copies of the newest pages; mimic that
-            // by inserting duplicates of the first two record pages ahead of the run.
-            all.Insert(2, (byte[])all[2].Clone());
-            if (_pages.Count > 1) all.Insert(3, (byte[])all[4].Clone());
+
+            // Pages 2 and 3 are the tail copies: mirrors of the most recently written record
+            // pages. With a single record page the second slot has never been used.
+            var tail0 = (byte[])_pages[Math.Max(0, _pages.Count - 2)].Clone();
+            var tail1 = _pages.Count > 1 ? (byte[])_pages[^1].Clone() : new byte[PageSize];
+
+            var all = new List<byte[]> { restart, (byte[])restart.Clone(), tail0, tail1 };
+            all.AddRange(_pages);
 
             var result = new byte[all.Count * PageSize];
             for (int i = 0; i < all.Count; i++) all[i].CopyTo(result, i * PageSize);
             return result;
         }
 
-        private static void Fixup(byte[] page, int usaOfs)
+        /// <summary>
+        /// A restart page laid out as NTFS writes it. Restart area at 0x30:
+        /// +0x10 seq_number_bits, +0x18 file_size, +0x24 log_record_header_length,
+        /// +0x26 log_page_data_offset.
+        /// </summary>
+        internal static void WriteRestart(Span<byte> restart, ushort dataOffsetField)
         {
-            BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(usaOfs), Usn);
+            "RSTR"u8.CopyTo(restart);
+            BinaryPrimitives.WriteUInt32LittleEndian(restart[0x10..], PageSize);      // system_page_size
+            BinaryPrimitives.WriteUInt32LittleEndian(restart[0x14..], PageSize);      // log_page_size
+            BinaryPrimitives.WriteUInt16LittleEndian(restart[0x18..], 0x30);          // restart_area_offset
+            var ra = restart[0x30..];
+            BinaryPrimitives.WriteInt64LittleEndian(ra, LsnFor(HomePage0 * (long)PageSize + DataOffset));   // current_lsn
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x08..], 1);                  // log_clients
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x0A..], 0xFFFF);             // client_free_list
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x0C..], 0);                  // client_in_use_list
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x0E..], 2);                  // flags: volume clean
+            BinaryPrimitives.WriteUInt32LittleEndian(ra[0x10..], SeqBits);            // seq_number_bits
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x14..], 0x30);               // restart_area_length
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x16..], 0x30);               // client_array_offset
+            BinaryPrimitives.WriteInt64LittleEndian(ra[0x18..], FileSizeField);       // file_size
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x24..], 0x30);               // log_record_header_length
+            BinaryPrimitives.WriteUInt16LittleEndian(ra[0x26..], dataOffsetField);    // log_page_data_offset
+            Fixup(restart, 0x1E);
+        }
+
+        internal static void Fixup(Span<byte> page, int usaOfs)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(page[4..], (ushort)usaOfs);
+            BinaryPrimitives.WriteUInt16LittleEndian(page[6..], 9);
+            BinaryPrimitives.WriteUInt16LittleEndian(page[usaOfs..], Usn);
             for (int i = 1; i <= 8; i++)
             {
                 var end = i * 512 - 2;
-                page.AsSpan(end, 2).CopyTo(page.AsSpan(usaOfs + i * 2));
-                BinaryPrimitives.WriteUInt16LittleEndian(page.AsSpan(end), Usn);
+                page.Slice(end, 2).CopyTo(page[(usaOfs + i * 2)..]);
+                BinaryPrimitives.WriteUInt16LittleEndian(page[end..], Usn);
             }
         }
 
         private static int Pad8(int n) => (n + 7) & ~7;
+    }
+
+    /// <summary>Counts the bytes actually read, to pin down how much I/O a parse performs.</summary>
+    private sealed class CountingStream(byte[] data) : MemoryStream(data, writable: false)
+    {
+        public long BytesRead { get; private set; }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var n = base.Read(buffer, offset, count);
+            BytesRead += n;
+            return n;
+        }
     }
 }

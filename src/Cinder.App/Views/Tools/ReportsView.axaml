@@ -1,36 +1,29 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:vm="using:Cinder.App.ViewModels"
              xmlns:rep="using:Cinder.Reports"
              x:Class="Cinder.App.Views.Tools.ReportsView"
              x:DataType="vm:ReportsToolViewModel">
-    <Grid ColumnDefinitions="320,4,*" Margin="0">
+    <!-- Left: what the report is and what goes in it. Right: write a section, see the result. -->
+    <Grid ColumnDefinitions="330,4,*">
 
-        <!-- Left column: template + sections + export -->
-        <Border Grid.Column="0" Background="{DynamicResource CinderBackground1Brush}">
-            <DockPanel Margin="14">
-                <TextBlock DockPanel.Dock="Top" Text="REPORT"
-                           FontWeight="600"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
-                           Margin="0,0,0,10" />
+        <Border Grid.Column="0" Background="{DynamicResource CinderSurface1Brush}">
+            <DockPanel Margin="16,14">
                 <StackPanel DockPanel.Dock="Top" Spacing="10">
+                    <TextBlock Text="REPORT" Classes="section" />
                     <StackPanel Spacing="4">
-                        <TextBlock Text="Title" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBlock Text="Title" Classes="label" FontSize="11.5" />
                         <TextBox Text="{Binding Title, Mode=TwoWay}" />
                     </StackPanel>
                     <StackPanel Spacing="4">
-                        <TextBlock Text="Examiner" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBlock Text="Examiner" Classes="label" FontSize="11.5" />
                         <TextBox Text="{Binding Examiner, Mode=TwoWay}" />
                     </StackPanel>
                     <StackPanel Spacing="4">
-                        <TextBlock Text="Template" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <ComboBox ItemsSource="{Binding Templates}"
-                                  SelectedItem="{Binding SelectedTemplate}"
-                                  HorizontalAlignment="Stretch">
+                        <TextBlock Text="Template" Classes="label" FontSize="11.5" />
+                        <ComboBox ItemsSource="{Binding Templates}" SelectedItem="{Binding SelectedTemplate}" HorizontalAlignment="Stretch"
+                                  ToolTip.Tip="A template is a starting set of sections. Choosing another one replaces the sections below.">
                             <ComboBox.ItemTemplate>
                                 <DataTemplate DataType="rep:ReportTemplate">
                                     <TextBlock Text="{Binding Name}" />
@@ -40,98 +33,64 @@
                     </StackPanel>
                 </StackPanel>
 
-                <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,*" Margin="0,10,0,0">
-                    <Button Grid.Column="0" Margin="0,0,4,0"
-                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                            Content="Add section" Command="{Binding AddSectionCommand}" />
-                    <Button Grid.Column="1" Margin="4,0,0,0"
-                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                            Content="Refresh"  Command="{Binding RefreshCommand}" />
+                <!-- Export, pinned to the bottom: the last thing you do. -->
+                <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+                    <Border Height="1" Background="{DynamicResource CinderBorderBrush}" />
+                    <TextBlock Text="EXHIBITS FROM BOOKMARKS" Classes="section" Margin="0,4,0,0" />
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Button Classes="tb" Height="28" Content="Load bookmarks" Command="{Binding LoadBookmarksCommand}"
+                                ToolTip.Tip="Reads the open case's bookmarks so they can be included as numbered exhibits" />
+                        <CheckBox Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"
+                                  IsChecked="{Binding IncludeBookmarks}" Content="Include in the report" />
+                    </Grid>
+                    <TextBlock Text="{Binding BookmarkSummary}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    <c:ExportButton Classes="accent" Height="30" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                    ExportCommand="{Binding ExportCommand}" Formats="pdf,docx,html,md,json" />
+                    <TextBlock Text="{Binding StatusLine}" Classes="muted" FontSize="12" TextWrapping="Wrap"
+                               IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,16,0,6">
+                    <TextBlock Text="SECTIONS" Classes="section" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Classes="ghost" Height="22" Padding="8,0" FontSize="11.5" Command="{Binding AddSectionCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <c:CinderIcon Data="{x:Static c:Icons.Plus}" Width="12" Height="12" />
+                            <TextBlock Text="Add" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </Grid>
-
-                <Border DockPanel.Dock="Bottom" Background="{DynamicResource CinderBackground2Brush}"
-                        CornerRadius="4" Padding="10" Margin="0,10,0,8">
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="EXPORT" FontWeight="600"
-                                   FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <!-- Bookmarks → exhibits. Loaded from the open case on demand so the
-                             report reflects findings flagged after the tool was opened. -->
-                        <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
-                            <Button Grid.Column="0" Content="Load bookmarks" Command="{Binding LoadBookmarksCommand}" Margin="2" />
-                            <CheckBox Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
-                                      IsChecked="{Binding IncludeBookmarks}" Content="as exhibits" />
-                        </Grid>
-                        <TextBlock Text="{Binding BookmarkSummary}" TextWrapping="Wrap"
-                                   FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" Margin="2,0,2,6" />
-                        <UniformGrid Rows="2" Columns="3">
-                            <Button Content="Markdown" Command="{Binding ExportCommand}" CommandParameter="md"   Margin="2" />
-                            <Button Content="HTML"     Command="{Binding ExportCommand}" CommandParameter="html" Margin="2" />
-                            <Button Content="PDF"      Command="{Binding ExportCommand}" CommandParameter="pdf"  Margin="2" />
-                            <Button Content="DOCX"     Command="{Binding ExportCommand}" CommandParameter="docx" Margin="2" />
-                            <Button Content="JSON"     Command="{Binding ExportCommand}" CommandParameter="json" Margin="2" />
-                            <Border />
-                        </UniformGrid>
-                        <TextBlock Text="{Binding StatusLine}"
-                                   FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                                   IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                    </StackPanel>
-                </Border>
-
-                <ListBox ItemsSource="{Binding Sections}"
-                         SelectedItem="{Binding SelectedSection}">
+                <ListBox ItemsSource="{Binding Sections}" SelectedItem="{Binding SelectedSection}" Background="Transparent">
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="vm:DraftSection">
-                            <TextBlock Text="{Binding Title}" />
+                            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
             </DockPanel>
         </Border>
 
-        <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+        <GridSplitter Grid.Column="1" />
 
-        <!-- Right column: section editor + preview -->
         <Grid Grid.Column="2" RowDefinitions="*,4,*">
-            <Border Grid.Row="0" Background="{DynamicResource CinderBackground0Brush}" Padding="14">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="SECTION"
-                               FontWeight="600"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundDisabledBrush}"
-                               Margin="0,0,0,8" />
-                    <TextBox DockPanel.Dock="Top"
-                             Text="{Binding SelectedSection.Title, Mode=TwoWay, FallbackValue=''}"
-                             FontWeight="600"
-                             FontSize="{DynamicResource CinderFontSizeMd}"
-                             Margin="0,0,0,8" />
-                    <TextBox Text="{Binding SelectedSection.Body, Mode=TwoWay, FallbackValue=''}"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalContentAlignment="Top"
-                             FontFamily="{DynamicResource CinderFontFamilyMono}"
-                             FontSize="{DynamicResource CinderFontSizeSm}" />
-                </DockPanel>
-            </Border>
-            <GridSplitter Grid.Row="1" Background="{DynamicResource CinderBorderBrush}" />
-            <Border Grid.Row="2" Background="{DynamicResource CinderBackground1Brush}" Padding="14">
-                <DockPanel>
+            <DockPanel Grid.Row="0" Margin="16,14">
+                <TextBlock DockPanel.Dock="Top" Text="SECTION" Classes="section" Margin="0,0,0,8" />
+                <TextBox DockPanel.Dock="Top" Text="{Binding SelectedSection.Title, Mode=TwoWay, FallbackValue=''}"
+                         FontWeight="600" FontSize="14" Margin="0,0,0,8" Watermark="Section heading" />
+                <TextBox Text="{Binding SelectedSection.Body, Mode=TwoWay, FallbackValue=''}"
+                         AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top"
+                         FontFamily="{DynamicResource CinderFontFamilyMono}" FontSize="12.5"
+                         Watermark="Write this section here. Plain text works; Markdown is supported if you want it (# heading, **bold**, - list item)." />
+            </DockPanel>
+            <GridSplitter Grid.Row="1" />
+            <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}">
+                <DockPanel Margin="16,12">
                     <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
-                        <TextBlock Grid.Column="0" Text="MARKDOWN PREVIEW"
-                                   FontWeight="600"
-                                   FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                        <Button Grid.Column="1" Content="Refresh" Command="{Binding RefreshCommand}"
-                                FontSize="{DynamicResource CinderFontSizeXs}" Padding="8,3" />
+                        <TextBlock Text="PREVIEW (AS MARKDOWN)" Classes="section" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="ghost" Height="22" Padding="8,0" FontSize="11.5" Content="Update preview"
+                                Command="{Binding RefreshCommand}" />
                     </Grid>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <SelectableTextBlock Text="{Binding PreviewMarkdown}"
-                                             FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                             FontSize="{DynamicResource CinderFontSizeXs}"
-                                             Foreground="{DynamicResource CinderForegroundBrush}"
-                                             TextWrapping="Wrap" />
+                        <SelectableTextBlock Text="{Binding PreviewMarkdown}" Classes="mono" FontSize="12" TextWrapping="Wrap" LineHeight="18" />
                     </ScrollViewer>
                 </DockPanel>
             </Border>

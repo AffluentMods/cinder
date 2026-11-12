@@ -86,14 +86,164 @@ public sealed class CustodySignerTests : IDisposable
     }
 
     [Fact]
-    public async Task Verification_needs_only_the_case_file_not_the_key()
+    public async Task A_valid_signature_from_a_key_the_verifier_does_not_know_is_not_verified()
+    {
+        // This test used to be "Verification_needs_only_the_case_file_not_the_key" and asserted
+        // Ok for a verifier that had never seen the signing key. That is the defect: the key
+        // travels in the case file beside the signature, so "verifies under its own key" is
+        // true of anything anyone signs. The signature is still checkable from the case file
+        // alone; whether to believe it needs the key to be known from somewhere else.
+        var (store, _, caseId) = await NewCaseAsync();
+        var a = await new CustodySigner(store, KeyPath()).SignTipAsync(caseId, "alice");
+
+        var verifier = new CustodySigner(store, KeyPath("someone-elses-key.p8"));
+        var r = (await verifier.VerifyAsync(caseId)).Single();
+
+        r.SignatureValid.Should().BeTrue("the cryptographic check needs nothing but the case file");
+        r.ChainMatches.Should().BeTrue();
+        r.KeyTrusted.Should().BeFalse();
+        r.SignedByUnknownKey.Should().BeTrue();
+        r.Ok.Should().BeFalse();
+        r.Reason.Should().Contain("does not trust").And.Contain(a.KeyFingerprint);
+        File.Exists(KeyPath("someone-elses-key.p8")).Should().BeFalse("verifying must never create a key");
+    }
+
+    [Fact]
+    public async Task An_attestation_verifies_for_another_examiner_once_its_key_is_trusted()
     {
         var (store, _, caseId) = await NewCaseAsync();
-        await new CustodySigner(store, KeyPath()).SignTipAsync(caseId, "alice");
+        var a = await new CustodySigner(store, KeyPath()).SignTipAsync(caseId, "alice");
+        var verifier = new CustodySigner(store, Path.Combine(_dir, "bob", "key.p8"));
 
-        // A second signer with no access to the original key (fresh path) can still verify.
-        var verifier = new CustodySigner(store, KeyPath("someone-elses-key.p8"));
-        (await verifier.VerifyAsync(caseId)).Single().Ok.Should().BeTrue();
+        // Supplied explicitly: as the public key, or as the fingerprint Cinder displays.
+        var bySpki = (await verifier.VerifyAsync(caseId, [a.PublicKeySpkiBase64])).Single();
+        bySpki.Ok.Should().BeTrue();
+        bySpki.KeyTrustSource.Should().Be("supplied by caller");
+        (await verifier.VerifyAsync(caseId, [a.KeyFingerprint])).Single().Ok.Should().BeTrue();
+        (await verifier.VerifyAsync(caseId, ["SHA256:" + new string('0', 32)])).Single().Ok.Should().BeFalse();
+
+        // Or installed: the signer's .pub dropped into the verifier's trusted-keys directory.
+        (await verifier.VerifyAsync(caseId)).Single().Ok.Should().BeFalse();
+        Directory.CreateDirectory(verifier.TrustedKeysDirectory);
+        File.Copy(KeyPath() + ".pub", Path.Combine(verifier.TrustedKeysDirectory, "alice.pub"));
+        var installed = (await verifier.VerifyAsync(caseId)).Single();
+        installed.Ok.Should().BeTrue();
+        installed.KeyTrustSource.Should().Be("trusted-keys/alice.pub");
+
+        // A file that is not a public key grants nothing.
+        File.WriteAllText(Path.Combine(verifier.TrustedKeysDirectory, "junk.pub"), "not a key");
+        verifier.GetTrustedKeys().Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task A_rewritten_log_re_attested_with_a_fresh_key_is_reported_as_an_unknown_signer()
+    {
+        // The full attack: rewrite an entry, recompute the chain, throw away the real
+        // attestation and sign the new tip with a key made for the purpose. Every hash and
+        // every signature in the file is then internally consistent.
+        var (store, log, caseId) = await NewCaseAsync();
+        var signer = new CustodySigner(store, KeyPath());
+        await signer.SignTipAsync(caseId, "alice");
+
+        await RewriteEntryAndRechainAsync(store, log, caseId, sequence: 2, newDetails: "{\"tool\":\"nothing-to-see\"}");
+        await using (var conn = store.Open())
+        {
+            await conn.ExecuteAsync("DELETE FROM custody_attestations");
+        }
+        var forged = await new CustodySigner(store, KeyPath("attacker.p8")).SignTipAsync(caseId, "alice");
+        CustodySigner.VerifySignature(forged).Should().BeTrue("the forgery is cryptographically flawless");
+        (await log.VerifyAsync(caseId)).Ok.Should().BeTrue();
+
+        var r = (await signer.VerifyAsync(caseId)).Single();
+
+        r.SignatureValid.Should().BeTrue();
+        r.ChainMatches.Should().BeTrue();
+        r.KeyTrusted.Should().BeFalse("it was not signed by this examiner key or any key trusted here");
+        r.Ok.Should().BeFalse();
+        r.Reason.Should().Contain("does not trust");
+    }
+
+    [Fact]
+    public async Task The_examiner_name_is_covered_by_the_signature()
+    {
+        var (store, _, caseId) = await NewCaseAsync();
+        var signer = new CustodySigner(store, KeyPath());
+        var a = await signer.SignTipAsync(caseId, "alice");
+        a.PayloadVersion.Should().Be(2);
+        (await signer.VerifyAsync(caseId)).Single().ExaminerBound.Should().BeTrue();
+
+        await using (var conn = store.Open())
+        {
+            await conn.ExecuteAsync("UPDATE custody_attestations SET examiner = @E WHERE id = @Id", new { E = "mallory", a.Id });
+        }
+
+        var r = (await signer.VerifyAsync(caseId)).Single();
+        r.SignatureValid.Should().BeFalse("attributing the signature to someone else must break it");
+        r.Ok.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task An_attestation_made_before_the_examiner_was_signed_still_verifies_and_says_so()
+    {
+        var (store, log, caseId) = await NewCaseAsync();
+        var signer = new CustodySigner(store, KeyPath());
+        var tip = (await log.ListAsync(caseId))[^1];
+        var signedUtc = DateTimeOffset.UtcNow;
+
+        // Exactly what the previous version stored: a signature over case|sequence|hash|time.
+        using (var key = signer.LoadOrCreateKey())
+        {
+            var signature = key.SignData(CustodySigner.Payload(caseId, tip.Sequence, tip.EntryHash, signedUtc),
+                System.Security.Cryptography.HashAlgorithmName.SHA256);
+            await using var conn = store.Open();
+            await conn.ExecuteAsync(
+                """
+                INSERT INTO custody_attestations (case_id, sequence, entry_hash, signed_utc, examiner, public_key_spki, signature)
+                VALUES (@C, @S, @H, @T, @E, @K, @Sig)
+                """,
+                new
+                {
+                    C = caseId.ToString("D"),
+                    S = tip.Sequence,
+                    H = tip.EntryHash,
+                    T = signedUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    E = "alice",
+                    K = Convert.ToBase64String(key.ExportSubjectPublicKeyInfo()),
+                    Sig = Convert.ToBase64String(signature),
+                });
+        }
+
+        var r = (await signer.VerifyAsync(caseId)).Single();
+        r.Ok.Should().BeTrue("existing attestations must keep verifying");
+        r.Attestation.PayloadVersion.Should().Be(1);
+        r.ExaminerBound.Should().BeFalse("the old payload never covered the examiner name");
+
+        using var doc = System.Text.Json.JsonDocument.Parse(CustodySigner.ExportAttestation(r.Attestation));
+        doc.RootElement.GetProperty("payload_version").GetInt32().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A_malformed_attestation_row_fails_verification_instead_of_throwing()
+    {
+        var (store, log, caseId) = await NewCaseAsync();
+        var signer = new CustodySigner(store, KeyPath());
+        var first = await signer.SignTipAsync(caseId, "alice");
+        await log.AppendAsync(caseId, "alice", CustodyAction.Annotation, "{}");
+        var second = await signer.SignTipAsync(caseId, "alice");
+
+        await using (var conn = store.Open())
+        {
+            await conn.ExecuteAsync(
+                "UPDATE custody_attestations SET public_key_spki = @K, signed_utc = @T, tsa_token = @Tok, tsa_time = @T WHERE id = @Id",
+                new { K = "not base64!", T = "yesterday", Tok = new byte[] { 0 }, first.Id });
+        }
+
+        var results = await signer.VerifyAsync(caseId);
+
+        results.Should().HaveCount(2);
+        results.Single(r => r.Attestation.Id == first.Id).Ok.Should().BeFalse();
+        results.Single(r => r.Attestation.Id == first.Id).SignatureValid.Should().BeFalse();
+        results.Single(r => r.Attestation.Id == second.Id).Ok.Should().BeTrue("one bad row must not stop the others being checked");
     }
 
     [Fact]
@@ -108,6 +258,8 @@ public sealed class CustodySignerTests : IDisposable
         doc.RootElement.GetProperty("entry_hash").GetString().Should().Be(a.EntryHash);
         doc.RootElement.GetProperty("public_key_spki").GetString().Should().Be(a.PublicKeySpkiBase64);
         doc.RootElement.GetProperty("signature").GetString().Should().Be(a.SignatureBase64);
+        doc.RootElement.GetProperty("payload_version").GetInt32().Should().Be(2);
+        doc.RootElement.GetProperty("signed_payload").GetString().Should().Contain("examiner");
     }
 
     [Fact]

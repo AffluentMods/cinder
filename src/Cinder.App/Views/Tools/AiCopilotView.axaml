@@ -1,97 +1,96 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:vm="using:Cinder.App.ViewModels"
              x:Class="Cinder.App.Views.Tools.AiCopilotView"
              x:DataType="vm:AiCopilotToolViewModel">
-    <Grid ColumnDefinitions="320,4,*">
-        <!-- Provider config -->
-        <Border Grid.Column="0" Background="{DynamicResource CinderBackground1Brush}">
-            <DockPanel Margin="14">
-                <TextBlock DockPanel.Dock="Top" Text="PROVIDER"
-                           FontWeight="600" FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
-                           Margin="0,0,0,10" />
-                <StackPanel DockPanel.Dock="Top" Spacing="10">
-                    <ComboBox ItemsSource="{Binding ProviderOptions}"
-                              SelectedItem="{Binding ProviderId}"
-                              HorizontalAlignment="Stretch" />
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="Endpoint" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <TextBox Text="{Binding Endpoint}" Watermark="http://localhost:11434" />
+    <!-- Which model to talk to on the left; the conversation on the right. -->
+    <Grid ColumnDefinitions="330,4,*">
+
+        <Border Grid.Column="0" Background="{DynamicResource CinderSurface1Brush}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+                <StackPanel Margin="16,14" Spacing="12">
+                    <TextBlock Text="MODEL" Classes="section" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Where the model runs" Classes="label" FontSize="11.5" />
+                        <ComboBox ItemsSource="{Binding ProviderOptions}" SelectedItem="{Binding ProviderId}" HorizontalAlignment="Stretch" />
                     </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="Model" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <TextBox Text="{Binding Model}" Watermark="llama3" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Address" Classes="label" FontSize="11.5" />
+                        <TextBox Text="{Binding Endpoint}" Watermark="http://localhost:11434"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
                     </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="API key (cloud only)" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <TextBox Text="{Binding ApiKey}" PasswordChar="•" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Model name" Classes="label" FontSize="11.5" />
+                        <TextBox Text="{Binding Model}" Watermark="llama3" FontFamily="{DynamicResource CinderFontFamilyMono}" />
                     </StackPanel>
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="System prompt" FontSize="{DynamicResource CinderFontSizeXs}"
-                                   Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                        <TextBox Text="{Binding SystemPrompt}"
-                                 AcceptsReturn="True" TextWrapping="Wrap" Height="80"
-                                 FontSize="{DynamicResource CinderFontSizeXs}" />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="API key (only for a hosted service)" Classes="label" FontSize="11.5" />
+                        <TextBox Text="{Binding ApiKey}" PasswordChar="•" Watermark="Leave empty for a local model" />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Standing instructions to the model" Classes="label" FontSize="11.5" />
+                        <TextBox Text="{Binding SystemPrompt}" AcceptsReturn="True" TextWrapping="Wrap" Height="96" FontSize="12" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Button Classes="accent" Content="Test connection"
-                                Command="{Binding TestCommand}"
-                                ToolTip.Tip="Pings the configured endpoint so you know it works before sending a real prompt." />
-                        <Button Content="Clear chat" Command="{Binding ClearCommand}" />
+                        <Button Classes="tb" Height="28" Content="Test connection" Command="{Binding TestCommand}"
+                                ToolTip.Tip="Checks that the address answers before you send anything real" />
+                        <Button Classes="tb" Height="28" Content="Clear conversation" Command="{Binding ClearCommand}" />
                     </StackPanel>
-                    <TextBlock Text="{Binding StatusLine}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
+                    <TextBlock Text="{Binding StatusLine}" Classes="muted" FontSize="12" TextWrapping="Wrap"
                                IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                    <Border Background="{DynamicResource CinderWarnSoftBrush}" BorderBrush="{DynamicResource CinderWarnBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,4,0,0">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
+                                          Foreground="{DynamicResource CinderWarnBrush}" />
+                            <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="12" LineHeight="17"
+                                       Text="With a model on this computer (Ollama, LM Studio) nothing leaves it. With a hosted service, everything you type or paste here is sent to that company. Do not paste case material into a hosted model unless the case allows it." />
+                        </Grid>
+                    </Border>
                 </StackPanel>
-            </DockPanel>
+            </ScrollViewer>
         </Border>
 
-        <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+        <GridSplitter Grid.Column="1" />
 
-        <!-- Chat -->
         <Grid Grid.Column="2" RowDefinitions="*,Auto">
-            <ScrollViewer Grid.Row="0" Padding="18" VerticalScrollBarVisibility="Auto">
-                <ItemsControl ItemsSource="{Binding Messages}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="vm:ChatMessageVm">
-                            <Border Padding="10" Margin="0,0,0,10" CornerRadius="6"
-                                    Background="{DynamicResource CinderBackground1Brush}">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Role}"
-                                               FontWeight="600"
-                                               FontSize="{DynamicResource CinderFontSizeXs}"
-                                               Foreground="{DynamicResource CinderAccentBrush}"
-                                               Margin="0,0,0,4" />
-                                    <SelectableTextBlock Text="{Binding Content}"
-                                                         TextWrapping="Wrap"
-                                                         FontFamily="{DynamicResource CinderFontFamily}"
-                                                         FontSize="{DynamicResource CinderFontSizeSm}"
-                                                         Foreground="{DynamicResource CinderForegroundBrush}" />
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-            <Border Grid.Row="1" Background="{DynamicResource CinderBackground1Brush}"
-                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0"
-                    Padding="14,10">
+            <Panel Grid.Row="0">
+                <ScrollViewer Padding="18,14" VerticalScrollBarVisibility="Auto" IsVisible="{Binding Messages.Count}">
+                    <ItemsControl ItemsSource="{Binding Messages}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ChatMessageVm">
+                                <Border Padding="14,10" Margin="0,0,0,10" CornerRadius="8" MaxWidth="860" HorizontalAlignment="Left"
+                                        Background="{DynamicResource CinderSurface2Brush}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding Role}" Classes="section" />
+                                        <SelectableTextBlock Text="{Binding Content}" TextWrapping="Wrap" FontSize="13" LineHeight="19" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <c:EmptyState Icon="{x:Static c:Icons.Spark}" Title="Ask about text you paste in" IsVisible="{Binding !Messages.Count}"
+                              Message="The assistant sees only what you type or paste below. It cannot open the case or read the evidence itself. Use it to explain an unfamiliar log line, summarise a long extract or suggest where to look next, and check anything it says against the evidence before relying on it." />
+            </Panel>
+            <Border Grid.Row="1" Padding="14,10,12,10" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0">
                 <Grid ColumnDefinitions="*,Auto">
-                    <TextBox Grid.Column="0" Text="{Binding Input, Mode=TwoWay}"
-                             AcceptsReturn="False"
-                             Watermark="Ask the model anything about the case…">
-                        <TextBox.KeyBindings>
-                            <KeyBinding Gesture="Return" Command="{Binding SendCommand}" />
-                        </TextBox.KeyBindings>
-                    </TextBox>
-                    <Button Grid.Column="1" Margin="6,0,0,0" Classes="accent" Content="Send"
-                            Command="{Binding SendCommand}"
-                            IsEnabled="{Binding !IsStreaming}" />
+                    <Border Classes="field" Height="34" Padding="10,0,8,0">
+                        <TextBox Classes="bare" FontSize="13" Text="{Binding Input, Mode=TwoWay}" AcceptsReturn="False"
+                                 Watermark="Type a question, or paste text and ask about it">
+                            <TextBox.KeyBindings>
+                                <KeyBinding Gesture="Return" Command="{Binding SendCommand}" />
+                            </TextBox.KeyBindings>
+                        </TextBox>
+                    </Border>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="8,0,0,0">
+                        <Button Classes="tb" Height="34" Padding="14,0" Content="Stop" Command="{Binding SendCancelCommand}"
+                                IsVisible="{Binding IsStreaming}" />
+                        <Button Classes="accent" Height="34" Padding="16,0" Content="Send"
+                                Command="{Binding SendCommand}" IsEnabled="{Binding !IsStreaming}" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>

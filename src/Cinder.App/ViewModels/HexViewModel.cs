@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using Avalonia.Threading;
 using Cinder.Core.Hashing;
 using Cinder.Core.Signatures;
@@ -165,6 +166,7 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(SelectionLength));
         OnPropertyChanged(nameof(SelectionSummary));
         RaiseSelectionPanel();
+        RefreshInspector();
     }
 
     partial void OnSelectionEndChanged(long value)
@@ -173,17 +175,20 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(SelectionLength));
         OnPropertyChanged(nameof(SelectionSummary));
         RaiseSelectionPanel();
+        RefreshInspector();
     }
 
     private void RefreshInspector()
     {
         InspectorRows.Clear();
-        if (Buffer is null || CaretOffset >= Buffer.Length)
+        OnPropertyChanged(nameof(InspectorBasis));
+        var at = InspectorOffset;
+        if (Buffer is null || at < 0 || at >= Buffer.Length)
         {
             return;
         }
         Span<byte> bytes = stackalloc byte[16];
-        var read = Buffer.Read(CaretOffset, bytes);
+        var read = Buffer.Read(at, bytes);
         foreach (var r in Inspector.Decode(bytes[..read], IsLittleEndian, DateTimeOffset.UtcNow))
         {
             InspectorRows.Add(r);
@@ -191,6 +196,16 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
     }
 
     // ============================ Inspector panel ============================
+
+    /// <summary>
+    /// Where the data inspector decodes from. With a multi-byte selection it is the first
+    /// selected byte: dragging across an 8-byte timestamp leaves the caret on its last byte,
+    /// and decoding from there showed a value that starts in the wrong place.
+    /// </summary>
+    public long InspectorOffset => HasSelection && SelectionLength > 1 ? Math.Min(SelectionStart, SelectionEnd) : CaretOffset;
+
+    /// <summary>Says which of the two it is, so the values are never read against the wrong byte.</summary>
+    public string InspectorBasis => HasSelection && SelectionLength > 1 ? "from selection" : "from caret";
 
     [ObservableProperty]
     private bool _isLittleEndian = true;
@@ -415,6 +430,21 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
     private int _findIndex = -1;
     private CancellationTokenSource? _findCts;
 
+    /// <summary>Hits kept in <see cref="SearchResults"/> at a time. Past this, results are paged.</summary>
+    internal const int FindPageSize = 1000;
+
+    /// <summary>The search the current page of results came from, so the next page can be fetched.</summary>
+    private HexSearchOptions? _findOptions;
+
+    /// <summary>True when matches may exist after the last hit of the current page.</summary>
+    private bool _moreAfterPage;
+
+    /// <summary>
+    /// How many matches precede the current page: 0 for the first page, -1 when it is not known
+    /// (the page was reached by stepping backwards from the end of the file).
+    /// </summary>
+    private long _hitsBeforePage;
+
     public bool FindIsAscii => FindKind == HexSearchKind.Ascii;
     public bool FindIsUtf16 => FindKind == HexSearchKind.Utf16Le;
     public bool FindIsHex => FindKind == HexSearchKind.Hex;
@@ -441,7 +471,12 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         _ => HexSearchKind.Ascii,
     };
 
-    [RelayCommand]
+    /// <summary>
+    /// Concurrent executions are allowed on purpose: each run cancels the one before it, so
+    /// pressing Enter on a corrected query restarts the search instead of being ignored until
+    /// the first one finishes (and its hits then appearing beside the new query text).
+    /// </summary>
+    [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task RunFindAsync()
     {
         _findCts?.Cancel();
@@ -452,11 +487,21 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             FindStatus = null;
             return;
         }
+        // A pattern that cannot be searched is reported as such. "no matches" is a statement
+        // about the evidence and must never be the answer to a typo.
+        if (ValidateFindQuery(FindKind, FindQuery!) is not null)
+        {
+            FindStatus = "invalid pattern";
+            return;
+        }
         var cts = _findCts = new CancellationTokenSource();
+        var caretAtStart = CaretOffset;
         FindStatus = "searching…";
         try
         {
-            await SearchAsync(new HexSearchOptions(FindKind, FindQuery!, CaseSensitive: false, StartOffset: 0), cts.Token);
+            // Byte patterns are exact. Case-folding a hex search would report 6D 7A for 4D 5A.
+            var caseSensitive = FindKind == HexSearchKind.Hex;
+            await SearchAsync(new HexSearchOptions(FindKind, FindQuery!, caseSensitive, StartOffset: 0), cts.Token);
             if (cts.IsCancellationRequested)
             {
                 return;
@@ -468,36 +513,217 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
             }
             // Land on the first hit at or after the caret, like every editor's Find.
             var i = 0;
-            while (i < SearchResults.Count && SearchResults[i].Offset < CaretOffset)
+            while (i < SearchResults.Count && SearchResults[i].Offset < caretAtStart)
             {
                 i++;
             }
-            ShowHit(i < SearchResults.Count ? i : 0);
+            if (i < SearchResults.Count)
+            {
+                ShowHit(i);
+            }
+            else if (!_moreAfterPage || !await LoadFindPageAsync(forward: true, anchor: caretAtStart, hitsBefore: -1))
+            {
+                // Nothing at or after the caret (even beyond the first page): wrap to the first.
+                ShowHit(0);
+            }
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception ex)
         {
-            FindStatus = ex is ArgumentException or FormatException ? "invalid pattern" : "search failed";
+            if (!cts.IsCancellationRequested)
+            {
+                FindStatus = ex switch
+                {
+                    RegexMatchTimeoutException => "pattern too slow",
+                    ArgumentException ae when ae.Message.Contains("ASCII", StringComparison.OrdinalIgnoreCase) => "not ASCII: use UTF-16",
+                    ArgumentException or FormatException => "invalid pattern",
+                    _ => "search failed",
+                };
+            }
+        }
+    }
+
+    /// <summary>Mirrors the limit in <see cref="HexSearch"/>, past which a hex query is ignored.</summary>
+    private const int MaxHexQueryChars = 1 << 16;
+
+    /// <summary>
+    /// Returns why <paramref name="query"/> cannot be searched as <paramref name="kind"/>, or
+    /// null when it can. Checked before searching because the search itself treats an
+    /// unparseable regex or an odd-length hex string as "matches nothing".
+    /// </summary>
+    internal static string? ValidateFindQuery(HexSearchKind kind, string query)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return "Enter something to search for.";
+        }
+        switch (kind)
+        {
+            case HexSearchKind.Regex:
+                try
+                {
+                    _ = new Regex(query, RegexOptions.None, TimeSpan.FromSeconds(1));
+                    return null;
+                }
+                catch (ArgumentException ex)
+                {
+                    return "Not a valid regular expression: " + ex.Message;
+                }
+
+            case HexSearchKind.Hex:
+                var digits = 0;
+                foreach (var c in query)
+                {
+                    if (char.IsWhiteSpace(c) || c is '-' or ':' or ',')
+                    {
+                        continue;
+                    }
+                    if (!char.IsAsciiHexDigit(c))
+                    {
+                        return $"'{c}' is not a hex digit.";
+                    }
+                    digits++;
+                }
+                return digits == 0 ? "Enter at least one byte, e.g. 4D 5A."
+                    : digits % 2 != 0 ? "A hex pattern needs whole bytes (an even number of digits)."
+                    : query.Length > MaxHexQueryChars ? "That hex pattern is too long."
+                    : null;
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Next match. Within the page it is instant; on the last hit of a full page it fetches the
+    /// following page, and only wraps to the first match once the end of the file is reached.
+    /// (It used to wrap at the 1,000th hit, so later matches could not be reached at all.)
+    /// </summary>
+    [RelayCommand]
+    private async Task FindNextAsync()
+    {
+        if (SearchResults.Count == 0)
+        {
+            return;
+        }
+        if (_findIndex + 1 < SearchResults.Count)
+        {
+            ShowHit(_findIndex + 1);
+            return;
+        }
+        if (_moreAfterPage)
+        {
+            var before = _hitsBeforePage < 0 ? -1 : _hitsBeforePage + SearchResults.Count;
+            if (await LoadFindPageAsync(forward: true, anchor: SearchResults[^1].Offset + 1, hitsBefore: before))
+            {
+                return;
+            }
+        }
+        // The end of the matches: wrap to the first.
+        if (_hitsBeforePage == 0)
+        {
+            ShowHit(0);
+        }
+        else
+        {
+            await LoadFindPageAsync(forward: true, anchor: 0, hitsBefore: 0);
         }
     }
 
     [RelayCommand]
-    private void FindNext()
+    private async Task FindPreviousAsync()
     {
-        if (SearchResults.Count > 0)
+        if (SearchResults.Count == 0)
         {
-            ShowHit((_findIndex + 1) % SearchResults.Count);
+            return;
+        }
+        if (_findIndex < 0)
+        {
+            // With no current hit (results came from the Find dialog) "previous" is the last one.
+            ShowHit(SearchResults.Count - 1);
+            return;
+        }
+        if (_findIndex > 0)
+        {
+            ShowHit(_findIndex - 1);
+            return;
+        }
+        if (_hitsBeforePage != 0
+            && await LoadFindPageAsync(forward: false, anchor: SearchResults[0].Offset, hitsBefore: _hitsBeforePage))
+        {
+            return;
+        }
+        // The first match of all: wrap to the last.
+        if (!_moreAfterPage)
+        {
+            ShowHit(SearchResults.Count - 1);
+        }
+        else
+        {
+            await LoadFindPageAsync(forward: false, anchor: long.MaxValue, hitsBefore: -1);
         }
     }
 
-    [RelayCommand]
-    private void FindPrevious()
+    /// <summary>
+    /// Replaces the current page with the one after (<paramref name="forward"/>) or before the
+    /// anchor offset and lands on its first or last hit. Returns false when there is nothing
+    /// in that direction, leaving the current page as it was.
+    /// </summary>
+    private async Task<bool> LoadFindPageAsync(bool forward, long anchor, long hitsBefore)
     {
-        if (SearchResults.Count > 0)
+        var buffer = Buffer;
+        if (buffer is null || _findOptions is not { } options)
         {
-            ShowHit((_findIndex - 1 + SearchResults.Count) % SearchResults.Count);
+            return false;
+        }
+        _findCts?.Cancel();
+        var cts = _findCts = new CancellationTokenSource();
+        var previousStatus = FindStatus;
+        FindStatus = "searching…";
+        try
+        {
+            var page = await Task.Run(() => forward
+                ? HexSearch.FindNext(buffer, options, anchor, FindPageSize, cts.Token)
+                : HexSearch.FindPrevious(buffer, options, anchor, FindPageSize, cts.Token), cts.Token);
+            if (cts.IsCancellationRequested || !ReferenceEquals(buffer, Buffer))
+            {
+                return false;
+            }
+            if (page.Hits.Count == 0)
+            {
+                FindStatus = previousStatus;
+                return false;
+            }
+            var wrappedToEnd = !forward && anchor == long.MaxValue;
+            SearchResults.Clear();
+            foreach (var h in forward ? page.Hits : page.Hits.Reverse())
+            {
+                SearchResults.Add(h);
+            }
+            if (forward)
+            {
+                _hitsBeforePage = hitsBefore;
+                _moreAfterPage = page.StoppedAtCap;
+            }
+            else
+            {
+                // Going backwards: reaching the start of the file makes the position known again.
+                _hitsBeforePage = page.ReachedEnd ? 0 : hitsBefore > 0 ? Math.Max(0, hitsBefore - page.Hits.Count) : -1;
+                _moreAfterPage = !wrappedToEnd;
+            }
+            ShowHit(forward ? 0 : SearchResults.Count - 1);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception)
+        {
+            FindStatus = "search failed";
+            return false;
         }
     }
 
@@ -508,8 +734,17 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         JumpTo(hit.Offset);
         SelectionStart = hit.Offset;
         SelectionEnd = hit.Offset + Math.Max(1, hit.Length) - 1;
-        var capped = SearchResults.Count >= 1000 ? "1000+" : SearchResults.Count.ToString(CultureInfo.InvariantCulture);
-        FindStatus = $"{index + 1} of {capped}";
+        var inv = CultureInfo.InvariantCulture;
+        if (_hitsBeforePage < 0)
+        {
+            // Reached by stepping back from the end: the count from the start is not known.
+            var fromEnd = SearchResults.Count - 1 - index;
+            FindStatus = _moreAfterPage ? "match" : fromEnd == 0 ? "last match" : $"{fromEnd.ToString("N0", inv)} before last";
+            return;
+        }
+        var position = (_hitsBeforePage + index + 1).ToString("N0", inv);
+        var total = (_hitsBeforePage + SearchResults.Count).ToString("N0", inv) + (_moreAfterPage ? "+" : "");
+        FindStatus = $"{position} of {total}";
     }
 
     [RelayCommand]
@@ -520,6 +755,9 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         FindStatus = null;
         SearchResults.Clear();
         _findIndex = -1;
+        _findOptions = null;
+        _moreAfterPage = false;
+        _hitsBeforePage = 0;
     }
 
     partial void OnSelectedSearchResultChanged(HexSearchHit? value)
@@ -542,17 +780,27 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
     /// <summary>Full path of the open file; identity for de-duplicating tabs.</summary>
     public string? SourcePath { get; private set; }
 
+    /// <summary>
+    /// Opens <paramref name="path"/> in this tab. The new buffer is created before anything
+    /// else is touched, so when the file cannot be opened (in use by another process, access
+    /// denied, a directory) the exception leaves this view-model exactly as it was — still
+    /// showing the previous file, or still empty and reusable.
+    /// </summary>
     public void OpenFile(string path)
     {
-        Buffer?.Dispose();
-        SourcePath = Path.GetFullPath(path);
-        Buffer = new MmapHexBuffer(path);
+        var full = Path.GetFullPath(path);
+        var opened = new MmapHexBuffer(full);
+
+        var previous = Buffer;
+        SourcePath = full;
+        Buffer = opened;          // cancels any hash / find still running against the old buffer
+        previous?.Dispose();
         ScrollOffset = 0;
         CaretOffset = 0;
         QuickHashSha256 = null;
         QuickHashSha256Full = null;
-        AnalyzeHeader(path);
-        if (Buffer.Length <= AutoHashLimit)
+        AnalyzeHeader(full);
+        if (opened.Length <= AutoHashLimit)
         {
             _ = HashWholeFileAsync();
         }
@@ -902,39 +1150,41 @@ public sealed partial class HexViewModel : ViewModelBase, IDisposable
         JumpTo(parsed);
     }
 
-    /// <summary>Run a search across the open buffer and surface the first ~1000 hits.</summary>
+    /// <summary>
+    /// Run a search across the open buffer and surface the first ~1000 hits. Call from the UI
+    /// thread; the scan itself runs on the thread pool.
+    ///
+    /// <para>This only fills <see cref="SearchResults"/>. It deliberately does not move the
+    /// caret or select a hit: the caller decides where to land (the inline find lands on the
+    /// first hit at or after the caret, the Find dialog on the first hit in the file).</para>
+    /// </summary>
     public async Task SearchAsync(HexSearchOptions options, CancellationToken ct = default)
     {
-        if (Buffer is null)
+        var buffer = Buffer;
+        if (buffer is null)
         {
             return;
         }
         SearchResults.Clear();
-        var hits = await Task.Run(() =>
-        {
-            var bag = new List<HexSearchHit>();
-            foreach (var hit in HexSearch.Search(Buffer, options, ct))
-            {
-                bag.Add(hit);
-                if (bag.Count >= 1000)
-                {
-                    break;
-                }
-            }
-            return bag;
-        }, ct);
+        _findIndex = -1;
+        _findOptions = null;
+        _moreAfterPage = false;
+        _hitsBeforePage = 0;
+        var page = await Task.Run(() => HexSearch.FindNext(buffer, options, options.StartOffset, FindPageSize, ct), ct);
 
-        await Dispatcher.UIThread.InvokeAsync(() =>
+        // A search that was cancelled, or whose tab now shows a different file, has nothing to
+        // say about what is on screen. Its hits must not be added to the current list.
+        ct.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(buffer, Buffer))
         {
-            foreach (var h in hits)
-            {
-                SearchResults.Add(h);
-            }
-            if (hits.Count > 0)
-            {
-                SelectedSearchResult = hits[0];
-            }
-        });
+            return;
+        }
+        foreach (var h in page.Hits)
+        {
+            SearchResults.Add(h);
+        }
+        _findOptions = options;
+        _moreAfterPage = page.StoppedAtCap;
     }
 
     public void Dispose()

@@ -41,8 +41,42 @@ public sealed class CaseIndex : IDisposable
         _analyzer = new StandardAnalyzer(Version);
     }
 
+    /// <summary>True when <paramref name="path"/> already holds an index (as opposed to any other folder).</summary>
+    public static bool Exists(string path)
+    {
+        if (!System.IO.Directory.Exists(path))
+        {
+            return false;
+        }
+        using var dir = FSDirectory.Open(path);
+        return DirectoryReader.IndexExists(dir);
+    }
+
+    /// <summary>Documents currently searchable. Zero for a folder that has never been indexed into.</summary>
+    public int DocumentCount
+    {
+        get
+        {
+            lock (_readerLock)
+            {
+                if (_writer is null && !DirectoryReader.IndexExists(_dir))
+                {
+                    return 0;
+                }
+            }
+            EnsureReader();
+            return _reader!.NumDocs;
+        }
+    }
+
     public void OpenForWrite()
     {
+        // Idempotent: a second writer on the same directory fails on the write lock, which
+        // made every "index another folder" after the first one throw.
+        if (_writer is not null)
+        {
+            return;
+        }
         var config = new IndexWriterConfig(Version, _analyzer)
         {
             OpenMode = OpenMode.CREATE_OR_APPEND,
@@ -73,19 +107,38 @@ public sealed class CaseIndex : IDisposable
             d.Add(new Int64Field("timestamp", ms, Field.Store.YES));
             d.Add(new NumericDocValuesField("timestamp", ms));
         }
-        _writer.AddDocument(d);
+        // Update-by-id rather than add: indexing the same source twice must not double its hits.
+        _writer.UpdateDocument(new Term("id", doc.Id), d);
     }
 
     public void Commit() => _writer?.Commit();
 
+    /// <summary>
+    /// Runs a Lucene query across every text field. Throws <see cref="FormatException"/> when
+    /// the query cannot be parsed: returning "no hits" for a typo in the syntax would tell the
+    /// examiner the evidence contains nothing when the search never ran.
+    /// </summary>
     public IReadOnlyList<SearchHit> Search(string query, int max = 100)
     {
+        lock (_readerLock)
+        {
+            if (_writer is null && !DirectoryReader.IndexExists(_dir))
+            {
+                return [];
+            }
+        }
         EnsureReader();
         var parser = new MultiFieldQueryParser(Version,
             new[] { "text", "path", "summary", "tags", "user", "source" }, _analyzer);
         Query q;
-        try { q = parser.Parse(query); }
-        catch (ParseException) { return []; }
+        try
+        {
+            q = parser.Parse(query);
+        }
+        catch (ParseException ex)
+        {
+            throw new FormatException(ex.Message, ex);
+        }
         var top = _searcher!.Search(q, max);
         var hits = new List<SearchHit>(top.ScoreDocs.Length);
         foreach (var sd in top.ScoreDocs)

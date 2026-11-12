@@ -22,28 +22,89 @@ public sealed class Workflow
 
     public static Workflow FromJson(string json) => JsonSerializer.Deserialize<Workflow>(json) ?? new Workflow();
 
-    public IEnumerable<WorkflowNode> TopologicalOrder()
+    /// <summary>
+    /// The nodes in an order where every node comes after everything it depends on.
+    ///
+    /// <para>The graph is validated first, and eagerly — this is not a lazy iterator, so a bad
+    /// definition fails here rather than part-way through a run. A workflow is a repeatable
+    /// acquisition plan: one that quietly leaves steps out is worse than one that refuses to
+    /// start. Kahn's algorithm simply never reaches the nodes of a cycle, which used to mean a
+    /// cyclic workflow "completed" having skipped them.</para>
+    /// </summary>
+    /// <exception cref="WorkflowDefinitionException">
+    /// A node id is empty or duplicated, an edge names a node that does not exist, or the
+    /// edges form a cycle. The message names the offending ids.
+    /// </exception>
+    public IReadOnlyList<WorkflowNode> TopologicalOrder()
     {
-        var indegree = Nodes.ToDictionary(n => n.Id, _ => 0);
-        foreach (var e in Edges)
+        // "Nodes": null in the JSON overwrites the initialiser.
+        if (Nodes is null || Edges is null || Nodes.Any(n => n is null) || Edges.Any(e => e is null))
         {
-            indegree[e.To]++;
+            throw new WorkflowDefinitionException($"Workflow '{Name}' has a null node or edge list, or a null entry in one.");
         }
+
+        var byId = new Dictionary<string, WorkflowNode>(StringComparer.Ordinal);
+        foreach (var node in Nodes)
+        {
+            if (string.IsNullOrEmpty(node.Id))
+            {
+                throw new WorkflowDefinitionException($"Workflow '{Name}' has a node with no id (kind '{node.Kind}').");
+            }
+            if (!byId.TryAdd(node.Id, node))
+            {
+                throw new WorkflowDefinitionException($"Workflow '{Name}' defines node id '{node.Id}' more than once.");
+            }
+        }
+
+        var indegree = byId.Keys.ToDictionary(id => id, _ => 0, StringComparer.Ordinal);
+        var outgoing = byId.Keys.ToDictionary(id => id, _ => new List<string>(), StringComparer.Ordinal);
+        foreach (var edge in Edges)
+        {
+            if (edge.From is null || edge.To is null)
+            {
+                throw new WorkflowDefinitionException($"Workflow '{Name}' has an edge with a null endpoint.");
+            }
+            if (!byId.ContainsKey(edge.From))
+            {
+                throw new WorkflowDefinitionException(
+                    $"Workflow '{Name}' has an edge from unknown node '{edge.From}' (to '{edge.To}').");
+            }
+            if (!byId.ContainsKey(edge.To))
+            {
+                throw new WorkflowDefinitionException(
+                    $"Workflow '{Name}' has an edge to unknown node '{edge.To}' (from '{edge.From}').");
+            }
+            outgoing[edge.From].Add(edge.To);
+            indegree[edge.To]++;
+        }
+
+        var ordered = new List<WorkflowNode>(Nodes.Count);
         var ready = new Queue<WorkflowNode>(Nodes.Where(n => indegree[n.Id] == 0));
         while (ready.Count > 0)
         {
             var node = ready.Dequeue();
-            yield return node;
-            foreach (var edge in Edges.Where(e => e.From == node.Id))
+            ordered.Add(node);
+            foreach (var next in outgoing[node.Id])
             {
-                if (--indegree[edge.To] == 0)
+                if (--indegree[next] == 0)
                 {
-                    ready.Enqueue(Nodes.First(n => n.Id == edge.To));
+                    ready.Enqueue(byId[next]);
                 }
             }
         }
+
+        if (ordered.Count != Nodes.Count)
+        {
+            var stuck = Nodes.Where(n => indegree[n.Id] > 0).Select(n => $"'{n.Id}'");
+            throw new WorkflowDefinitionException(
+                $"Workflow '{Name}' has a dependency cycle; these nodes can never run: {string.Join(", ", stuck)}.");
+        }
+        return ordered;
     }
 }
+
+/// <summary>The workflow definition itself is invalid — nothing was run.</summary>
+public sealed class WorkflowDefinitionException(string message) : InvalidOperationException(message);
 
 public sealed class WorkflowNode
 {

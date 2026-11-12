@@ -1,64 +1,98 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
-             xmlns:srch="using:Cinder.Search"
              x:Class="Cinder.App.Views.Tools.GraphView"
              x:DataType="tools:GraphTool">
-    <Grid RowDefinitions="Auto,Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Ingest email folder…"
-                        Command="{Binding IngestEmailFolderCommand}"
-                        ToolTip.Tip="Walk a folder of .eml / .msg / .mbox files, build the From → To graph automatically." />
-                <Button Content="Clear graph" Command="{Binding ClearGraphCommand}" />
-                <TextBlock Text="{Binding StatusLine}" VerticalAlignment="Center"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            </StackPanel>
+    <!-- People on the left (most connected first); pick one to narrow the messages on the right. -->
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <Border Grid.Row="0" Classes="toolbar">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Classes="tb" Command="{Binding IngestEmailFolderCommand}"
+                            ToolTip.Tip="Reads the From, To and Cc of every .eml, .msg and .mbox file under a folder">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <c:CinderIcon Data="{x:Static c:Icons.Mail}" Width="14" Height="14" />
+                            <TextBlock Text="Add mail from folder…" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="tb" Content="Stop" Command="{Binding IngestEmailFolderCancelCommand}"
+                            IsVisible="{Binding IngestEmailFolderCommand.IsRunning}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                            IsVisible="{Binding Nodes.Count}">
+                    <c:ExportButton ExportCommand="{Binding ExportCommand}" />
+                    <Button Classes="tb" Content="Clear" Command="{Binding ClearGraphCommand}"
+                            ToolTip.Tip="Remove every person and message from this view (the mail files are not touched)" />
+                </StackPanel>
+            </Grid>
         </Border>
-        <Border Grid.Row="1" Background="{DynamicResource CinderSurface1Brush}" Padding="14,8"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+
+        <Border Grid.Row="1" Classes="subbar">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBlock Text="Add manually:" VerticalAlignment="Center"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBox Width="180" Text="{Binding From}" Watermark="from (email/handle)" />
-                <TextBox Width="180" Text="{Binding To}"   Watermark="to" />
-                <TextBox Width="120" Text="{Binding Source}" Watermark="source" />
-                <TextBox Width="200" Text="{Binding Subject}" Watermark="subject (optional)" />
-                <Button Content="Add edge" Command="{Binding AddEdgeCommand}" />
+                <TextBlock Text="Add a link" Classes="label" Margin="0,0,4,0" />
+                <TextBox Width="200" Text="{Binding From}" Watermark="From (address or handle)" />
+                <TextBox Width="200" Text="{Binding To}" Watermark="To" />
+                <TextBox Width="220" Text="{Binding Subject}" Watermark="Subject (optional)" />
+                <TextBox Width="130" Text="{Binding Source}" Watermark="Where it came from" />
+                <Button Classes="tb" Content="Add" Command="{Binding AddEdgeCommand}" />
             </StackPanel>
         </Border>
-        <Grid Grid.Row="2" ColumnDefinitions="*,4,*">
-            <DockPanel Grid.Column="0">
-                <TextBlock DockPanel.Dock="Top" Text="NODES"
-                           FontWeight="600" Margin="14,8"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                <DataGrid ItemsSource="{Binding Nodes}" AutoGenerateColumns="False" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Identity"  Binding="{Binding Identity}" Width="*" />
-                        <DataGridTextColumn Header="In"        Binding="{Binding InCount}" Width="60" />
-                        <DataGridTextColumn Header="Out"       Binding="{Binding OutCount}" Width="60" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </DockPanel>
-            <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
-            <DockPanel Grid.Column="2">
-                <TextBlock DockPanel.Dock="Top" Text="EDGES"
-                           FontWeight="600" Margin="14,8"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                <DataGrid ItemsSource="{Binding Edges}" AutoGenerateColumns="False" IsReadOnly="True">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="From"    Binding="{Binding From}"    Width="*" />
-                        <DataGridTextColumn Header="To"      Binding="{Binding To}"      Width="*" />
-                        <DataGridTextColumn Header="Source"  Binding="{Binding Source}"  Width="120" />
-                        <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="*" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </DockPanel>
-        </Grid>
+
+        <Panel Grid.Row="2">
+            <Grid ColumnDefinitions="360,4,*" IsVisible="{Binding Nodes.Count}">
+                <DockPanel Grid.Column="0">
+                    <Border DockPanel.Dock="Top" Padding="14,8" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                        <TextBlock Text="PEOPLE" Classes="section" />
+                    </Border>
+                    <DataGrid ItemsSource="{Binding Nodes}" SelectedItem="{Binding SelectedNode}"
+                              AutoGenerateColumns="False" IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Address" Binding="{Binding Identity}" Width="*" />
+                            <DataGridTextColumn Header="Received" Binding="{Binding InCount}" Width="84"
+                                                FontFamily="{StaticResource CinderFontFamilyMono}" />
+                            <DataGridTextColumn Header="Sent" Binding="{Binding OutCount}" Width="64"
+                                                FontFamily="{StaticResource CinderFontFamilyMono}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+                <GridSplitter Grid.Column="1" />
+                <DockPanel Grid.Column="2">
+                    <Border DockPanel.Dock="Top" Padding="14,0,8,0" Height="33"
+                            BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="{Binding EdgesHeading}" Classes="section" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" />
+                            <Button Grid.Column="1" Classes="ghost" Height="22" Padding="8,0" FontSize="11.5" Content="Show everyone"
+                                    Command="{Binding ShowAllCommand}" IsVisible="{Binding HasSelectedNode}" />
+                        </Grid>
+                    </Border>
+                    <DataGrid ItemsSource="{Binding Edges}" AutoGenerateColumns="False" IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Sent (UTC)" Binding="{Binding SentUtc}" Width="160"
+                                                FontFamily="{StaticResource CinderFontFamilyMono}" />
+                            <DataGridTextColumn Header="From" Binding="{Binding From}" Width="*" />
+                            <DataGridTextColumn Header="To" Binding="{Binding To}" Width="*" />
+                            <DataGridTextColumn Header="Subject" Binding="{Binding Subject}" Width="2*" />
+                            <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="80" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Grid>
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="No communications yet" IsVisible="{Binding !Nodes.Count}"
+                          Message="Point Cinder at a folder of mail (.eml, .msg or .mbox) and it lists who wrote to whom, most connected first. Pick a person to see only their messages.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="Add mail from folder…"
+                        Command="{Binding IngestEmailFolderCommand}" />
+            </c:EmptyState>
+        </Panel>
+
+        <Border Grid.Row="3" Classes="footer">
+            <Grid ColumnDefinitions="Auto,Auto,*">
+                <TextBlock Text="{Binding Nodes.Count, StringFormat='{}{0:N0} people'}" Classes="mono" />
+                <TextBlock Grid.Column="1" Text="{Binding Edges.Count, StringFormat='{}{0:N0} messages shown'}" Classes="mono" Margin="16,0,0,0" />
+                <TextBlock Grid.Column="2" Text="{Binding StatusLine}" Margin="16,0,0,0" />
+            </Grid>
+        </Border>
     </Grid>
 </UserControl>

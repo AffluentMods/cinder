@@ -16,8 +16,31 @@ public sealed class IocScanStats
     public int FilesScanned { get; set; }
     public int TimelineEvents { get; set; }
     public int Errors { get; set; }
-    public override string ToString() =>
-        $"{Files:N0} files · {FilesHashed:N0} hashed · {FilesScanned:N0} content-scanned · {TimelineEvents:N0} timeline events · {Errors} errors";
+
+    /// <summary>
+    /// Chunks of forensic containers (E01, AFF4) that could not be decoded during the content
+    /// scan and were read as zeros, across all files. When this is not zero the scan is not a
+    /// clean negative for those files: an indicator that lay in a damaged chunk cannot have
+    /// been found.
+    /// </summary>
+    public int DamagedChunks { get; set; }
+
+    /// <summary>How many of the scanned files had at least one damaged chunk.</summary>
+    public int DamagedFiles { get; set; }
+
+    /// <summary>The files counted in <see cref="DamagedFiles"/> (the first hundred), so a tool can name them.</summary>
+    public List<string> DamagedFilePaths { get; } = [];
+
+    public override string ToString()
+    {
+        var text = $"{Files:N0} files · {FilesHashed:N0} hashed · {FilesScanned:N0} content-scanned · {TimelineEvents:N0} timeline events · {Errors} errors";
+        if (DamagedChunks > 0)
+        {
+            text += $" · WARNING: {DamagedChunks:N0} damaged chunk{(DamagedChunks == 1 ? "" : "s")} in {DamagedFiles:N0} container{(DamagedFiles == 1 ? "" : "s")} " +
+                    "read as zeros — no match there is not proof of absence";
+        }
+        return text;
+    }
 }
 
 /// <summary>
@@ -41,7 +64,12 @@ public static class IocScanner
     private const long MaxContentBytes = 512L * 1024 * 1024;
     private const int MaxFiles = 200_000;
 
-    public static async Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanAsync(
+    /// <summary>
+    /// Runs the scan on the thread pool. Enumerating a large tree, building the automaton and
+    /// matching file bytes are all CPU- or disk-bound, and the callers are view-model commands
+    /// on the UI thread — none of that work may run there.
+    /// </summary>
+    public static Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanAsync(
         IReadOnlyList<Indicator> indicators,
         string folder,
         IProgress<string>? progress,
@@ -49,6 +77,18 @@ public static class IocScanner
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(indicators);
+        return Task.Run(() => ScanCoreAsync(indicators, folder, progress, maxRows, Cinder.Imaging.EvidenceOpener.Open, ct), ct);
+    }
+
+    /// <summary>The scan itself. <paramref name="open"/> is how a file's content is opened; tests substitute it.</summary>
+    internal static async Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanCoreAsync(
+        IReadOnlyList<Indicator> indicators,
+        string folder,
+        IProgress<string>? progress,
+        int maxRows,
+        Func<string, Stream> open,
+        CancellationToken ct)
+    {
         var rows = new List<IocMatchRow>();
         var stats = new IocScanStats();
         if (indicators.Count == 0 || !Directory.Exists(folder))
@@ -56,8 +96,12 @@ public static class IocScanner
             return (rows, stats);
         }
 
-        var hashIocs = indicators.Where(i => i.IsHash)
-            .ToDictionary(i => i.Value.ToLowerInvariant(), i => i, StringComparer.OrdinalIgnoreCase);
+        // TryAdd, not ToDictionary: the same digest listed twice must not abort the scan.
+        var hashIocs = new Dictionary<string, Indicator>(StringComparer.OrdinalIgnoreCase);
+        foreach (var hash in indicators.Where(i => i.IsHash))
+        {
+            hashIocs.TryAdd(hash.Value, hash);
+        }
         var textIocs = indicators.Where(i => !i.IsHash).ToList();
 
         // ---- files: paths, hashes, content ----
@@ -104,9 +148,14 @@ public static class IocScanner
 
             if (ruleset is not null && size > 0 && size <= MaxContentBytes)
             {
+                // Kept outside the try: damage met before a read error is still damage.
+                var info = new YaraLiteScanInfo();
                 try
                 {
-                    await foreach (var m in ruleset.ScanAsync(file, ct))
+                    // Opened through the evidence opener, so an E01 / AFF4 / VHD is scanned as
+                    // the media inside it — and reports the chunks it could not decode.
+                    await using var content = open(file);
+                    await foreach (var m in ruleset.ScanAsync(content, file, YaraLiteRuleset.DefaultBufferSize, info, ct))
                     {
                         if (rows.Count >= maxRows) break;
                         var ioc = textIocs[int.Parse(m.RuleName["ioc_".Length..], CultureInfo.InvariantCulture)];
@@ -118,6 +167,16 @@ public static class IocScanner
                 }
                 catch (OperationCanceledException) { throw; }
                 catch { stats.Errors++; }
+
+                if (info.DamagedChunks > 0)
+                {
+                    stats.DamagedChunks += info.DamagedChunks;
+                    stats.DamagedFiles++;
+                    if (stats.DamagedFilePaths.Count < 100)
+                    {
+                        stats.DamagedFilePaths.Add(file);
+                    }
+                }
             }
         }
 
@@ -164,8 +223,10 @@ public static class IocScanner
                 Name = "ioc_" + i.ToString(CultureInfo.InvariantCulture),
                 Strings =
                 [
-                    new YaraLiteString { Identifier = "$a", Pattern = Encoding.ASCII.GetBytes(v), NoCase = true },
-                    new YaraLiteString { Identifier = "$w", Pattern = Encoding.Unicode.GetBytes(v) },
+                    // Both forms are case-insensitive at any length: "Evil.Example" in a log
+                    // and "EVIL.EXAMPLE" in a registry value are the same indicator.
+                    new YaraLiteString { Identifier = "$a", Pattern = Encoding.UTF8.GetBytes(v), NoCase = true, Text = v },
+                    new YaraLiteString { Identifier = "$w", Pattern = Encoding.Unicode.GetBytes(v), NoCase = true, Text = v },
                 ],
                 Condition = "any of them",
             });

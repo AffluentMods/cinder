@@ -3,114 +3,118 @@
         xmlns:vm="using:Cinder.App.ViewModels"
         x:Class="Cinder.App.Views.SettingsDialog"
         x:DataType="vm:SettingsDialogViewModel"
-        Title="Cinder · Settings"
-        Width="640" Height="640"
+        Title="Cinder settings"
+        Width="660" Height="680" MinWidth="560" MinHeight="420"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource CinderBackground1Brush}"
-        Foreground="{DynamicResource CinderForegroundBrush}">
-    <Border BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1" CornerRadius="6">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20">
-            <StackPanel Spacing="22">
-                <TextBlock Text="SETTINGS" FontWeight="600"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Appearance" FontWeight="600" />
-                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto" Margin="0,0,0,4">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Theme" VerticalAlignment="Center" />
-                        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding Theme}" />
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Density" VerticalAlignment="Center" Margin="0,8,0,0" />
-                        <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" ItemsSource="{Binding DensityOptions}" SelectedItem="{Binding Density}" />
-                    </Grid>
-                    <CheckBox Content="Vim mode in hex viewer" IsChecked="{Binding VimModeInHex}" />
-                    <CheckBox Content="Respect OS reduce-motion" IsChecked="{Binding RespectReduceMotion}" />
+        Background="{DynamicResource CinderSurface1Brush}"
+        Foreground="{DynamicResource CinderForegroundBrush}"
+        FontFamily="{DynamicResource CinderFontFamily}"
+        FontSize="{DynamicResource CinderFontSizeBase}">
+    <!-- Only settings that change something are shown. Options that were stored but never read
+         (density, Vim keys, reduce motion, update check, Python paths) were removed from this
+         dialog rather than left as switches that do nothing. -->
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Padding="20,12" Background="{DynamicResource CinderSurface0Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding SaveError}" Foreground="{DynamicResource CinderDangerBrush}" FontSize="12"
+                           TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,16,0" IsVisible="{Binding HasSaveError}" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Classes="tb" Height="30" Padding="16,0" Content="Cancel" Click="OnCloseClick" />
+                    <Button Classes="accent" Height="30" Padding="18,0" Content="Save" Click="OnSaveClick" IsDefault="True" />
                 </StackPanel>
+            </Grid>
+        </Border>
 
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Updates" FontWeight="600" />
-                    <CheckBox Content="Check for updates on launch (public GitHub API)" IsChecked="{Binding CheckForUpdates}" />
-                </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+            <StackPanel Margin="24,20" Spacing="26">
 
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Python sidecars" FontWeight="600" />
-                    <TextBlock Text="Used for parsers (pytsk3, regipy, volatility3, etc.). Leave blank to use 'python' on PATH."
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}" TextWrapping="Wrap" />
-                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Python executable" VerticalAlignment="Center" />
-                        <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding PythonExecutable}" Watermark="python.exe (optional)" />
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Parsers directory" VerticalAlignment="Center" Margin="0,8,0,0" />
-                        <TextBox  Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding ParsersDirectory}" Watermark="Path to parsers/ folder" />
+                <StackPanel Spacing="10">
+                    <TextBlock Text="APPEARANCE" Classes="section" />
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Theme" Classes="label" />
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding Theme}" MinWidth="180" />
                     </Grid>
                 </StackPanel>
 
-                <StackPanel Spacing="8">
-                    <TextBlock Text="AI provider (BYOM)" FontWeight="600" />
-                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Provider" VerticalAlignment="Center" />
-                        <ComboBox  Grid.Row="0" Grid.Column="1" ItemsSource="{Binding AiProviderOptions}" SelectedItem="{Binding AiProviderId}" />
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Endpoint" VerticalAlignment="Center" Margin="0,8,0,0" />
-                        <TextBox  Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding AiEndpoint}" Watermark="http://localhost:11434 / vLLM URL / etc." />
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Model" VerticalAlignment="Center" Margin="0,8,0,0" />
-                        <TextBox  Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" Text="{Binding AiModel}" Watermark="e.g. llama3, mistral, gpt-4o-mini" />
-                        <TextBlock Grid.Row="3" Grid.Column="0" Text="API key" VerticalAlignment="Center" Margin="0,8,0,0" />
-                        <TextBox  Grid.Row="3" Grid.Column="1" Margin="0,8,0,0" Text="{Binding AiApiKey}" PasswordChar="•" Watermark="(only for cloud providers)" />
+                <StackPanel Spacing="10">
+                    <TextBlock Text="HASH SETS" Classes="section" />
+                    <TextBlock Classes="muted" FontSize="12" LineHeight="17" TextWrapping="Wrap"
+                               Text="The hash-set database used by the Hash sets tool. With hashing switched on, the Filesystem tool also hashes every file it lists and marks each one Known, Notable or Unknown, so you can filter out standard operating-system files. Hashing a whole volume is slow; it is off by default." />
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Database" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding HashSetDatabase}" Watermark="Choose it in the Hash sets tool"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    </Grid>
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Skip files larger than" Classes="label" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <NumericUpDown Value="{Binding HashSizeLimitMb}" Minimum="1" Maximum="4096" Increment="16" FormatString="0" Width="150" />
+                            <TextBlock Text="MB" Classes="label" />
+                        </StackPanel>
+                    </Grid>
+                    <CheckBox Margin="170,0,0,0" IsChecked="{Binding HashFilesOnEnumerate}"
+                              Content="Hash files while listing a file system" />
+                </StackPanel>
+
+                <StackPanel Spacing="10">
+                    <TextBlock Text="CHAIN OF CUSTODY" Classes="section" />
+                    <TextBlock Classes="muted" FontSize="12" LineHeight="17" TextWrapping="Wrap"
+                               Text="Optional. When an address is set, signing a custody log also asks this time-stamp service (RFC 3161) to countersign, so the time comes from a clock you do not control. Only a hash of your signature is sent, never case content. Public services include freetsa.org, DigiCert and Sectigo; an organisation can run its own." />
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Time-stamp service" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding TimestampAuthorityUrl}" Watermark="https://freetsa.org/tsr   (leave empty to turn off)"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
                     </Grid>
                 </StackPanel>
 
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Hash sets" FontWeight="600" />
-                    <TextBlock TextWrapping="Wrap"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               Text="The SQLite database the Hash sets tool imports NSRL into. With hashing on, the Filesystem tool reads every file on a volume, records its SHA-1, and marks it Known / Notable / Unknown — filter on Unknown to drop operating-system noise. Slow on large volumes; off by default." />
-                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Database" VerticalAlignment="Center" />
-                        <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding HashSetDatabase}" Watermark="path to hashsets.db (pick it in the Hash sets tool)" />
-                        <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,8,0,0" Text="Size limit (MB)" VerticalAlignment="Center" />
-                        <NumericUpDown Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Value="{Binding HashSizeLimitMb}" Minimum="1" Maximum="4096" Increment="16" FormatString="0" Width="160" HorizontalAlignment="Left" />
-                        <CheckBox Grid.Row="2" Grid.ColumnSpan="2" Margin="0,8,0,0" IsChecked="{Binding HashFilesOnEnumerate}"
-                                  Content="Hash files during filesystem enumeration and look them up" />
+                <StackPanel Spacing="10">
+                    <TextBlock Text="AI ASSISTANT" Classes="section" />
+                    <TextBlock Classes="muted" FontSize="12" LineHeight="17" TextWrapping="Wrap"
+                               Text="The model the AI assistant tool starts with. Cinder ships no model: point it at one running on this computer (Ollama, LM Studio) or at a hosted service. Anything typed into the assistant is sent to that address." />
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Where the model runs" Classes="label" />
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding AiProviderOptions}" SelectedItem="{Binding AiProviderId}" MinWidth="180" />
                     </Grid>
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Address" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding AiEndpoint}" Watermark="http://localhost:11434"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    </Grid>
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Model name" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding AiModel}" Watermark="llama3"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    </Grid>
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="API key" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding AiApiKey}" PasswordChar="•" Watermark="Only for a hosted service" />
+                    </Grid>
+                    <TextBlock Margin="170,0,0,0" Classes="dim" FontSize="11.5" TextWrapping="Wrap"
+                               Text="The key is saved in your settings file, encrypted for your Windows account. On Linux and macOS it is only obscured, not securely encrypted." />
                 </StackPanel>
 
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Chain of custody" FontWeight="600" />
-                    <TextBlock TextWrapping="Wrap"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                               Text="When set, signing the chain tip in the Custody tool also asks this RFC 3161 Time-Stamp Authority to countersign the attestation, so the time comes from a clock you do not control. Only a SHA-256 of the signature is sent. Public TSAs include DigiCert (http://timestamp.digicert.com — use its https endpoint), Sectigo and freetsa.org; organisations can run their own." />
-                    <Grid ColumnDefinitions="160,*">
-                        <TextBlock Grid.Column="0" Text="Timestamp authority" VerticalAlignment="Center" />
-                        <TextBox  Grid.Column="1" Text="{Binding TimestampAuthorityUrl}" Watermark="https://freetsa.org/tsr  (empty = off)" />
+                <StackPanel Spacing="10">
+                    <TextBlock Text="CLOUD SIGN-IN" Classes="section" />
+                    <TextBlock Classes="muted" FontSize="12" LineHeight="17" TextWrapping="Wrap"
+                               Text="Used by the Cloud pull tool, which is not finished yet. Each value is the public client ID of a sign-in application you create in the provider's developer console (docs/cloud-setup.md explains how). Never paste a client secret here." />
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Google Drive" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding GoogleDriveClientId}" Watermark="123-abc.apps.googleusercontent.com"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
                     </Grid>
-                </StackPanel>
-
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Cloud connectors" FontWeight="600" />
-                    <TextBlock TextWrapping="Wrap"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}">
-                        <Run Text="Paste OAuth client IDs here. See " />
-                        <Run Text="docs/cloud-setup.md" Foreground="{DynamicResource CinderAccentBrush}" />
-                        <Run Text=" for the per-provider walkthrough. PKCE means these are public — never paste a client secret." />
-                    </TextBlock>
-                    <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Google Drive" VerticalAlignment="Center" />
-                        <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding GoogleDriveClientId}" Watermark="123-abc.apps.googleusercontent.com" />
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="OneDrive" VerticalAlignment="Center" Margin="0,8,0,0" />
-                        <TextBox  Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding OneDriveClientId}" Watermark="00000000-0000-0000-0000-000000000000" />
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Dropbox" VerticalAlignment="Center" Margin="0,8,0,0" />
-                        <TextBox  Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" Text="{Binding DropboxAppKey}" Watermark="dropbox app key" />
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="OneDrive" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding OneDriveClientId}" Watermark="00000000-0000-0000-0000-000000000000"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
                     </Grid>
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" Margin="0,8,0,0">
-                    <Button Content="Save" Classes="accent" Command="{Binding SaveCommand}" />
-                    <Button Content="Close" Click="OnCloseClick" />
+                    <Grid ColumnDefinitions="170,*">
+                        <TextBlock Text="Dropbox" Classes="label" />
+                        <TextBox Grid.Column="1" Text="{Binding DropboxAppKey}" Watermark="Dropbox app key"
+                                 FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                    </Grid>
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>
-    </Border>
+    </DockPanel>
 </Window>

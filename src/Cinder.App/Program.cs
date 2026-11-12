@@ -17,8 +17,11 @@ public static class Program
         }
         catch (Exception ex)
         {
-            CrashHandler.Capture(ex, "fatal-startup");
-            Log.Fatal(ex, "Cinder failed to start.");
+            // Reached for a start-up failure and for an exception the UI-thread policy in
+            // CrashHandler judged unsafe to continue past. Either way: record it, say so, exit.
+            var bundle = CrashHandler.Capture(ex, "fatal");
+            Log.Fatal(ex, "Cinder stopped on an unhandled exception.");
+            CrashHandler.ReportFatal(ex, bundle, interactive: !args.Contains("--shot"));
             return 1;
         }
         finally

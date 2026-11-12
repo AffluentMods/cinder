@@ -100,17 +100,44 @@ public sealed record SrumNetworkUsage(
 
 // ============== Prefetch ==============
 
+/// <param name="ExecutableName">Executable name from the file header.</param>
+/// <param name="Hash">Path hash from the file header.</param>
+/// <param name="RunCount">Run counter from the file header.</param>
+/// <param name="LastRun">Most recent run; null when the stored value is unset or not a representable time.</param>
+/// <param name="AllRunTimes">Every run time the file records (up to eight), newest first.</param>
+/// <param name="LoadedFiles">Files the executable loaded (not parsed yet: always empty).</param>
+/// <param name="FormatVersion">Prefetch format version (17, 23, 26, 30, 31); null if the worker did not say.</param>
+/// <param name="SourceFile">Name of the .pf file this row came from.</param>
 public sealed record PrefetchEntry(
     string ExecutableName,
     string Hash,
     int RunCount,
     DateTimeOffset? LastRun,
     IReadOnlyList<DateTimeOffset> AllRunTimes,
-    IReadOnlyList<string> LoadedFiles) : ArtifactBase(
+    IReadOnlyList<string> LoadedFiles,
+    int? FormatVersion = null,
+    string? SourceFile = null) : ArtifactBase(
         Source: "prefetch",
         User: null,
         Timestamp: LastRun,
         Summary: $"{ExecutableName} (run {RunCount}×)");
+
+/// <summary>A .pf file that produced no row, and why.</summary>
+public sealed record SkippedPrefetchFile(string File, string Reason);
+
+/// <summary>
+/// A Prefetch directory as parsed. <see cref="Skipped"/> matters as much as the rows: on
+/// Windows 10 and later every Prefetch file is MAM-compressed, the parser does not decode those
+/// yet, and a directory of 200 files that yields no rows is "200 files not decoded", not "no
+/// program ever ran".
+/// </summary>
+/// <param name="Entries">Parsed files.</param>
+/// <param name="Skipped">Files that were not parsed, each with its reason.</param>
+/// <param name="CompressedNotDecoded">How many of <paramref name="Skipped"/> are MAM-compressed files.</param>
+public sealed record PrefetchResult(
+    IReadOnlyList<PrefetchEntry> Entries,
+    IReadOnlyList<SkippedPrefetchFile> Skipped,
+    int CompressedNotDecoded);
 
 // ============== Shellbags ==============
 
@@ -174,18 +201,43 @@ public sealed record EventLogRecord(
 
 // ============== Browser ==============
 
+/// <param name="User">Profile owner.</param>
+/// <param name="Browser">Browser name.</param>
+/// <param name="Url">The URL.</param>
+/// <param name="Title">Page title.</param>
+/// <param name="VisitCount">
+/// Visits recorded for the URL. 0 is a real value (a bookmark or typed URL never visited);
+/// null means the database held no usable number. Neither is "1".
+/// </param>
+/// <param name="Timestamp">Last visit; null when never visited or when the stored value is not a representable time.</param>
+/// <param name="VisitType">Transition type, when known.</param>
 public sealed record BrowserHistoryEntry(
     string User,
     string Browser,
     string Url,
     string? Title,
-    int VisitCount,
+    int? VisitCount,
     DateTimeOffset? Timestamp,
     string? VisitType) : ArtifactBase(
         Source: "browser.history",
         User: User,
         Timestamp: Timestamp,
         Summary: $"{Url} ({Title})");
+
+/// <summary>A browser history database as parsed, with what could not be read from it.</summary>
+/// <param name="Entries">The rows.</param>
+/// <param name="RowErrors">Rows that could not be converted at all and are not in <paramref name="Entries"/>.</param>
+/// <param name="TimestampErrors">Rows that are in <paramref name="Entries"/> with a null timestamp because the stored value was not a time.</param>
+/// <param name="ReadError">Set when the database was damaged part-way: <paramref name="Entries"/> then holds only the rows read before the damage.</param>
+public sealed record BrowserHistoryResult(
+    IReadOnlyList<BrowserHistoryEntry> Entries,
+    int RowErrors,
+    int TimestampErrors,
+    string? ReadError)
+{
+    /// <summary>True when every row was read and converted cleanly.</summary>
+    public bool IsComplete => RowErrors == 0 && TimestampErrors == 0 && ReadError is null;
+}
 
 public sealed record BrowserDownloadEntry(
     string User,

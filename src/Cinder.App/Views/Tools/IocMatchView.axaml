@@ -4,16 +4,20 @@
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.IocMatchView"
              x:DataType="tools:IocMatchTool">
-    <!-- Two inputs in reading order — indicators, then where to look — then Run. -->
+    <!--
+        Two inputs in reading order — the indicator list, then the folder to look in — then Run.
+        While a scan runs the pickers stay usable (changing either stops the scan and clears the
+        results, which is the honest thing to do) and Stop is offered. Results, the scan summary
+        and both banners belong to the list and folder named in the toolbar.
+    -->
     <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
         <!-- ===== Toolbar ===== -->
-        <Border Grid.Row="0" Height="44" Padding="14,0,12,0"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Classes="toolbar">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Button Classes="tb" Command="{Binding PickIocListCommand}"
-                            ToolTip.Tip="{Binding EvidencePath, TargetNullValue='A text file with one indicator per line: hashes, IPs, domains, paths, strings'}">
+                            ToolTip.Tip="{Binding EvidencePath, TargetNullValue='A text file with one indicator per line: hashes, addresses, domains, paths or any text'}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <c:CinderIcon Data="{x:Static c:Icons.Target}" Width="14" Height="14" />
                             <TextBlock Text="{Binding EvidencePath, TargetNullValue='Indicator list…'}" VerticalAlignment="Center"
@@ -23,7 +27,7 @@
                     <c:CinderIcon Data="{x:Static c:Icons.Chevron}" Width="12" Height="12"
                                   Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
                     <Button Classes="tb" Command="{Binding PickFolderCommand}"
-                            ToolTip.Tip="{Binding TargetFolder, TargetNullValue='The folder to scan: a mounted image, a triage collection, an export'}">
+                            ToolTip.Tip="{Binding TargetFolder, TargetNullValue='The folder to scan: a mounted image, a triage collection or an export'}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="14" Height="14" />
                             <TextBlock Text="{Binding TargetFolder, TargetNullValue='Folder to scan…'}" VerticalAlignment="Center"
@@ -32,7 +36,11 @@
                     </Button>
                     <Button Classes="accent" Height="26" Padding="12,0" Content="Run scan"
                             Command="{Binding LoadEvidenceCommand}" CommandParameter="{Binding EvidencePath}"
-                            IsEnabled="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                            IsEnabled="{Binding CanRunScan}" IsVisible="{Binding !IsLoading}"
+                            ToolTip.Tip="Check every file in the folder against the list" />
+                    <Button Classes="tb" Content="Stop" Command="{Binding LoadEvidenceCancelCommand}"
+                            IsVisible="{Binding IsLoading}"
+                            ToolTip.Tip="Stop the scan. Matches found so far are not shown, because the scan did not finish." />
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
@@ -41,78 +49,102 @@
                         <Grid ColumnDefinitions="Auto,*">
                             <c:CinderIcon Data="{x:Static c:Icons.Filter}" Width="14" Height="14"
                                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                            <TextBox Grid.Column="1" Classes="bare" Margin="8,0,0,0" FontSize="12.5" Watermark="Filter hits"
-                                     Text="{Binding RowFilter, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Grid.Column="1" Classes="bare" Margin="8,0,0,0" FontSize="12.5" Watermark="Filter matches"
+                                     Text="{Binding RowFilter, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip.Tip="Shows matches with this text in any column. Export writes the matches the filter shows." />
                         </Grid>
                     </Border>
-                    <Button Classes="tb">
+                    <Button Classes="tb" ToolTip.Tip="Keep the selected match as a finding in the open case. Reports turns bookmarks into exhibits.">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <c:CinderIcon Data="{x:Static c:Icons.Download}" Width="14" Height="14" />
-                            <TextBlock Text="Export" VerticalAlignment="Center" />
-                            <c:CinderIcon Data="{x:Static c:Icons.ChevronDown}" Width="12" Height="12" />
+                            <c:CinderIcon Data="{x:Static c:Icons.Bookmark}" Width="14" Height="14" />
+                            <TextBlock Text="Bookmark" VerticalAlignment="Center" />
                         </StackPanel>
                         <Button.Flyout>
-                            <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                <MenuItem Header="CSV (formula-injection safe)" Command="{Binding ExportCommand}" CommandParameter="csv" />
-                                <MenuItem Header="JSON array" Command="{Binding ExportCommand}" CommandParameter="json" />
-                            </MenuFlyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                                <StackPanel Width="300" Spacing="10">
+                                    <TextBlock Text="BOOKMARK SELECTED MATCH" Classes="section" />
+                                    <TextBox Watermark="Note (optional): why this match matters"
+                                             Text="{Binding BookmarkNote}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
+                                    <Button Classes="accent" HorizontalAlignment="Right" Content="Add bookmark"
+                                            Command="{Binding BookmarkSelectedCommand}" />
+                                </StackPanel>
+                            </Flyout>
                         </Button.Flyout>
                     </Button>
+                    <c:ExportButton ExportCommand="{Binding ExportCommand}" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Indicator summary -->
-        <Border Grid.Row="1" Padding="14,6" Background="{DynamicResource CinderSurface1Brush}"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+        <!-- What the list holds, then (after a scan) how much was looked at and what could have been missed. -->
+        <Border Grid.Row="1" Classes="subbar"
                 IsVisible="{Binding IndicatorSummary, Converter={x:Static ObjectConverters.IsNotNull}}">
-            <TextBlock Text="{Binding IndicatorSummary}" Classes="muted" FontSize="12" />
+            <TextBlock Text="{Binding IndicatorSummary}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
         </Border>
 
+        <!-- Error: the heading says what failed (the scan, or saving an export). -->
         <Border Grid.Row="2" Padding="14,8"
                 BorderBrush="{DynamicResource CinderDangerBrush}" BorderThickness="0,0,0,1"
                 IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
             <Border.Background>
                 <SolidColorBrush Color="{DynamicResource CinderDangerColor}" Opacity="0.09" />
             </Border.Background>
-            <SelectableTextBlock Text="{Binding ErrorMessage}" Classes="mono" TextWrapping="Wrap" FontSize="12" />
+            <Grid ColumnDefinitions="Auto,*">
+                <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
+                              Foreground="{DynamicResource CinderDangerBrush}" />
+                <StackPanel Grid.Column="1" Spacing="3">
+                    <TextBlock Text="{Binding ErrorTitle}" FontWeight="500" />
+                    <SelectableTextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" FontSize="12.5"
+                                         Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                </StackPanel>
+            </Grid>
         </Border>
 
+        <!-- Cut short: there are more matches than the grid holds. -->
         <Border Grid.Row="3" IsVisible="{Binding IsTruncated}" Padding="14,8"
                 Background="{DynamicResource CinderWarnSoftBrush}"
                 BorderBrush="{DynamicResource CinderWarnBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,*">
                 <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
                               Foreground="{DynamicResource CinderWarnBrush}" />
-                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" TextWrapping="Wrap" FontWeight="500" />
+                <TextBlock Grid.Column="1" Text="{Binding TruncationNotice}" TextWrapping="Wrap" FontWeight="500" />
             </Grid>
         </Border>
 
         <Panel Grid.Row="4">
             <DataGrid ItemsSource="{Binding VisibleRows}" SelectedItem="{Binding SelectedRow}"
                       c:AutoColumns.FromFirstItem="True" IsReadOnly="True" IsVisible="{Binding Rows.Count}" />
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Spacing="14"
-                        IsVisible="{Binding !Rows.Count}">
-                <Border Width="52" Height="52" CornerRadius="12" HorizontalAlignment="Center"
-                        Background="{DynamicResource CinderSurface2Brush}"
-                        BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
-                    <c:CinderIcon Data="{x:Static c:Icons.Target}" Width="24" Height="24"
-                                  Foreground="{DynamicResource CinderAccentBrush}" />
-                </Border>
-                <TextBlock Text="Sweep for indicators" FontSize="18" FontWeight="600" HorizontalAlignment="Center" />
-                <TextBlock Classes="muted" FontSize="13" TextAlignment="Center" TextWrapping="Wrap"
-                           Text="Pick an indicator list (one per line: file hashes, IPs, domains, paths, strings), then a folder. Cinder checks file hashes, paths and contents — ASCII and UTF-16 — and lists every hit." />
-                <ProgressBar IsIndeterminate="True" Width="160" IsVisible="{Binding IsLoading}" HorizontalAlignment="Center" />
+
+            <!-- Nothing chosen yet, or a scan that found nothing: say which. -->
+            <c:EmptyState Icon="{x:Static c:Icons.Target}" Title="Check a folder against a list of indicators"
+                          Message="{Binding EmptyStateHint}">
+                <c:EmptyState.IsVisible>
+                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="!Rows.Count" />
+                        <Binding Path="!IsLoading" />
+                    </MultiBinding>
+                </c:EmptyState.IsVisible>
+                <TextBlock Text="{Binding StatusLine}" Classes="muted" FontSize="13" MaxWidth="460"
+                           TextAlignment="Center" TextWrapping="Wrap"
+                           IsVisible="{Binding StatusLine, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </c:EmptyState>
+
+            <!-- Scanning: progress, what it is doing, and a way out. -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10"
+                        IsVisible="{Binding IsLoading}">
+                <ProgressBar IsIndeterminate="True" Width="160" />
+                <TextBlock Text="{Binding StatusLine}" Classes="muted" HorizontalAlignment="Center"
+                           MaxWidth="460" TextWrapping="Wrap" TextAlignment="Center" />
+                <Button Classes="tb" Content="Stop" HorizontalAlignment="Center"
+                        Command="{Binding LoadEvidenceCancelCommand}" />
             </StackPanel>
         </Panel>
 
-        <Border Grid.Row="5" Height="28" Padding="14,0" Background="{DynamicResource CinderSurface1Brush}"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0"
-                IsVisible="{Binding Rows.Count}">
+        <Border Grid.Row="5" Classes="footer" IsVisible="{Binding Rows.Count}">
             <Grid ColumnDefinitions="Auto,*">
-                <TextBlock Text="{Binding RowCountDisplay}" Classes="mono muted" FontSize="11.5" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Classes="dim" FontSize="11.5" Margin="16,0,0,0"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsVisible="{Binding !IsTruncated}" />
+                <TextBlock Text="{Binding RowCountDisplay}" Classes="mono" />
+                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Margin="16,0,0,0"
+                           ToolTip.Tip="{Binding StatusLine}" />
             </Grid>
         </Border>
     </Grid>

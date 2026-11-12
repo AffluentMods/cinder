@@ -113,8 +113,9 @@ fixture-vs-reference diff is in CI.
 - **State:** PDF renders in-process via QuestPDF. DOCX ships for real through
   [`DocxReportWriter`](src/Cinder.Reports/DocxReportWriter.cs) on DocumentFormat.OpenXml —
   covered by `DocxReportWriterTests`.
-- **Blockers:** PDF/A-specific conformance (embedded font subsetting, XMP metadata, the
-  PDF/A-2b identifier) is not implemented — output is ordinary PDF, not archival PDF/A.
+- **Now:** the PDF export writes PDF/A-2b through QuestPDF (XMP `pdfaid` and output
+  intent present) and fails rather than falling back to a converter that cannot. It has
+  not been run through an independent validator such as veraPDF.
 
 ## AFF4
 
@@ -139,6 +140,37 @@ zero-filled in the stream and listed in the `.log.json` rather than as a separat
   attestation is also RFC 3161 countersigned, so the examiner cannot backdate it either. What
   remains is a process step: export the attestation and publish it out of the examiner's
   reach. Full reasoning in [SECURITY.md](SECURITY.md).
+
+## <a id="review-gaps"></a> Known gaps left by the full review pass
+
+Things the review found and did not fix, or fixed without being able to exercise them on the
+real thing:
+
+- **`$LogFile`.** The corrected restart-area layout is tested against a synthetic log built
+  from the documented format, not against a real `$LogFile`.
+- **Carver.** Format probes (including the GIF block walk and the PDF `%%EOF` chain) were
+  written from specifications and tested on synthetic objects, not on a corpus of real files.
+  A PDF whose later `startxref` is wrong is carved to its last verifiable revision.
+- **Imaging on real devices.** The unbuffered device path, the Linux write blocker, the Linux
+  loop mounter (its per-file-system read-only options, btrfs in particular) and
+  `Mount-DiskImage` were exercised through fakes, not hardware or a real kernel. On Linux a
+  whole-disk image with a partition table cannot be mounted (partitions are not attached).
+- **Volatility.** The Memory tool's process handling (probe, cancel, the `volatility3.cli`
+  entry point) is untested: Volatility was not installed where this was written.
+- **SRUM.** Column names for the application table were corrected from knowledge of the
+  schema; no `SRUDB.dat` was available to confirm them.
+- **Linux and macOS.** The fatal-error dialog, the "needs Windows" messages for SRUM and
+  compressed Prefetch, and plugin signature display were not run on those systems. The
+  whole test suite does run on Linux in CI.
+- **Plugins.** Native-library loading through the new trust gate is untested. Signatures are
+  informational; revocation is not checked online.
+- **Python sidecar.** It still has no caller in the desktop app. Its E01 writer uses libewf
+  calls that could not be checked without the library, and compressed (MAM) Prefetch is
+  reported but not decoded there. The sidecar imager does not honour the new
+  "do not overwrite" flag.
+- **Update check.** The "Check for updates" command was tested against a fake server, not
+  the live GitHub API.
+- **Cloud pull and RAM capture** remain non-functional and say so on their screens.
 
 ## <a id="trademark-domains"></a> Trademark and domains
 

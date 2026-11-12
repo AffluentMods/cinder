@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using Markdig;
 
 namespace Cinder.Reports;
 
@@ -9,9 +8,9 @@ namespace Cinder.Reports;
 /// Markdown (canonical), HTML (Markdig-rendered, searchable), and JSON ("playbook" — re-runnable
 /// per docs/plan.md §8.13).
 ///
-/// PDF/A and DOCX exports go through the wkhtmltopdf binary and a docx-from-html templater
-/// respectively (see <see cref="ReportExporter"/>); they're not pure-managed because PDF/A-2u
-/// embedding is non-trivial and Cinder leans on a battle-tested external converter.
+/// PDF and DOCX exports are produced in-process by <see cref="ReportExporter"/> (QuestPDF and
+/// the Open XML SDK). Only the plain-PDF format falls back to an external converter, and only
+/// if QuestPDF fails.
 /// </summary>
 public sealed class ReportBuilder
 {
@@ -37,7 +36,16 @@ public sealed class ReportBuilder
     public void AddSection(string title, string markdownBody, IEnumerable<Exhibit>? exhibits = null)
     {
         var ex = exhibits?.ToList() ?? [];
-        foreach (var e in ex) _allExhibits.Add(e);
+        foreach (var e in ex)
+        {
+            // An exhibit handed back from RegisterExhibit is already indexed; adding it again
+            // listed it twice in the Exhibit Index. Identity, not value equality: two distinct
+            // exhibits may legitimately carry identical fields.
+            if (!_allExhibits.Any(known => ReferenceEquals(known, e)))
+            {
+                _allExhibits.Add(e);
+            }
+        }
         _sections.Add(new ReportSection(title, markdownBody, ex));
     }
 
@@ -57,31 +65,40 @@ public sealed class ReportBuilder
 
     public Report Build() => new(Id, CaseName, Examiner, Title, CreatedUtc, TemplateId, _sections);
 
+    /// <summary>
+    /// The canonical Markdown form of the report. Section bodies and exhibit descriptions are
+    /// Markdown by contract and pass through as written; every other field (titles, names,
+    /// paths, hashes) is plain text and is escaped via <see cref="ReportMarkdown"/> so a value
+    /// that came out of evidence cannot inject markup, forge an Exhibit Index cell or break out
+    /// of its line.
+    /// </summary>
     public string ToMarkdown()
     {
+        static string E(string? s) => ReportMarkdown.EscapeInline(s);
+
         var sb = new StringBuilder();
-        sb.AppendLine($"# {Title}");
+        sb.AppendLine($"# {E(Title)}");
         sb.AppendLine();
-        sb.AppendLine($"- **Case:** {CaseName}");
-        sb.AppendLine($"- **Examiner:** {Examiner}");
-        sb.AppendLine($"- **Generated:** {CreatedUtc:O}");
-        sb.AppendLine($"- **Template:** {TemplateId}");
+        sb.AppendLine($"- **Case:** {E(CaseName)}");
+        sb.AppendLine($"- **Examiner:** {E(Examiner)}");
+        sb.AppendLine($"- **Generated:** {CreatedUtc.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine($"- **Template:** {E(TemplateId)}");
         sb.AppendLine();
         foreach (var s in _sections)
         {
-            sb.AppendLine($"## {s.Title}");
+            sb.AppendLine($"## {E(s.Title)}");
             sb.AppendLine();
             sb.AppendLine(s.MarkdownBody);
             sb.AppendLine();
             foreach (var e in s.Exhibits)
             {
-                sb.AppendLine($"### {e.Id} — {e.Title}");
+                sb.AppendLine($"### {E(e.Id)} — {E(e.Title)}");
                 sb.AppendLine();
                 if (!string.IsNullOrEmpty(e.Description)) sb.AppendLine(e.Description);
-                if (!string.IsNullOrEmpty(e.FilePath)) sb.AppendLine($"- **File:** `{e.FilePath}`");
+                if (!string.IsNullOrEmpty(e.FilePath)) sb.AppendLine($"- **File:** {ReportMarkdown.CodeSpan(e.FilePath)}");
                 if (e.FileSize.HasValue) sb.AppendLine($"- **Size:** {e.FileSize:N0} bytes");
-                if (!string.IsNullOrEmpty(e.Sha256)) sb.AppendLine($"- **SHA-256:** `{e.Sha256}`");
-                sb.AppendLine($"- **Captured:** {e.CapturedUtc:O} by {e.Examiner ?? Examiner}");
+                if (!string.IsNullOrEmpty(e.Sha256)) sb.AppendLine($"- **SHA-256:** {ReportMarkdown.CodeSpan(e.Sha256)}");
+                sb.AppendLine($"- **Captured:** {e.CapturedUtc:O} by {E(e.Examiner ?? Examiner)}");
                 sb.AppendLine();
             }
         }
@@ -96,21 +113,44 @@ public sealed class ReportBuilder
             sb.AppendLine("|---|---|---|---|---|");
             foreach (var e in _allExhibits)
             {
-                sb.AppendLine($"| {e.Id} | {e.Title} | {e.Kind} | `{(e.Sha256 ?? "—")}` | {e.CapturedUtc.ToString("u", CultureInfo.InvariantCulture)} |");
+                sb.AppendLine($"| {E(e.Id)} | {E(e.Title)} | {e.Kind} | {HashCell(e.Sha256)} | {e.CapturedUtc.ToString("u", CultureInfo.InvariantCulture)} |");
             }
         }
         return sb.ToString();
     }
 
+    /// <summary>
+    /// A hash renders in a code span only when it is hex, as every hash Cinder computes is. Any
+    /// other value is treated as untrusted text: a pipe inside a code span would still split
+    /// the table row.
+    /// </summary>
+    private static string HashCell(string? hash)
+    {
+        if (string.IsNullOrEmpty(hash))
+        {
+            return "—";
+        }
+        return hash.All(char.IsAsciiHexDigit) ? $"`{hash}`" : ReportMarkdown.EscapeInline(hash);
+    }
+
+    /// <summary>
+    /// A self-contained HTML page. Raw HTML in the Markdown is rendered as text, links and
+    /// images are restricted (see <see cref="ReportMarkdown.ToSafeHtml"/>), the header fields
+    /// are HTML-encoded, and a Content-Security-Policy forbids script and every external load —
+    /// so opening the report, or printing it through a headless browser, cannot run code or
+    /// fetch anything, whatever the evidence contained.
+    /// </summary>
     public string ToHtml()
     {
-        var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
-        var inner = Markdown.ToHtml(ToMarkdown(), pipeline);
+        static string H(string? s) => System.Net.WebUtility.HtmlEncode(s ?? "");
+
+        var inner = ReportMarkdown.ToSafeHtml(ToMarkdown());
         return $$"""
             <!DOCTYPE html>
             <html lang="en"><head>
             <meta charset="utf-8" />
-            <title>{{Title}}</title>
+            <meta http-equiv="Content-Security-Policy" content="{{ReportMarkdown.ContentSecurityPolicy}}" />
+            <title>{{H(Title)}}</title>
             <style>
               body { font: 15px/1.6 Inter, -apple-system, system-ui, sans-serif; max-width: 880px; margin: 40px auto; padding: 0 24px; color: #16181D; }
               h1, h2, h3 { color: #FF7A1A; }
@@ -122,7 +162,7 @@ public sealed class ReportBuilder
             </style>
             </head><body>
             {{inner}}
-            <footer>Generated by Cinder · case "{{CaseName}}" · examiner {{Examiner}} · {{CreatedUtc:u}}</footer>
+            <footer>Generated by Cinder · case "{{H(CaseName)}}" · examiner {{H(Examiner)}} · {{CreatedUtc:u}}</footer>
             </body></html>
             """;
     }

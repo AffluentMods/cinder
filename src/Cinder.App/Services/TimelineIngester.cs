@@ -9,7 +9,7 @@
 //   lnk           — .lnk shortcuts: AccessedOn / WrittenOn / CreatedOn
 //   ntuser        — NTUSER.DAT: UserAssist last-execution per program
 //   browser       — Chromium/Edge/Firefox History sqlite: per-URL last_visit_time
-//   email         — .eml/.msg: Date: header (and Sent: for .msg)
+//   email         — .eml/.msg/.mbox: Date: header (Received/Sent for .msg), one event per message
 //   recyclebin    — $Recycle.Bin\<SID>\$I*: deletion timestamp + original path
 //   usn / logfile — $UsnJrnl$J change records; $LogFile name events at $FILE_NAME creation
 //   filesystem    — every other file gets its MAC times (creation / write / access)
@@ -58,7 +58,7 @@ public static class TimelineIngester
                 {
                     if (ext == ".evtx")
                     {
-                        IngestEvtx(timeline, file, stats);
+                        IngestEvtx(timeline, file, stats, ct);
                         progress?.Report($"evtx: {Path.GetFileName(file)}");
                     }
                     else if (ext == ".pf")
@@ -76,12 +76,16 @@ public static class TimelineIngester
                     }
                     else if (lower == "history" || lower == "places.sqlite")
                     {
-                        IngestBrowserHistory(timeline, file, stats);
+                        IngestBrowserHistory(timeline, file, stats, ct);
                         progress?.Report($"browser: {file}");
                     }
                     else if (ext == ".eml" || ext == ".msg" || ext == ".mbox")
                     {
-                        IngestEmail(timeline, file, stats);
+                        IngestEmail(timeline, file, stats, ct);
+                        if (ext == ".mbox")
+                        {
+                            progress?.Report($"mbox: {file}");
+                        }
                     }
                     else if (lower.StartsWith("$i", StringComparison.Ordinal) &&
                              file.Contains("$Recycle.Bin", StringComparison.OrdinalIgnoreCase))
@@ -91,19 +95,18 @@ public static class TimelineIngester
                     else if (lower == "$j" || lower.EndsWith("$usnjrnl$j", StringComparison.Ordinal) || lower == "$usnjrnl:$j")
                     {
                         // KAPE and most triage tools export the change journal as $Extend\$UsnJrnl$J.
-                        IngestUsnJournal(timeline, file, stats);
+                        IngestUsnJournal(timeline, file, stats, ct);
                         progress?.Report($"usn: {file}");
                     }
                     else if (lower == "$logfile")
                     {
-                        IngestLogFile(timeline, file, stats);
+                        IngestLogFile(timeline, file, stats, ct);
                         progress?.Report($"logfile: {file}");
                     }
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    stats.Errors++;
-                    stats.LastError = $"{Path.GetFileName(file)}: {ex.Message}";
+                    stats.Fail(file, ex);
                 }
             }
             timeline.Sort();
@@ -113,13 +116,18 @@ public static class TimelineIngester
 
     // ----- Per-source parsers --------------------------------------------------
 
-    private static void IngestEvtx(SuperTimeline timeline, string path, IngestStats stats)
+    private static void IngestEvtx(SuperTimeline timeline, string path, IngestStats stats, CancellationToken ct)
     {
         using var fs = File.OpenRead(path);
         var log = new evtx.EventLog(fs);
         var src = Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+        var n = 0;
         foreach (var rec in log.GetEventRecords())
         {
+            if ((++n & 0x3FF) == 0)
+            {
+                ct.ThrowIfCancellationRequested();   // a Security.evtx holds millions of records
+            }
             var when = rec.TimeCreated;
             var summary = string.IsNullOrEmpty(rec.MapDescription)
                 ? $"[{rec.Channel}] {rec.Provider} EventID={rec.EventId}"
@@ -134,13 +142,15 @@ public static class TimelineIngester
     /// "FILE_CREATE" and "FILE_DELETE" are filterable text, and the MFT reference ties the
     /// event to a record even after the file is gone.
     /// </summary>
-    private static void IngestUsnJournal(SuperTimeline timeline, string path, IngestStats stats)
+    private static void IngestUsnJournal(SuperTimeline timeline, string path, IngestStats stats, CancellationToken ct)
     {
         try
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
             var n = 0;
-            foreach (var r in Cinder.Filesystems.UsnJournal.Parse(fs))
+            // The token goes into the parser: a multi-gigabyte $J must stop when asked, not
+            // when its last record has been read.
+            foreach (var r in Cinder.Filesystems.UsnJournal.Parse(fs, ct))
             {
                 if (r.Timestamp == DateTimeOffset.MinValue) continue;
                 timeline.Add(new Synth("ntfs.usn", null, r.Timestamp,
@@ -149,7 +159,7 @@ public static class TimelineIngester
                 if (++n >= 2_000_000) break;   // a rolled-over journal on a busy volume can be larger than memory
             }
         }
-        catch { stats.Errors++; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
     }
 
     /// <summary>
@@ -160,13 +170,13 @@ public static class TimelineIngester
     /// is the one $LogFile fact that outlives both the MFT record and the USN journal. Stale
     /// (circular-slack) records are included and labelled, since they are why the log is read.
     /// </summary>
-    private static void IngestLogFile(SuperTimeline timeline, string path, IngestStats stats)
+    private static void IngestLogFile(SuperTimeline timeline, string path, IngestStats stats, CancellationToken ct)
     {
         try
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
             var n = 0;
-            foreach (var r in Cinder.Filesystems.NtfsLogFile.Parse(fs))
+            foreach (var r in Cinder.Filesystems.NtfsLogFile.Parse(fs, ct: ct))
             {
                 if (r.FileName is null || r.Created is null) continue;
                 if (r.RedoOp is not (0x02 or 0x0C or 0x0E) && r.UndoOp is not (0x0C or 0x0E)) continue;
@@ -184,7 +194,7 @@ public static class TimelineIngester
                 if (++n >= 2_000_000) break;
             }
         }
-        catch { stats.Errors++; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
     }
 
     private static void IngestPrefetch(SuperTimeline timeline, string path, IngestStats stats)
@@ -201,7 +211,7 @@ public static class TimelineIngester
                 stats.Prefetch++;
             }
         }
-        catch { stats.Errors++; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
     }
 
     private static void IngestLnk(SuperTimeline timeline, string path, IngestStats stats)
@@ -224,7 +234,7 @@ public static class TimelineIngester
                     $".lnk target accessed: {target} (from {name})"));
             stats.Lnk++;
         }
-        catch { stats.Errors++; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
     }
 
     private static void IngestNtuser(SuperTimeline timeline, string path, IngestStats stats)
@@ -241,32 +251,72 @@ public static class TimelineIngester
                 if (count is null) continue;
                 foreach (var v in count.Values)
                 {
-                    // Win7+ v4 format: 72 bytes; FILETIME at offset 60 (8 bytes LE)
-                    if (v.ValueDataRaw is not { Length: >= 68 } data) continue;
-                    var ft = BitConverter.ToInt64(data, 60);
-                    if (ft <= 0 || ft > 9_999_999_999_999_999) continue;
-                    DateTime when;
-                    try { when = DateTime.FromFileTimeUtc(ft); }
-                    catch { continue; }
+                    if (UserAssistLastRun(v.ValueDataRaw) is not { } when) continue;
                     var name = Rot13(v.ValueName ?? "");
-                    timeline.Add(new Synth("registry.userassist", null,
-                        new DateTimeOffset(when, TimeSpan.Zero),
+                    timeline.Add(new Synth("registry.userassist", null, when,
                         $"UserAssist: {name}"));
                     stats.UserAssist++;
                 }
             }
         }
-        catch { stats.Errors++; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
     }
 
-    private static void IngestBrowserHistory(SuperTimeline timeline, string path, IngestStats stats)
+    /// <summary>
+    /// Reads URL visits from a Chromium-family <c>History</c> or a Firefox <c>places.sqlite</c>.
+    ///
+    /// <para>The database is copied to a private staging directory first, together with its
+    /// write-ahead log: a browser that was running (or was killed) leaves its most recent
+    /// visits in <c>-wal</c>, and reading the main file alone silently drops exactly the
+    /// activity closest to the incident. SQLite never opens the evidence file itself. The
+    /// staging directory holds a copy of evidence, so it is removed before this returns — which
+    /// is why the connection is unpooled: a pooled connection keeps the file open after
+    /// Dispose and the delete fails.</para>
+    /// </summary>
+    internal static void IngestBrowserHistory(
+        SuperTimeline timeline, string path, IngestStats stats, CancellationToken ct, string? stagingRoot = null)
     {
-        // Stage to a temp copy so a locked DB still parses.
-        var staged = Path.Combine(Path.GetTempPath(), $"cinder-history-{Guid.NewGuid():N}.sqlite");
+        var stagingDir = Path.Combine(stagingRoot ?? Path.GetTempPath(), $"cinder-history-{Guid.NewGuid():N}");
         try
         {
+            Directory.CreateDirectory(stagingDir);
+            var staged = Path.Combine(stagingDir, "history.sqlite");
             File.Copy(path, staged, overwrite: true);
-            using var c = new SqliteConnection($"Data Source={staged};Mode=ReadOnly");
+            if (File.Exists(path + "-wal"))
+            {
+                try
+                {
+                    File.Copy(path + "-wal", staged + "-wal", overwrite: true);
+                    // The shared-memory index travels with the log when it can be read. It is
+                    // derived from the log (SQLite rebuilds it on open), so a live browser
+                    // holding it locked is no reason to give up on the log itself.
+                    if (File.Exists(path + "-shm"))
+                    {
+                        try
+                        {
+                            File.Copy(path + "-shm", staged + "-shm", overwrite: true);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            File.Delete(staged + "-shm");
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    File.Delete(staged + "-wal");
+                    stats.Skip($"{Path.GetFileName(path)}: its write-ahead log could not be copied ({ex.Message}); the most recent visits may be missing");
+                }
+            }
+
+            // Read-write on the copy (never on the evidence) so SQLite can replay the WAL.
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = staged,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false,
+            }.ToString();
+            using var c = new SqliteConnection(connectionString);
             c.Open();
             string? sql;
             // Chromium-family: urls(last_visit_time microseconds since 1601-01-01) + visits
@@ -275,62 +325,98 @@ public static class TimelineIngester
                 cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='urls'";
                 sql = cmd.ExecuteScalar() as string;
             }
-            if (sql is not null)
-            {
-                using var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT url, title, last_visit_time FROM urls WHERE last_visit_time>0 ORDER BY last_visit_time DESC LIMIT 50000";
-                using var r = cmd.ExecuteReader();
-                while (r.Read())
-                {
-                    var url = r.GetString(0);
-                    var title = r.IsDBNull(1) ? "" : r.GetString(1);
-                    var lvt = r.GetInt64(2);
-                    // Chromium: microseconds since 1601-01-01
-                    var when = new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero)
-                        .AddTicks(lvt * 10);
-                    timeline.Add(new Synth("browser.history", null, when,
-                        string.IsNullOrEmpty(title) ? url : $"{title} — {url}"));
-                    stats.Browser++;
-                }
-            }
-            else
-            {
+            using var query = c.CreateCommand();
+            query.CommandText = sql is not null
+                ? "SELECT url, title, last_visit_time FROM urls WHERE last_visit_time>0 ORDER BY last_visit_time DESC LIMIT 50000"
                 // Firefox: moz_places (last_visit_date microseconds Unix epoch)
-                using var cmd = c.CreateCommand();
-                cmd.CommandText = "SELECT url, title, last_visit_date FROM moz_places WHERE last_visit_date IS NOT NULL ORDER BY last_visit_date DESC LIMIT 50000";
-                using var r = cmd.ExecuteReader();
-                while (r.Read())
+                : "SELECT url, title, last_visit_date FROM moz_places WHERE last_visit_date IS NOT NULL ORDER BY last_visit_date DESC LIMIT 50000";
+            using var r = query.ExecuteReader();
+            var n = 0;
+            while (r.Read())
+            {
+                if ((++n & 0x3FF) == 0)
                 {
-                    var url = r.GetString(0);
-                    var title = r.IsDBNull(1) ? "" : r.GetString(1);
-                    var lvd = r.GetInt64(2);
-                    var when = DateTimeOffset.FromUnixTimeMilliseconds(lvd / 1000);
-                    timeline.Add(new Synth("browser.history", null, when,
-                        string.IsNullOrEmpty(title) ? url : $"{title} — {url}"));
-                    stats.Browser++;
+                    ct.ThrowIfCancellationRequested();
                 }
+                var url = r.IsDBNull(0) ? "" : r.GetString(0);
+                var title = r.IsDBNull(1) ? "" : r.GetString(1);
+                var raw = r.GetInt64(2);
+                // One row with a nonsense timestamp must cost one row, not the rest of the file.
+                var when = sql is not null ? FromWebKitMicroseconds(raw) : FromUnixMicroseconds(raw);
+                if (when is null)
+                {
+                    stats.Skip($"{Path.GetFileName(path)}: visit to {url} has an out-of-range timestamp ({raw})");
+                    continue;
+                }
+                timeline.Add(new Synth("browser.history", null, when.Value,
+                    string.IsNullOrEmpty(title) ? url : $"{title} — {url}"));
+                stats.Browser++;
             }
         }
-        catch { stats.Errors++; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
         finally
         {
-            try { if (File.Exists(staged)) File.Delete(staged); } catch { }
+            try
+            {
+                if (Directory.Exists(stagingDir))
+                {
+                    Directory.Delete(stagingDir, recursive: true);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A copy of evidence left behind is worth a line in the summary, not silence.
+                stats.Fail(stagingDir, new IOException("staged browser database could not be removed: " + ex.Message));
+            }
         }
     }
 
-    private static void IngestEmail(SuperTimeline timeline, string path, IngestStats stats)
+    /// <summary>How much of an .eml is read to find its headers. Bodies and attachments are not loaded.</summary>
+    private const int MaxHeaderChars = 1 << 18;
+
+    /// <summary>No single mailbox contributes more than this many events.</summary>
+    private const int MaxMessagesPerMailbox = 2_000_000;
+
+    private static void IngestEmail(SuperTimeline timeline, string path, IngestStats stats, CancellationToken ct)
     {
         try
         {
             if (path.EndsWith(".eml", StringComparison.OrdinalIgnoreCase))
             {
-                var text = File.ReadAllText(path);
-                var (date, from, subject) = ParseEmlHeaders(text);
-                if (date is not null)
+                // A triage folder can hold a hundred thousand .eml files; rent the block
+                // rather than allocate one per message.
+                Dictionary<string, string> headers;
+                var block = System.Buffers.ArrayPool<char>.Shared.Rent(MaxHeaderChars);
+                try
                 {
-                    timeline.Add(new Synth("email", from, date.Value,
-                        $"Email: {subject} (from {from ?? "?"})"));
-                    stats.Email++;
+                    int read;
+                    using (var reader = new StreamReader(path))
+                    {
+                        read = reader.ReadBlock(block, 0, MaxHeaderChars);
+                    }
+                    headers = ReadHeaders(new StringReader(new string(block, 0, read)));
+                }
+                finally
+                {
+                    System.Buffers.ArrayPool<char>.Shared.Return(block);
+                }
+                AddMessage(timeline, stats, path,
+                    headers.GetValueOrDefault("Date"), headers.GetValueOrDefault("From"), headers.GetValueOrDefault("Subject"));
+            }
+            else if (path.EndsWith(".mbox", StringComparison.OrdinalIgnoreCase))
+            {
+                // One event per message, streamed: an mbox is routinely gigabytes.
+                using var reader = new StreamReader(path);
+                var n = 0;
+                foreach (var headers in Cinder.App.ViewModels.Tools.MboxHeaderReader.ReadMessages(reader, ct))
+                {
+                    AddMessage(timeline, stats, path,
+                        headers.GetValueOrDefault("Date"), headers.GetValueOrDefault("From"), headers.GetValueOrDefault("Subject"));
+                    if (++n >= MaxMessagesPerMailbox)
+                    {
+                        stats.Skip($"{Path.GetFileName(path)}: stopped after {MaxMessagesPerMailbox:N0} messages");
+                        break;
+                    }
                 }
             }
             else if (path.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
@@ -343,55 +429,159 @@ public static class TimelineIngester
                         $"Email: {msg.Subject} (from {msg.Sender?.DisplayName ?? "?"})"));
                     stats.Email++;
                 }
-            }
-        }
-        catch { stats.Errors++; }
-    }
-
-    private static (DateTimeOffset? Date, string? From, string Subject) ParseEmlHeaders(string text)
-    {
-        DateTimeOffset? date = null;
-        string? from = null;
-        string subject = "(no subject)";
-        using var sr = new StringReader(text);
-        string? line;
-        while ((line = sr.ReadLine()) is not null)
-        {
-            if (line.Length == 0) break;
-            if (line.StartsWith("Date:", StringComparison.OrdinalIgnoreCase))
-            {
-                if (DateTimeOffset.TryParse(line[5..].Trim(), CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal, out var d))
+                else
                 {
-                    date = d;
+                    stats.Skip($"{Path.GetFileName(path)}: message has no sent or received date");
                 }
             }
-            else if (line.StartsWith("From:", StringComparison.OrdinalIgnoreCase))
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
+    }
+
+    /// <summary>Adds one message to the timeline, or counts it as skipped when it cannot be placed in time.</summary>
+    private static void AddMessage(SuperTimeline timeline, IngestStats stats, string path, string? date, string? from, string? subject)
+    {
+        if (ParseMailDate(date) is not { } when)
+        {
+            stats.Skip(string.IsNullOrWhiteSpace(date)
+                ? $"{Path.GetFileName(path)}: message has no Date header"
+                : $"{Path.GetFileName(path)}: unreadable Date header \"{date}\"");
+            return;
+        }
+        timeline.Add(new Synth("email", from, when,
+            $"Email: {(string.IsNullOrWhiteSpace(subject) ? "(no subject)" : subject)} (from {from ?? "?"})"));
+        stats.Email++;
+    }
+
+    /// <summary>
+    /// Reads one RFC 5322 header block (up to the first blank line). A line starting with a
+    /// space or tab continues the header before it; the first occurrence of a header wins.
+    /// </summary>
+    internal static Dictionary<string, string> ReadHeaders(TextReader reader)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? last = null;
+        string? line;
+        while ((line = reader.ReadLine()) is not null && line.Length > 0)
+        {
+            if (line[0] is ' ' or '\t')
             {
-                from = line[5..].Trim();
+                if (last is not null)
+                {
+                    headers[last] = (headers[last] + " " + line.Trim()).Trim();
+                }
+                continue;
             }
-            else if (line.StartsWith("Subject:", StringComparison.OrdinalIgnoreCase))
+            var colon = line.IndexOf(':');
+            if (colon <= 0)
             {
-                subject = line[8..].Trim();
+                last = null;
+                continue;
+            }
+            var name = line[..colon].Trim();
+            if (headers.TryAdd(name, line[(colon + 1)..].Trim()))
+            {
+                last = name;
+            }
+            else
+            {
+                last = null;   // a repeated header: keep the first, and its continuation lines with it
             }
         }
-        return (date, from, subject);
+        return headers;
+    }
+
+    /// <summary>Zone names RFC 5322 still allows in a Date header (obs-zone) that .NET does not know.</summary>
+    private static readonly Dictionary<string, string> ObsoleteZones = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["UT"] = "+0000",
+        ["UTC"] = "+0000",
+        ["Z"] = "+0000",
+        ["EST"] = "-0500",
+        ["EDT"] = "-0400",
+        ["CST"] = "-0600",
+        ["CDT"] = "-0500",
+        ["MST"] = "-0700",
+        ["MDT"] = "-0600",
+        ["PST"] = "-0800",
+        ["PDT"] = "-0700",
+    };
+
+    /// <summary>
+    /// Parses a mail <c>Date:</c> value. Handles what real headers contain and
+    /// <see cref="DateTimeOffset.TryParse(string, IFormatProvider, DateTimeStyles, out DateTimeOffset)"/>
+    /// alone does not: a trailing comment — <c>Tue, 3 Jun 2025 10:00:00 +0000 (UTC)</c> is what
+    /// most mail servers write — and the obsolete named zones.
+    /// </summary>
+    internal static DateTimeOffset? ParseMailDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        // Comments are parenthesised and may nest; they carry no information the offset lacks.
+        var sb = new StringBuilder(value.Length);
+        var depth = 0;
+        foreach (var c in value)
+        {
+            if (c == '(')
+            {
+                depth++;
+            }
+            else if (c == ')')
+            {
+                depth = Math.Max(0, depth - 1);
+            }
+            else if (depth == 0)
+            {
+                sb.Append(c);
+            }
+        }
+        var text = string.Join(' ', sb.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
+        const DateTimeStyles Styles = DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces;
+        if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, Styles, out var parsed))
+        {
+            return parsed;
+        }
+        var lastSpace = text.LastIndexOf(' ');
+        if (lastSpace > 0 && ObsoleteZones.TryGetValue(text[(lastSpace + 1)..], out var offset) &&
+            DateTimeOffset.TryParse(text[..lastSpace] + " " + offset, CultureInfo.InvariantCulture, Styles, out parsed))
+        {
+            return parsed;
+        }
+        return null;
     }
 
     private static void IngestRecycleBin(SuperTimeline timeline, string path, IngestStats stats)
     {
         try
         {
+            // $I files are a few hundred bytes. Anything large with that name is not one, and
+            // is not read into memory to find that out.
+            if (new FileInfo(path).Length > 64 * 1024)
+            {
+                stats.Skip($"{Path.GetFileName(path)}: too large to be a Recycle Bin index record");
+                return;
+            }
             var data = File.ReadAllBytes(path);
             if (data.Length < 24) return;
             var version = BitConverter.ToInt64(data, 0);
-            var ft = BitConverter.ToInt64(data, 16);
-            if (ft <= 0) return;
+            if (FromFileTime(BitConverter.ToInt64(data, 16)) is not { } when)
+            {
+                stats.Skip($"{Path.GetFileName(path)}: deletion time is out of range");
+                return;
+            }
             string origPath;
             if (version == 2 && data.Length >= 28)
             {
                 var nameChars = BitConverter.ToInt32(data, 24);
-                var byteCount = Math.Max(0, Math.Min(nameChars * 2, data.Length - 28));
+                var byteCount = (int)Math.Clamp((long)nameChars * 2, 0, data.Length - 28);
                 origPath = Encoding.Unicode.GetString(data, 28, byteCount).TrimEnd('\0');
             }
             else
@@ -399,15 +589,49 @@ public static class TimelineIngester
                 var end = Math.Min(data.Length, 24 + 520);
                 origPath = Encoding.Unicode.GetString(data, 24, end - 24).TrimEnd('\0');
             }
-            var when = new DateTimeOffset(DateTime.FromFileTimeUtc(ft), TimeSpan.Zero);
             // Owning user SID from the parent folder name (S-1-5-21-...)
             var sid = Path.GetFileName(Path.GetDirectoryName(path) ?? "");
             timeline.Add(new Synth("recyclebin", sid.StartsWith("S-1-", StringComparison.Ordinal) ? sid : null,
                 when, $"Deleted: {origPath}"));
             stats.RecycleBin++;
         }
-        catch { stats.Errors++; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { stats.Fail(path, ex); }
     }
+
+    // ----- Timestamps ----------------------------------------------------------
+
+    /// <summary>The largest FILETIME <see cref="DateTime"/> can represent (9999-12-31).</summary>
+    private const long MaxFileTime = 2_650_467_743_999_999_999L;
+
+    /// <summary>A Windows FILETIME (100 ns ticks since 1601-01-01 UTC), or null when it is zero ("never") or out of range.</summary>
+    internal static DateTimeOffset? FromFileTime(long fileTime) =>
+        fileTime is <= 0 or > MaxFileTime
+            ? null
+            : new DateTimeOffset(DateTime.FromFileTimeUtc(fileTime), TimeSpan.Zero);
+
+    /// <summary>Chromium / WebKit time: microseconds since 1601-01-01 UTC.</summary>
+    internal static DateTimeOffset? FromWebKitMicroseconds(long microseconds) =>
+        microseconds is <= 0 or > MaxFileTime / 10 ? null : FromFileTime(microseconds * 10);
+
+    /// <summary>Firefox PRTime: microseconds since the Unix epoch.</summary>
+    internal static DateTimeOffset? FromUnixMicroseconds(long microseconds)
+    {
+        var milliseconds = microseconds / 1000;
+        return milliseconds is < -62_135_596_800_000 or > 253_402_300_799_999
+            ? null
+            : DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
+    }
+
+    /// <summary>
+    /// Last-run time from a UserAssist <c>Count</c> value (Windows 7 and later: 72 bytes, with
+    /// the FILETIME at offset 60). Null when the entry has never been run or the data is short.
+    ///
+    /// <para>The only bounds are "not zero" and "representable". An earlier upper bound of
+    /// 9,999,999,999,999,999 sat a factor of ten below every FILETIME since 1632 — today's are
+    /// about 1.3 × 10^17 — so it rejected every real entry and this source produced nothing.</para>
+    /// </summary>
+    internal static DateTimeOffset? UserAssistLastRun(byte[]? data) =>
+        data is { Length: >= 68 } ? FromFileTime(BitConverter.ToInt64(data, 60)) : null;
 
     // ----- Helpers -------------------------------------------------------------
 
@@ -445,7 +669,6 @@ public static class TimelineIngester
     private sealed record Synth(string Source, string? User, DateTimeOffset? Timestamp, string Summary)
         : ArtifactBase(Source, User, Timestamp, Summary);
 }
-
 public sealed class IngestStats
 {
     public int Evtx;
@@ -459,8 +682,41 @@ public sealed class IngestStats
     public int LogFile;
     public int Errors;
     public string? LastError;
+
+    /// <summary>
+    /// Records that were read but could not be put on the timeline — a message with no usable
+    /// date, a visit with an impossible timestamp, a mailbox cut off at the cap. They are not
+    /// errors (the file parsed), but the examiner must be told the timeline is short by this many.
+    /// </summary>
+    public int Skipped;
+    public string? LastSkipReason;
+
     public int Total =>
         Evtx + Prefetch + Lnk + UserAssist + Browser + Email + RecycleBin + Usn + LogFile;
-    public override string ToString() =>
-        $"evtx={Evtx} pf={Prefetch} lnk={Lnk} userassist={UserAssist} browser={Browser} email={Email} recycle={RecycleBin} usn={Usn} logfile={LogFile} errors={Errors}";
+
+    internal void Skip(string reason)
+    {
+        Skipped++;
+        LastSkipReason = reason;
+    }
+
+    internal void Fail(string path, Exception ex)
+    {
+        Errors++;
+        LastError = $"{Path.GetFileName(path)}: {ex.Message}";
+    }
+
+    public override string ToString()
+    {
+        var text = $"evtx={Evtx} pf={Prefetch} lnk={Lnk} userassist={UserAssist} browser={Browser} email={Email} recycle={RecycleBin} usn={Usn} logfile={LogFile} errors={Errors} skipped={Skipped}";
+        if (Skipped > 0 && LastSkipReason is not null)
+        {
+            text += $" (last skipped: {LastSkipReason})";
+        }
+        if (Errors > 0 && LastError is not null)
+        {
+            text += $" (last error: {LastError})";
+        }
+        return text;
+    }
 }
