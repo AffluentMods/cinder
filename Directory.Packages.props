@@ -60,15 +60,15 @@
     <PackageVersion Include="Dapper" Version="2.1.89" />
 
     <!-- Hashing / Crypto -->
-    <PackageVersion Include="Blake3" Version="1.0.0" />
+    <PackageVersion Include="Blake3" Version="3.0.2" />
     <PackageVersion Include="System.IO.Hashing" Version="10.0.12" />
-    <PackageVersion Include="BouncyCastle.Cryptography" Version="2.5.0" />
+    <PackageVersion Include="BouncyCastle.Cryptography" Version="2.7.0" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.15" />
 
     <!-- Charts / Maps / Markdown -->
     <PackageVersion Include="LiveChartsCore.SkiaSharpView.Avalonia" Version="2.0.0-rc5.4" />
     <PackageVersion Include="Mapsui.Avalonia" Version="4.1.7" />
-    <PackageVersion Include="Markdig" Version="0.38.0" />
+    <PackageVersion Include="Markdig" Version="1.5.1" />
 
     <!-- Document text extraction (PDF). Office / OpenDocument / EPUB are handled
          in-house via System.IO.Compression.ZipArchive + XML scrape — no extra dep. -->
