@@ -101,17 +101,17 @@ public sealed class WindowsImageMounter(string parsersDir) : IImageMounter
     /// </summary>
     public async Task<MountedImage> MountReadOnlyAsync(string imagePath, CancellationToken ct = default)
     {
-        // SECURITY: PowerShell single-quoted strings escape via doubled single-quote (''). We
-        // sanitize the path AND pass it as an explicit -Args entry rather than interpolating
-        // it into the command string. The path itself never crosses parser boundaries.
+        // SECURITY: the image path is never part of the PowerShell command text. It travels in
+        // an environment variable of the child process and the fixed command reads it back as
+        // a string value, so nothing in a file name can be parsed as script.
         var ext = Path.GetExtension(imagePath).ToLowerInvariant();
         if (ext is ".vhd" or ".vhdx" or ".iso" or ".img")
         {
             var letter = await RunPowerShellAsync(
                 command:
-                    "Mount-DiskImage -Access ReadOnly -ImagePath $args[0] | Out-Null; " +
-                    "(Get-DiskImage -ImagePath $args[0] | Get-Volume).DriveLetter",
-                args: [imagePath],
+                    $"Mount-DiskImage -Access ReadOnly -ImagePath $env:{ImagePathVariable} | Out-Null; " +
+                    $"(Get-DiskImage -ImagePath $env:{ImagePathVariable} | Get-Volume).DriveLetter",
+                imagePath: imagePath,
                 ct: ct).ConfigureAwait(false);
             letter = letter.Trim();
             if (string.IsNullOrEmpty(letter))
@@ -136,18 +136,25 @@ public sealed class WindowsImageMounter(string parsersDir) : IImageMounter
         {
             var path = handle.LoopDevice["DiskImage:".Length..];
             await RunPowerShellAsync(
-                command: "Dismount-DiskImage -ImagePath $args[0] | Out-Null",
-                args: [path],
+                command: $"Dismount-DiskImage -ImagePath $env:{ImagePathVariable} | Out-Null",
+                imagePath: path,
                 ct: ct).ConfigureAwait(false);
         }
     }
 
+    /// <summary>Environment variable that carries the image path to the PowerShell child.</summary>
+    internal const string ImagePathVariable = "CINDER_IMAGE_PATH";
+
     /// <summary>
-    /// Runs a PowerShell command. The command itself is hardcoded; the variable parts are
-    /// passed via <c>$args[]</c> so an attacker can't escape into the command stream by
-    /// crafting a malicious filename. ArgumentList handles the CLI quoting on the .NET side.
+    /// Start info for a fixed PowerShell command that needs one image path. The command is a
+    /// compile-time string; the path is put in the child's environment as
+    /// <see cref="ImagePathVariable"/>, where PowerShell reads it as data.
+    ///
+    /// <para>It is deliberately not passed on the command line. Everything that follows
+    /// <c>-Command</c> is joined into the command text and parsed as script, so an argument
+    /// placed there never reaches <c>$args</c> — and a crafted file name would be executed.</para>
     /// </summary>
-    private static async Task<string> RunPowerShellAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
+    internal static System.Diagnostics.ProcessStartInfo BuildPowerShell(string command, string imagePath)
     {
         var psi = new System.Diagnostics.ProcessStartInfo(ExecutableResolver.ResolveRequired("powershell.exe"))
         {
@@ -160,18 +167,25 @@ public sealed class WindowsImageMounter(string parsersDir) : IImageMounter
         psi.ArgumentList.Add("-NonInteractive");
         psi.ArgumentList.Add("-Command");
         psi.ArgumentList.Add(command);
-        psi.ArgumentList.Add("--");
-        foreach (var a in args)
-        {
-            psi.ArgumentList.Add(a);
-        }
-        using var p = new System.Diagnostics.Process { StartInfo = psi };
+        psi.Environment[ImagePathVariable] = imagePath;
+        return psi;
+    }
+
+    internal static async Task<string> RunPowerShellAsync(string command, string imagePath, CancellationToken ct)
+    {
+        using var p = new System.Diagnostics.Process { StartInfo = BuildPowerShell(command, imagePath) };
         p.Start();
+        // Both pipes are drained together; reading only one can block the child on the other.
+        var stderr = p.StandardError.ReadToEndAsync(ct);
         var stdout = await p.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
+        var errors = await stderr.ConfigureAwait(false);
         await p.WaitForExitAsync(ct).ConfigureAwait(false);
         if (p.ExitCode != 0)
         {
-            throw new InvalidOperationException($"powershell: exit {p.ExitCode}");
+            var detail = errors.Trim();
+            throw new InvalidOperationException(detail.Length == 0
+                ? $"powershell: exit {p.ExitCode}"
+                : $"powershell: exit {p.ExitCode}: {detail}");
         }
         return stdout;
     }

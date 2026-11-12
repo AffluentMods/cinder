@@ -18,14 +18,8 @@
             </Border>
             <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
                        Text="When it ships: pick where the dump goes, Cinder captures physical memory, hashes it as it writes, and records the capture in the custody log." />
-            <Button Classes="tb" HorizontalAlignment="Left" Height="30" Content="Pick output and capture…"
-                    Command="{Binding PickAndCaptureCommand}" />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14"
-                              Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBlock Text="{Binding Output, TargetNullValue='No output path selected'}" Classes="mono muted" FontSize="12.5"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
+            <!-- No action button: nothing here can capture yet, and a button that asks for an output
+                 path and then captures nothing is worse than no button. -->
             <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
                     IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
                 <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />

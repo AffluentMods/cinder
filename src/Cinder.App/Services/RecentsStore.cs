@@ -49,7 +49,8 @@ public sealed class RecentsStore
         };
         try
         {
-            File.WriteAllText(_path, JsonSerializer.Serialize(trimmed, Json));
+            // Atomic: a crash mid-write must not leave half a list for the next launch.
+            AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(trimmed, Json));
         }
         catch
         {

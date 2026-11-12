@@ -16,7 +16,8 @@ public sealed partial class LogFileTool : SidecarToolViewModel
     public override string Id => "logfile";
     public override string Title => "$LogFile";
     public override string Icon => "🧾";
-    public override string Subtitle => "NTFS transaction log — file records and index entries created, deleted and renamed, with names recovered from the payloads. Image or extracted $LogFile.";
+    public override string Subtitle => "List the recent file creations, deletions and renames recorded in an NTFS volume's transaction log, with the file names it still holds.";
+    public override string EmptyStateHint => "Pick a disk or volume image (.dd, .E01, .vhd, .vhdx), or a $LogFile extracted from one.";
     public override string Phase => "3";
     public override string Kind => "logfile";
 
@@ -63,27 +64,29 @@ Timestamps are only those inside `$FILE_NAME` payloads (creation and last-modifi
 the file at that moment); the log itself does not stamp records. The MFT record number
 is derived from the target VCN assuming the volume's cluster size (read from the
 volume when an image is opened; 4 KiB assumed for an extracted file). The grid stops at
-200,000 rows and says so; export to get everything.
+200,000 rows and says so. Export writes the rows in the grid, so an export of a log that
+was cut short is cut short too. An extracted file is recognised by its name, which must
+start with `$LogFile`.
 """;
 
-    protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
+    protected override async Task<ParseResult> ParseAsync(string evidencePath, CancellationToken ct)
     {
-        var (rows, truncated) = await Task.Run(() => Parse(evidencePath, ct), ct);
-        AddRows(rows, budget: int.MaxValue);
-        IsTruncated = truncated;
+        var (rows, truncated, note) = await Task.Run(() => Parse(evidencePath, ct), ct);
+        return new ParseResult(rows, truncated, null, note);
     }
 
-    private static (List<object> Rows, bool Truncated) Parse(string path, CancellationToken ct)
+    private static (List<object> Rows, bool Truncated, string? Note) Parse(string path, CancellationToken ct)
     {
         var rows = new List<object>();
+        var problems = new List<string>();
         var truncated = false;
 
         var name = Path.GetFileName(path);
-        if (name.Equals("$LogFile", StringComparison.OrdinalIgnoreCase))
+        if (name.StartsWith("$LogFile", StringComparison.OrdinalIgnoreCase))
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20);
             truncated = Append(NtfsLogFile.Parse(fs, 4096, ct), "", rows, ct);
-            return (rows, truncated);
+            return (rows, truncated, null);
         }
 
         var ext = Path.GetExtension(path).ToLowerInvariant();
@@ -91,7 +94,7 @@ volume when an image is opened; 4 KiB assumed for an extracted file). The grid s
 
         if (stream is not null)
         {
-            truncated = WalkVolumes(stream, rows, ct);
+            truncated = WalkVolumes(stream, rows, problems, ct);
         }
         else
         {
@@ -99,39 +102,38 @@ volume when an image is opened; 4 KiB assumed for an extracted file). The grid s
             using VirtualDisk disk = ext == ".vhd"
                 ? new DiscUtils.Vhd.Disk(file, DiscUtils.Streams.Ownership.None)
                 : new DiscUtils.Vhdx.Disk(file, DiscUtils.Streams.Ownership.None);
-            foreach (var part in disk.Partitions.Partitions)
+            if (disk.Partitions is null)
             {
-                ct.ThrowIfCancellationRequested();
-                using var ps = part.Open();
-                TryVolume(ps, $"[part {part.FirstSector:N0}]", rows, ct);
-                if (rows.Count >= RowBudget) { truncated = true; break; }
+                // No partition table: the disk is one volume.
+                using var whole = disk.Content;
+                TryVolume(whole, "", rows, problems, ct);
             }
+            else
+            {
+                foreach (var part in disk.Partitions.Partitions)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    using var ps = part.Open();
+                    TryVolume(ps, $"[part {part.FirstSector:N0}]", rows, problems, ct);
+                    if (rows.Count >= RowBudget) break;
+                }
+            }
+            truncated = rows.Count >= RowBudget;
         }
 
         if (rows.Count == 0)
         {
-            rows.Add(new
-            {
-                Lsn = 0L,
-                Transaction = 0u,
-                Redo = "(no $LogFile found)",
-                Undo = "",
-                Mft = "",
-                FileName = "",
-                Parent = "",
-                Created = "",
-                Modified = "",
-                Flags = "",
-                Volume = "",
-                Note = "No NTFS volume with a $LogFile was found in this evidence.",
-            });
+            throw new InvalidOperationException(problems.Count > 0
+                ? $"The $LogFile in this evidence could not be read: {problems[0]}"
+                : "No NTFS volume with a $LogFile was found. Pick a disk or volume image, or an extracted file whose name starts with $LogFile.");
         }
-        return (rows, truncated);
+        var note = problems.Count == 0 ? null : $"Part of the log could not be read, so these rows are incomplete: {string.Join("; ", problems)}";
+        return (rows, truncated, note);
     }
 
-    private static bool WalkVolumes(Stream image, List<object> rows, CancellationToken ct)
+    private static bool WalkVolumes(Stream image, List<object> rows, List<string> problems, CancellationToken ct)
     {
-        if (TryVolume(image, "", rows, ct))
+        if (TryVolume(image, "", rows, problems, ct))
         {
             return rows.Count >= RowBudget;
         }
@@ -144,22 +146,32 @@ volume when an image is opened; 4 KiB assumed for an extracted file). The grid s
             try
             {
                 using var vs = vol.Open();
-                TryVolume(vs, $"[{vol.Identity}]", rows, ct);
+                TryVolume(vs, $"[{vol.Identity}]", rows, problems, ct);
             }
-            catch (OperationCanceledException) { throw; }
-            catch { /* not NTFS or unreadable — try the next partition */ }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A partition that cannot be opened at all — try the next one.
+            }
             if (rows.Count >= RowBudget) return true;
         }
         return false;
     }
 
 #pragma warning disable CA1416 // read-only NTFS access; see DiscUtilsWalker
-    private static bool TryVolume(Stream s, string prefix, List<object> rows, CancellationToken ct)
+    /// <summary>
+    /// Reads one volume. Returns true when the volume is NTFS (whether or not it has a log), so
+    /// the caller knows the image was a bare volume. A failure after the volume was recognised
+    /// is recorded in <paramref name="problems"/>: rows read before it are kept, and the grid
+    /// says they are incomplete instead of passing them off as the whole log.
+    /// </summary>
+    private static bool TryVolume(Stream s, string prefix, List<object> rows, List<string> problems, CancellationToken ct)
     {
+        var recognised = false;
         try
         {
             s.Position = 0;
             if (!NtfsFileSystem.Detect(s)) return false;
+            recognised = true;
             using var fs = new NtfsFileSystem(s);
             using var log = NtfsLogFile.Open(fs, out var clusterSize);
             if (log is null)
@@ -169,8 +181,14 @@ volume when an image is opened; 4 KiB assumed for an extracted file). The grid s
             Append(NtfsLogFile.Parse(log, clusterSize, ct), prefix, rows, ct);
             return true;
         }
-        catch (OperationCanceledException) { throw; }
-        catch { return false; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (recognised)
+            {
+                problems.Add($"{(prefix.Length > 0 ? prefix + " " : "")}{ex.Message}");
+            }
+            return recognised;
+        }
     }
 #pragma warning restore CA1416
 

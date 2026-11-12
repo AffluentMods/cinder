@@ -190,10 +190,12 @@ public static class EvidenceOpener
     /// EwfStream alone doesn't own the underlying <see cref="EwfReader"/> — wrap it so
     /// the caller's `using` properly tears down both the stream and the open segment files.
     /// </summary>
-    private sealed class EwfDisposingStream : Stream
+    private sealed class EwfDisposingStream : Stream, IEvidenceDamageSource
     {
         private readonly EwfReader _owner;
         private readonly Stream _inner;
+
+        public IReadOnlyList<int> DamagedChunks => _owner.DamagedChunks;
 
         public EwfDisposingStream(EwfReader owner)
         {

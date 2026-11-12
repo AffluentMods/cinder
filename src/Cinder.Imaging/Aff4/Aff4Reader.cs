@@ -31,6 +31,7 @@ public sealed class Aff4Reader : IDisposable
     private readonly Dictionary<string, ImageStreamInfo> _streams = new(StringComparer.Ordinal);
     private readonly List<int> _damaged = [];
     private readonly int _minor;
+    private readonly string _tool;
 
     private Aff4Reader(FileStream file, ZipArchive zip)
     {
@@ -40,7 +41,9 @@ public sealed class Aff4Reader : IDisposable
         VolumeUrn = ReadText("container.description")?.Trim() ?? zip.Comment?.Trim() ?? "";
         var version = ReadText("version.txt") ?? "";
         var m = Regex.Match(version, @"minor\s*=\s*(\d+)");
-        _minor = m.Success ? int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) : 0;
+        _minor = m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var minor) ? minor : 0;
+        var tool = Regex.Match(version, @"^tool\s*=\s*(.*?)\s*$", RegexOptions.Multiline);
+        _tool = tool.Success ? tool.Groups[1].Value : "";
 
         var turtle = ReadText("information.turtle") ?? throw new InvalidDataException("AFF4: no information.turtle in the container.");
         ParseTurtle(turtle);
@@ -145,6 +148,13 @@ public sealed class Aff4Reader : IDisposable
         public required int ChunksPerSegment { get; init; }
         public required string Compression { get; init; }
         public required long Size { get; init; }
+
+        /// <summary>
+        /// True for a zlib stream written by Cinder's first AFF4 writer, which compressed every
+        /// chunk and never stored one raw. For such a stream a chunk exactly one chunk-size long
+        /// is still compressed data, where every other writer means "stored".
+        /// </summary>
+        public bool AlwaysCompressed { get; init; }
         public int LoadedBevy = -1;
         public byte[]? BevyData;
         public long[]? BevyOffsets;
@@ -174,9 +184,10 @@ public sealed class Aff4Reader : IDisposable
 
     private List<MapRange> ReadMap(string mapUrn)
     {
-        var idx = ReadText(Member(mapUrn, "idx")) ?? ReadText(MemberRaw(mapUrn, "idx")) ?? "";
+        var idxBytes = ReadMember(mapUrn, "idx");
+        var idx = idxBytes is null ? "" : Encoding.UTF8.GetString(idxBytes);
         var targets = idx.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(t => t.Trim()).ToList();
-        var raw = ReadBytes(Member(mapUrn, "map")) ?? ReadBytes(MemberRaw(mapUrn, "map"))
+        var raw = ReadMember(mapUrn, "map")
             ?? throw new InvalidDataException("AFF4: map has no range data.");
         if (raw.Length % 28 != 0)
         {
@@ -194,13 +205,26 @@ public sealed class Aff4Reader : IDisposable
             {
                 throw new InvalidDataException("AFF4: map range with negative offsets.");
             }
+            // A null target reads as zeros, which is only right for the targets that mean zeros.
+            // A range whose data cannot be located — a target id the idx does not list, or a
+            // stream whose bevies are not in this container (another volume of a split image,
+            // or member names this reader does not recognise) — must not be served as zeros:
+            // the whole image would then read "successfully" as empty media.
             ImageStreamInfo? target = null;
-            if (targetId < targets.Count)
+            if (length > 0)
             {
+                if (targetId >= targets.Count)
+                {
+                    throw new InvalidDataException(
+                        $"AFF4: map range at offset {mapOffset:N0} refers to target #{targetId}, but the map lists {targets.Count} target(s).");
+                }
                 var t = targets[(int)targetId];
                 if (!IsZeroTarget(t))
                 {
-                    target = StreamInfo(t);   // null → treated as unreadable (zeros)
+                    target = StreamInfo(t) ?? throw new InvalidDataException(
+                        $"AFF4: map range at offset {mapOffset:N0} is stored in {t}, whose data is not in this container " +
+                        "(looked for its first bevy under every member naming this reader knows). " +
+                        "Refusing to present the range as zeros.");
                 }
             }
             ranges.Add(new MapRange(mapOffset, length, targetOffset, target));
@@ -227,11 +251,17 @@ public sealed class Aff4Reader : IDisposable
         }
         var compression = Get(urn, "compressionMethod") ?? Aff4Writer.StoredCompression;
         var size = ParseLong(Get(urn, "size")) ?? 0;
-        if (_zip.GetEntry(Member(urn, "00000000")) is null && _zip.GetEntry(MemberRaw(urn, "00000000")) is null && size > 0)
+        if (FindMember(urn, "00000000") is null && size > 0)
         {
             return null;   // referenced but not stored here (a foreign container)
         }
-        var info = new ImageStreamInfo { Urn = urn, ChunkSize = chunkSize, ChunksPerSegment = perSegment, Compression = compression, Size = size };
+        var legacyCinder = compression == Aff4Writer.ZlibCompression && _tool == "Cinder" &&
+            !_triples.Any(t => t.S == urn && t.P == Aff4Writer.StoredChunkMarker);
+        var info = new ImageStreamInfo
+        {
+            Urn = urn, ChunkSize = chunkSize, ChunksPerSegment = perSegment, Compression = compression, Size = size,
+            AlwaysCompressed = legacyCinder,
+        };
         _streams[urn] = info;
         return info;
     }
@@ -247,6 +277,9 @@ public sealed class Aff4Reader : IDisposable
             var pos = offset + done;
             if (pos >= s.Size)
             {
+                // The map points past the end of the stream it names. There is nothing to
+                // read, so the bytes are zeros — but they are not data, and are reported.
+                RecordDamage(pos / s.ChunkSize);
                 dest[done..].Clear();
                 return dest.Length;
             }
@@ -296,6 +329,17 @@ public sealed class Aff4Reader : IDisposable
             return Damaged(chunkIndex, expected);
         }
         var raw = s.BevyData.AsSpan((int)start, length);
+
+        // A chunk stored at exactly the chunk size is raw: writers keep a chunk uncompressed
+        // when compressing it does not help, and this length is how every reader tells. It is
+        // tested before any decoder runs, because raw media can itself be a valid zlib, LZ4 or
+        // snappy stream — a compressed file that starts on a chunk boundary is enough — and
+        // decoding it would silently replace evidence with its decompressed form.
+        if (length == s.ChunkSize && !s.AlwaysCompressed && !IsStoredCompression(s.Compression))
+        {
+            return raw[..expected].ToArray();
+        }
+
         try
         {
             var outBuf = new byte[expected];
@@ -332,6 +376,9 @@ public sealed class Aff4Reader : IDisposable
         }
     }
 
+    private static bool IsStoredCompression(string method) =>
+        method is Aff4Writer.StoredCompression or "http://aff4.org/Schema#NullCompressor" or "https://aff4.org/Schema#NullCompressor";
+
     private static int Copy(ReadOnlySpan<byte> raw, byte[] outBuf)
     {
         var n = Math.Min(raw.Length, outBuf.Length);
@@ -361,8 +408,8 @@ public sealed class Aff4Reader : IDisposable
         s.BevyLengths = null;
 
         var name = bevy.ToString("D8", CultureInfo.InvariantCulture);
-        var data = ReadBytes(Member(s.Urn, name), MaxBevyBytes) ?? ReadBytes(MemberRaw(s.Urn, name), MaxBevyBytes);
-        var index = ReadBytes(Member(s.Urn, name + ".index")) ?? ReadBytes(MemberRaw(s.Urn, name + ".index"));
+        var data = ReadMember(s.Urn, name, MaxBevyBytes);
+        var index = ReadMember(s.Urn, name + ".index");
         if (data is null || index is null)
         {
             return;
@@ -427,8 +474,34 @@ public sealed class Aff4Reader : IDisposable
 
     // ---- members ---------------------------------------------------------------------------
 
-    private static string Member(string urn, string segment) => Aff4Writer.MemberName(urn, segment);
-    private static string MemberRaw(string urn, string segment) => urn + "/" + segment;
+    /// <summary>
+    /// The ZIP member holding <paramref name="segment"/> of object <paramref name="urn"/>, under
+    /// whichever naming the writer used: the whole URN percent-encoded (v1.0), the URN verbatim
+    /// (pyaff4 0.3x), only the scheme separator encoded with path slashes kept, or a path
+    /// relative to the volume URN for objects named beneath it. Null when none exists.
+    /// </summary>
+    private string? FindMember(string urn, string segment)
+    {
+        const string Scheme = "aff4://";
+        Span<string?> candidates =
+        [
+            Aff4Writer.MemberName(urn, segment),
+            urn + "/" + segment,
+            urn.StartsWith(Scheme, StringComparison.Ordinal) ? "aff4%3A%2F%2F" + urn[Scheme.Length..] + "/" + segment : null,
+            VolumeUrn.Length > 0 && urn.StartsWith(VolumeUrn + "/", StringComparison.Ordinal) ? urn[(VolumeUrn.Length + 1)..] + "/" + segment : null,
+        ];
+        foreach (var name in candidates)
+        {
+            if (name is not null && _zip.GetEntry(name) is not null)
+            {
+                return name;
+            }
+        }
+        return null;
+    }
+
+    private byte[]? ReadMember(string urn, string segment, long limit = 64L * 1024 * 1024) =>
+        FindMember(urn, segment) is { } name ? ReadBytes(name, limit) : null;
 
     private string? ReadText(string name)
     {
@@ -622,6 +695,10 @@ public sealed class Aff4Reader : IDisposable
                     if (j < s.Length && s[j] == '<')
                     {
                         var end = s.IndexOf('>', j);
+                        if (end < 0)
+                        {
+                            throw new InvalidDataException("AFF4: information.turtle has an unterminated datatype IRI.");
+                        }
                         datatype = s[j..(end + 1)];
                         j = end + 1;
                     }
@@ -664,9 +741,11 @@ public sealed class Aff4Reader : IDisposable
 
     // ---- stream -----------------------------------------------------------------------------
 
-    private sealed class Aff4Stream(Aff4Reader reader, bool ownsReader) : Stream
+    private sealed class Aff4Stream(Aff4Reader reader, bool ownsReader) : Stream, IEvidenceDamageSource
     {
         private long _pos;
+
+        public IReadOnlyList<int> DamagedChunks => reader.DamagedChunks;
 
         public override bool CanRead => true;
         public override bool CanSeek => true;

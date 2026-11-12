@@ -20,20 +20,103 @@ Methods:
     privs(image, pid?)         -> {entries:[...]}
     handles(image, pid?)       -> {entries:[...]}
     run_plugin(image, plugin, options?) -> {raw: <list of dicts>}
+
+Value conversion. A volatility TreeGrid cell is not always a plain value:
+
+* a field that could not be read is an *absent value* object (``NotApplicableValue``,
+  ``NotAvailableValue``, ``UnreadableValue``, ``UnparsableValue``, all subclasses of
+  ``BaseAbsentValue``). It has no integer or string meaning. It becomes ``None`` here;
+  it is never turned into 0, "" or the object's repr.
+* raw memory (``bytes``, e.g. malfind's ``Hexdump``) is not UTF-8 and cannot go into JSON
+  as text. It becomes a lowercase hex string.
+* ``format_hints.Hex`` and friends are ``int`` subclasses and become plain ints;
+  datetimes become ISO 8601.
+
+The helpers below do this by duck typing so they can be tested without volatility3.
 """
 
 from __future__ import annotations
 
 import asyncio
-import sys
+import datetime as _dt
 from typing import Any
 
-from shared.protocol import Sidecar
+from shared.protocol import Sidecar, json_safe, report_progress
 
 sidecar = Sidecar()
 
 _contexts: dict[str, Any] = {}
 
+
+# -------------------- value conversion --------------------
+
+def _is_absent(value: Any) -> bool:
+    """True for None and for volatility3's absent-value markers."""
+    if value is None:
+        return True
+    return any(cls.__name__ == "BaseAbsentValue" for cls in type(value).__mro__)
+
+
+def _plain(value: Any) -> Any:
+    """One TreeGrid cell as a JSON-serialisable value (see module docstring)."""
+    if _is_absent(value):
+        return None
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex()
+    if isinstance(value, str):
+        return json_safe(str(value))
+    if isinstance(value, (_dt.datetime, _dt.date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_plain(v) for v in value]
+    return json_safe(value)
+
+
+def _int(value: Any) -> int | None:
+    """Integer value of a cell, or None when it is absent or not a number."""
+    value = _plain(value)
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value == value and value not in (float("inf"), float("-inf")) else None
+    if isinstance(value, str):
+        text = value.strip()
+        try:
+            return int(text, 0) if text else None
+        except ValueError:
+            return None
+    return None
+
+
+def _str(value: Any) -> str | None:
+    """Text value of a cell, or None when it is absent or empty."""
+    value = _plain(value)
+    if value is None:
+        return None
+    text = value if isinstance(value, str) else str(value)
+    return text or None
+
+
+def _first(row: dict[str, Any], *names: str) -> Any:
+    """The first present, non-absent column among ``names`` (column spellings differ
+    between volatility3 releases and between plugins)."""
+    for name in names:
+        if name in row and not _is_absent(row[name]):
+            return row[name]
+    return None
+
+
+# -------------------- volatility3 plumbing --------------------
 
 def _import_vol():
     try:
@@ -61,6 +144,10 @@ def _automagic_context(image_path: str):
     return _contexts[image_path]
 
 
+def _on_vol_progress(_progress: Any = None, _description: Any = None) -> None:
+    report_progress(phase="volatility")
+
+
 def _run_plugin(image_path: str, plugin_id: str, options: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     volatility3, framework, _ = _import_vol()
     from volatility3.framework import plugins, automagic, contexts
@@ -84,37 +171,129 @@ def _run_plugin(image_path: str, plugin_id: str, options: dict[str, Any] | None 
     from volatility3.framework import constants
     from volatility3.framework.plugins import construct_plugin
     automagic.choose_automagic(automagics, plugin)
-    constructed = construct_plugin(ctx, automagics, plugin, "plugins", None, options or {})
+    constructed = construct_plugin(ctx, automagics, plugin, "plugins", _on_vol_progress, options or {})
 
     treegrid = constructed.run()
     rows: list[dict[str, Any]] = []
 
     def _visitor(node, accumulator):
-        record = {col.name: node.values[i] for i, col in enumerate(treegrid.columns)}
-        rows.append(record)
+        rows.append(_row_from_node(treegrid.columns, node.values))
+        report_progress(phase="volatility", rows=len(rows))
         return accumulator
     treegrid.populate(_visitor, None)
     return rows
 
 
+def _row_from_node(columns: Any, values: Any) -> dict[str, Any]:
+    """One TreeGrid row as {column name: plain value}. Everything a handler returns goes
+    through here, so no absent-value object or raw byte string reaches the JSON encoder."""
+    return {str(col.name): _plain(values[i]) for i, col in enumerate(columns)}
+
+
+# -------------------- shaping --------------------
+
 def _shape_pstree(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for r in rows:
         out.append({
-            "pid": int(r.get("PID", 0) or 0),
-            "ppid": int(r.get("PPID", 0) or 0),
-            "image": str(r.get("ImageFileName", "") or ""),
-            "cmdline": r.get("CommandLine", None),
-            "created_at": str(r.get("CreateTime", "")) or None,
-            "exited_at": str(r.get("ExitTime", "")) or None,
-            "threads": int(r.get("Threads", 0) or 0),
-            "handles": int(r.get("Handles", 0) or 0),
-            "session": str(r.get("SessionId", "")) or None,
+            "pid": _int(r.get("PID")),
+            "ppid": _int(r.get("PPID")),
+            "image": _str(r.get("ImageFileName")) or "",
+            "cmdline": _str(_first(r, "CommandLine", "Cmd")),
+            "created_at": _str(r.get("CreateTime")),
+            "exited_at": _str(r.get("ExitTime")),
+            "threads": _int(r.get("Threads")),
+            "handles": _int(r.get("Handles")),
+            "session": _str(r.get("SessionId")),
             "integrity": None,
             "anomalies": [],
         })
     return out
 
+
+def _shape_netscan(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for r in rows:
+        out.append({
+            "pid": _int(r.get("PID")),
+            "proto": _str(r.get("Proto")) or "",
+            "local_addr": _str(r.get("LocalAddr")) or "",
+            "local_port": _int(r.get("LocalPort")),
+            "remote_addr": _str(r.get("ForeignAddr")) or "",
+            "remote_port": _int(r.get("ForeignPort")),
+            "state": _str(r.get("State")) or "",
+            "created_at": _str(r.get("Created")),
+        })
+    return out
+
+
+def _shape_dlllist(rows: list[dict[str, Any]], pid: Any = None) -> list[dict[str, Any]]:
+    wanted = _int(pid)
+    out = []
+    for r in rows:
+        row_pid = _int(r.get("PID"))
+        if wanted is not None and row_pid != wanted:
+            continue
+        out.append({
+            "pid": row_pid,
+            "name": _str(r.get("Name")) or "",
+            "path": _str(r.get("Path")) or "",
+            "base": _str(r.get("Base")),
+            "size": _int(r.get("Size")),
+            "signed": False,  # vol3 doesn't validate signing here
+        })
+    return out
+
+
+def _shape_malfind(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for r in rows:
+        out.append({
+            "pid": _int(r.get("PID")),
+            "image_name": _str(r.get("Process")) or "",
+            "type": "malfind",
+            "address": _str(_first(r, "Start VPN", "Start")),
+            "length": _int(r.get("Length")),
+            # Hexdump is raw memory: _plain() turns it into hex text.
+            "notes": _str(r.get("Hexdump")),
+        })
+    return out
+
+
+def _shape_hashdump(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for r in rows:
+        # volatility3 names the columns "lmhash" / "nthash"; older builds and other tools
+        # use "LM" / "NT". Accept either.
+        lm = _str(_first(r, "lmhash", "LM", "LMHash", "lm"))
+        nt = _str(_first(r, "nthash", "NT", "NTHash", "nt"))
+        out.append({
+            "plugin": "hashdump",
+            "account": _str(_first(r, "User", "user")) or "",
+            "domain": None,
+            "rid": _int(_first(r, "rid", "RID")),
+            "lm": lm,
+            "nt": nt,
+            # pwdump-style "LM:NT"; null when neither hash was recovered, so an empty
+            # result can never be read as the pair of empty hashes ":".
+            "hash": f"{lm or ''}:{nt or ''}" if (lm or nt) else None,
+            "last_change": None,
+        })
+    return out
+
+
+def _shape_cmdline(rows: list[dict[str, Any]], pid: Any = None) -> list[dict[str, Any]]:
+    wanted = _int(pid)
+    out = []
+    for r in rows:
+        row_pid = _int(r.get("PID"))
+        if wanted is not None and row_pid != wanted:
+            continue
+        out.append({"pid": row_pid, "cmdline": _str(r.get("Args"))})
+    return out
+
+
+# -------------------- methods --------------------
 
 @sidecar.method("pstree")
 def pstree(params: Any) -> dict[str, Any]:
@@ -131,53 +310,19 @@ def pslist(params: Any) -> dict[str, Any]:
 @sidecar.method("netscan")
 def netscan(params: Any) -> dict[str, Any]:
     rows = _run_plugin(params["image"], "windows.netscan.NetScan")
-    out = []
-    for r in rows:
-        out.append({
-            "pid": int(r.get("PID", 0) or 0),
-            "proto": r.get("Proto", ""),
-            "local_addr": r.get("LocalAddr", ""),
-            "local_port": int(r.get("LocalPort", 0) or 0),
-            "remote_addr": r.get("ForeignAddr", ""),
-            "remote_port": int(r.get("ForeignPort", 0) or 0),
-            "state": r.get("State", ""),
-            "created_at": str(r.get("Created", "")) or None,
-        })
-    return {"entries": out}
+    return {"entries": _shape_netscan(rows)}
 
 
 @sidecar.method("dlllist")
 def dlllist(params: Any) -> dict[str, Any]:
     rows = _run_plugin(params["image"], "windows.dlllist.DllList")
-    out = []
-    for r in rows:
-        if "pid" in params and int(r.get("PID", 0) or 0) != int(params["pid"]):
-            continue
-        out.append({
-            "pid": int(r.get("PID", 0) or 0),
-            "name": r.get("Name", ""),
-            "path": r.get("Path", ""),
-            "base": str(r.get("Base", "")),
-            "size": int(r.get("Size", 0) or 0),
-            "signed": False,  # vol3 doesn't validate signing here
-        })
-    return {"entries": out}
+    return {"entries": _shape_dlllist(rows, params.get("pid"))}
 
 
 @sidecar.method("malfind")
 def malfind(params: Any) -> dict[str, Any]:
     rows = _run_plugin(params["image"], "windows.malfind.Malfind")
-    out = []
-    for r in rows:
-        out.append({
-            "pid": int(r.get("PID", 0) or 0),
-            "image_name": r.get("Process", ""),
-            "type": "malfind",
-            "address": str(r.get("Start VPN", r.get("Start", ""))),
-            "length": int(r.get("Length", 0) or 0),
-            "notes": r.get("Hexdump", None),
-        })
-    return {"entries": out}
+    return {"entries": _shape_malfind(rows)}
 
 
 @sidecar.method("hollowfind")
@@ -191,16 +336,7 @@ def hollowfind(params: Any) -> dict[str, Any]:
 @sidecar.method("hashdump")
 def hashdump(params: Any) -> dict[str, Any]:
     rows = _run_plugin(params["image"], "windows.hashdump.Hashdump")
-    out = []
-    for r in rows:
-        out.append({
-            "plugin": "hashdump",
-            "account": r.get("User", ""),
-            "domain": None,
-            "hash": f"{r.get('LM', '')}:{r.get('NT', '')}",
-            "last_change": None,
-        })
-    return {"entries": out}
+    return {"entries": _shape_hashdump(rows)}
 
 
 @sidecar.method("lsadump")
@@ -218,12 +354,7 @@ def cachedump(params: Any) -> dict[str, Any]:
 @sidecar.method("cmdline")
 def cmdline(params: Any) -> dict[str, Any]:
     rows = _run_plugin(params["image"], "windows.cmdline.CmdLine")
-    out = []
-    for r in rows:
-        if "pid" in params and int(r.get("PID", 0) or 0) != int(params["pid"]):
-            continue
-        out.append({"pid": int(r.get("PID", 0) or 0), "cmdline": r.get("Args", "")})
-    return {"entries": out}
+    return {"entries": _shape_cmdline(rows, params.get("pid"))}
 
 
 @sidecar.method("run_plugin")

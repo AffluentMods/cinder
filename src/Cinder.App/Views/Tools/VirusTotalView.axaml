@@ -7,7 +7,7 @@
     <!-- Action form: what will happen, the inputs, one primary action, the result. -->
     <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
         <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
-            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640"
+            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
                        Text="Asks VirusTotal what antivirus engines say about a file, using only its hash. The file itself is never uploaded." />
             <Border Background="{DynamicResource CinderWarnSoftBrush}" BorderBrush="{DynamicResource CinderWarnBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="14,12">

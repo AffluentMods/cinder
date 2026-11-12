@@ -8,10 +8,14 @@ using Cinder.Core.Diagnostics;
 namespace Cinder.Plugins;
 
 /// <summary>
-/// Embedded Python scripting host. Spawns a long-running Python sidecar that exposes the case
-/// API: <c>cinder.case</c>, <c>cinder.timeline</c>, <c>cinder.artifacts</c>, <c>cinder.search</c>.
-/// Scripts run as untrusted code (no file IO outside the case dir, no network) — enforced
-/// loosely in the harness; trustworthy scripts can be marked "trusted" in settings.
+/// Embedded Python scripting host. Spawns a long-running Python sidecar and evaluates scripts
+/// in it.
+///
+/// <para><b>There is no sandbox.</b> A script runs as ordinary Python with the examiner's full
+/// rights: it can read and write any file, open network connections and start processes. An
+/// earlier comment here promised confinement to the case directory; nothing ever enforced
+/// that, and restricting <c>exec</c> is not a security boundary. Treat a script exactly like a
+/// program: run only ones you trust.</para>
 /// </summary>
 public sealed class PythonScriptingHost : IAsyncDisposable
 {

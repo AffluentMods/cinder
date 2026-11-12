@@ -29,6 +29,9 @@
             </Grid>
             <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Content="Convert"
                     Command="{Binding RunCommand}" Margin="120,0,0,0" />
+            <Button Classes="tb" HorizontalAlignment="Left" Height="30" Margin="120,0,0,0" Content="Stop"
+                    Command="{Binding RunCancelCommand}" IsVisible="{Binding RunCommand.IsRunning}"
+                    ToolTip.Tip="Stops and deletes the unfinished output" />
             <ProgressBar IsIndeterminate="True" IsVisible="{Binding !!BytesConverted}" Margin="120,0,0,0" />
             <TextBlock Text="{Binding BytesConverted, StringFormat='{}{0:N0} bytes converted'}" Classes="mono dim" FontSize="12"
                        IsVisible="{Binding !!BytesConverted}" Margin="120,0,0,0" />

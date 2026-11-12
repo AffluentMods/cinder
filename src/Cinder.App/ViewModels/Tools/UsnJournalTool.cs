@@ -16,7 +16,8 @@ public sealed partial class UsnJournalTool : SidecarToolViewModel
     public override string Id => "usnjrnl";
     public override string Title => "USN journal";
     public override string Icon => "📜";
-    public override string Subtitle => "$UsnJrnl:$J — every create / delete / rename / write on the volume, with MFT references. Image or extracted $J.";
+    public override string Subtitle => "List every file creation, deletion, rename and write recorded in an NTFS volume's change journal, with the time of each.";
+    public override string EmptyStateHint => "Pick a disk or volume image (.dd, .E01, .vhd, .vhdx), or a $J file extracted from one.";
     public override string Phase => "3";
     public override string Kind => "usnjrnl";
 
@@ -44,30 +45,32 @@ finding what was written in the minutes around an alert.
 3. Filter, export CSV / JSON, or bookmark a row as a finding.
 
 ## Limits
-The grid shows up to 200,000 records and says so when it stops; export to get
-everything. The journal only covers what NTFS still retains — a busy volume rolls
-it over in days. The Timeline tool ingests `$J` files from a triage folder too.
+The grid shows up to 200,000 records, oldest first, and says so when it stops. Export
+writes the rows in the grid, so an export of a journal that was cut short is cut short
+too. The journal only covers what NTFS still retains — a busy volume rolls it over in
+days. An extracted file is recognised by its name, which must end in `$J` or start with
+`$UsnJrnl`. The Timeline tool ingests `$J` files from a triage folder too.
 """;
 
-    protected override async Task LoadAsync(string evidencePath, CancellationToken ct)
+    protected override async Task<ParseResult> ParseAsync(string evidencePath, CancellationToken ct)
     {
-        var (rows, truncated) = await Task.Run(() => Parse(evidencePath, ct), ct);
-        AddRows(rows, budget: int.MaxValue);
-        IsTruncated = truncated;
+        var (rows, truncated, note) = await Task.Run(() => Parse(evidencePath, ct), ct);
+        return new ParseResult(rows, truncated, null, note);
     }
 
-    private static (List<object> Rows, bool Truncated) Parse(string path, CancellationToken ct)
+    private static (List<object> Rows, bool Truncated, string? Note) Parse(string path, CancellationToken ct)
     {
         var rows = new List<object>();
+        var problems = new List<string>();
         var truncated = false;
 
         // An extracted $J: parse the file directly.
         var name = Path.GetFileName(path);
-        if (name.EndsWith("$J", StringComparison.OrdinalIgnoreCase) || name.Equals("$UsnJrnl", StringComparison.OrdinalIgnoreCase))
+        if (name.EndsWith("$J", StringComparison.OrdinalIgnoreCase) || name.StartsWith("$UsnJrnl", StringComparison.OrdinalIgnoreCase))
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
             truncated = Append(UsnJournal.Parse(fs, ct), "", rows, ct);
-            return (rows, truncated);
+            return (rows, truncated, rows.Count == 0 ? "This journal file holds no records." : null);
         }
 
         var ext = Path.GetExtension(path).ToLowerInvariant();
@@ -77,7 +80,7 @@ it over in days. The Timeline tool ingests `$J` files from a triage folder too.
 
         if (stream is not null)
         {
-            truncated = WalkVolumes(stream, rows, ct);
+            truncated = WalkVolumes(stream, rows, problems, ct);
         }
         else
         {
@@ -85,36 +88,38 @@ it over in days. The Timeline tool ingests `$J` files from a triage folder too.
             using VirtualDisk disk = ext == ".vhd"
                 ? new DiscUtils.Vhd.Disk(file, DiscUtils.Streams.Ownership.None)
                 : new DiscUtils.Vhdx.Disk(file, DiscUtils.Streams.Ownership.None);
-            foreach (var part in disk.Partitions.Partitions)
+            if (disk.Partitions is null)
             {
-                ct.ThrowIfCancellationRequested();
-                using var ps = part.Open();
-                if (TryVolume(ps, $"[part {part.FirstSector:N0}]", rows, ct)) { truncated = rows.Count >= RowBudget; }
-                if (truncated) break;
+                // No partition table: the disk is one volume.
+                using var whole = disk.Content;
+                TryVolume(whole, "", rows, problems, ct);
             }
+            else
+            {
+                foreach (var part in disk.Partitions.Partitions)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    using var ps = part.Open();
+                    TryVolume(ps, $"[part {part.FirstSector:N0}]", rows, problems, ct);
+                    if (rows.Count >= RowBudget) break;
+                }
+            }
+            truncated = rows.Count >= RowBudget;
         }
 
         if (rows.Count == 0)
         {
-            rows.Add(new
-            {
-                Usn = 0L,
-                Timestamp = "",
-                FileName = "(no journal found)",
-                Reason = "",
-                Mft = "",
-                Parent = "",
-                Attributes = "",
-                Volume = "",
-                Note = "No NTFS volume with a $UsnJrnl:$J was found in this evidence.",
-            });
+            throw new InvalidOperationException(problems.Count > 0
+                ? $"The change journal in this evidence could not be read: {problems[0]}"
+                : "No NTFS volume with a change journal ($UsnJrnl) was found. Pick a disk or volume image, or an extracted file named $J.");
         }
-        return (rows, truncated);
+        var note = problems.Count == 0 ? null : $"Part of the journal could not be read, so these rows are incomplete: {string.Join("; ", problems)}";
+        return (rows, truncated, note);
     }
 
-    private static bool WalkVolumes(Stream image, List<object> rows, CancellationToken ct)
+    private static bool WalkVolumes(Stream image, List<object> rows, List<string> problems, CancellationToken ct)
     {
-        if (TryVolume(image, "", rows, ct))
+        if (TryVolume(image, "", rows, problems, ct))
         {
             return rows.Count >= RowBudget;
         }
@@ -127,22 +132,32 @@ it over in days. The Timeline tool ingests `$J` files from a triage folder too.
             try
             {
                 using var vs = vol.Open();
-                TryVolume(vs, $"[{vol.Identity}]", rows, ct);
+                TryVolume(vs, $"[{vol.Identity}]", rows, problems, ct);
             }
-            catch (OperationCanceledException) { throw; }
-            catch { /* not NTFS or unreadable — try the next partition */ }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A partition that cannot be opened at all — try the next one.
+            }
             if (rows.Count >= RowBudget) return true;
         }
         return false;
     }
 
 #pragma warning disable CA1416 // read-only NTFS access; see DiscUtilsWalker
-    private static bool TryVolume(Stream s, string prefix, List<object> rows, CancellationToken ct)
+    /// <summary>
+    /// Reads one volume. Returns true when the volume is NTFS (whether or not it has a journal),
+    /// so the caller knows the image was a bare volume. A failure after the volume was
+    /// recognised is recorded in <paramref name="problems"/>: rows read before it are kept, and
+    /// the grid says they are incomplete instead of passing them off as the whole journal.
+    /// </summary>
+    private static bool TryVolume(Stream s, string prefix, List<object> rows, List<string> problems, CancellationToken ct)
     {
+        var recognised = false;
         try
         {
             s.Position = 0;
             if (!NtfsFileSystem.Detect(s)) return false;
+            recognised = true;
             using var fs = new NtfsFileSystem(s);
             using var j = UsnJournal.Open(fs);
             if (j is null)
@@ -152,8 +167,14 @@ it over in days. The Timeline tool ingests `$J` files from a triage folder too.
             Append(UsnJournal.Parse(j, ct), prefix, rows, ct);
             return true;
         }
-        catch (OperationCanceledException) { throw; }
-        catch { return false; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (recognised)
+            {
+                problems.Add($"{(prefix.Length > 0 ? prefix + " " : "")}{ex.Message}");
+            }
+            return recognised;
+        }
     }
 #pragma warning restore CA1416
 

@@ -42,7 +42,7 @@ public sealed class SettingsStore
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     /// <summary>Settings keys whose values are encrypted at rest before being written.</summary>
-    private static readonly string[] SecretAiKeys = ["apiKey", "ApiKey", "api_key"];
+    private static readonly string[] SecretAiKeys = [ApiKeyName, "ApiKey", "api_key"];
 
     /// <summary>Marker prefix on values that have been DPAPI-encrypted by Cinder.</summary>
     public const string EncryptedPrefix = "enc::";
@@ -56,60 +56,103 @@ public sealed class SettingsStore
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
     }
 
-    public CinderSettings Load()
+    /// <summary>The spelling every reader in the app uses for the AI provider's API key.</summary>
+    public const string ApiKeyName = "apiKey";
+
+    /// <summary>
+    /// The settings on disk, or defaults when there are none — or when the file cannot be read.
+    /// Callers that are about to write should use <see cref="TryLoad"/> (or just call
+    /// <see cref="Save"/>, which refuses to replace a file it cannot read).
+    /// </summary>
+    public CinderSettings Load() => TryLoad(out var settings, out _) ? settings : new CinderSettings();
+
+    /// <summary>
+    /// Reads the settings file. Returns true with defaults when there is no file (or an empty
+    /// one) — nothing has been saved yet. Returns false, with the reason, when a file exists
+    /// but could not be read or parsed: in that case <paramref name="settings"/> is defaults
+    /// that say nothing about what the examiner had configured, and must not be written back.
+    /// </summary>
+    public bool TryLoad(out CinderSettings settings, out string? error)
     {
-        if (!File.Exists(_path))
-        {
-            return new CinderSettings();
-        }
+        settings = new CinderSettings();
+        error = null;
         try
         {
-            var settings = JsonSerializer.Deserialize<CinderSettings>(File.ReadAllText(_path)) ?? new CinderSettings();
+            if (!File.Exists(_path))
+            {
+                return true;
+            }
+            var text = File.ReadAllText(_path);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return true;   // a zero-length file holds no settings to lose
+            }
+            var loaded = JsonSerializer.Deserialize<CinderSettings>(text) ?? new CinderSettings();
             // Decrypt any AI-provider secrets on load. We mutate the dictionary in place so the
             // rest of the app never sees the ciphertext form.
-            DecryptSecrets(settings.AiProvider);
-            return settings;
+            DecryptSecrets(loaded.AiProvider);
+            NormalizeApiKey(loaded.AiProvider);
+            settings = loaded;
+            return true;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
+                                       or NotSupportedException or System.Security.SecurityException)
         {
-            return new CinderSettings();
+            error = ex.Message;
+            return false;
         }
     }
 
+    /// <summary>
+    /// Writes the settings, atomically. Throws <see cref="SettingsUnreadableException"/> —
+    /// without touching the file — when a settings file exists but cannot be read: saving then
+    /// would replace whatever the examiner had configured (API key, hash-set database,
+    /// timestamp authority) with defaults plus one change, and they would never be told.
+    /// </summary>
     public void Save(CinderSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (!TryLoad(out _, out var error))
+        {
+            throw new SettingsUnreadableException(_path, error ?? "unknown error");
+        }
+
         // Round-trip through a copy so we don't mutate the caller's dictionary when we encrypt.
         var safe = settings with
         {
             AiProvider = new Dictionary<string, string>(settings.AiProvider),
         };
+        NormalizeApiKey(safe.AiProvider);
         EncryptSecrets(safe.AiProvider);
-        File.WriteAllText(_path, JsonSerializer.Serialize(safe, Json));
-        RestrictToOwner(_path);
+        // The file holds the AI provider API key, so on Unix it is created owner-only. On
+        // Windows it already sits under %LOCALAPPDATA%, which is user-scoped by ACL.
+        AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(safe, Json), ownerOnly: true);
     }
 
     /// <summary>
-    /// Restricts settings.json to the owning user on Unix.
-    ///
-    /// <para>The file holds the AI provider API key. On Windows it already sits under
-    /// <c>%LOCALAPPDATA%</c>, which is user-scoped by ACL. On Linux and macOS the default umask
-    /// leaves it world-readable, and the non-Windows encryption fallback derives its key from
-    /// the machine and user name — so any local account that can read the file can also
-    /// reproduce the key. Tightening the mode is what stops those two weaknesses compounding.</para>
+    /// Earlier builds saved the key as "api_key" while the AI tool read "apiKey", so a saved key
+    /// never loaded. Whatever spelling a file uses, the app sees (and writes) exactly one.
     /// </summary>
-    private static void RestrictToOwner(string path)
+    private static void NormalizeApiKey(IDictionary<string, string> ai)
     {
-        if (OperatingSystem.IsWindows())
+        string? value = null;
+        foreach (var key in SecretAiKeys)
         {
-            return;
+            if (ai.TryGetValue(key, out var v) && !string.IsNullOrEmpty(v))
+            {
+                value ??= v;
+            }
         }
-        try
+        foreach (var key in SecretAiKeys)
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            if (key != ApiKeyName)
+            {
+                ai.Remove(key);
+            }
         }
-        catch
+        if (value is not null)
         {
-            // Best-effort: an exotic filesystem that rejects chmod must not stop settings saving.
+            ai[ApiKeyName] = value;
         }
     }
 
@@ -220,4 +263,16 @@ public sealed class SettingsStore
         CryptographicOperations.ZeroMemory(key);
         return plain;
     }
+}
+
+/// <summary>
+/// Thrown by <see cref="SettingsStore.Save"/> when a settings file exists but could not be read.
+/// The file has not been changed. An <see cref="IOException"/>, so callers that already report
+/// I/O failures report this one too.
+/// </summary>
+public sealed class SettingsUnreadableException(string path, string reason)
+    : IOException($"The settings file {path} exists but could not be read ({reason}). " +
+                  "It has been left as it is; fix or remove it, then save again.")
+{
+    public string SettingsPath { get; } = path;
 }

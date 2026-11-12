@@ -17,7 +17,11 @@ namespace Cinder.AI;
 public class OpenAiCompatibleProvider : IAiProvider
 {
     private readonly HttpClient _http;
+    private readonly Uri _endpoint;
     private readonly Func<string?> _apiKeyAccessor;
+
+    /// <summary>The API root every request is resolved against; always ends in '/'.</summary>
+    public Uri Endpoint => _endpoint;
 
     public string Id { get; }
     public string DisplayName { get; }
@@ -28,21 +32,26 @@ public class OpenAiCompatibleProvider : IAiProvider
         Func<string?> apiKeyAccessor, AiProviderCapabilities? capabilities = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
-        _http.BaseAddress = endpoint;
+        ArgumentNullException.ThrowIfNull(endpoint);
+        // The client is the caller's and may be shared or already in use: HttpClient.BaseAddress
+        // throws once a request has been sent, so the endpoint lives here and every request
+        // carries an absolute URI. Normalising it also keeps "https://host/v1" from losing its
+        // "/v1" when "chat/completions" is resolved against it.
+        _endpoint = AiEndpoint.Normalize(endpoint);
         Id = id;
         DisplayName = displayName;
         Model = model;
         _apiKeyAccessor = apiKeyAccessor ?? (() => null);
         Capabilities = capabilities ?? new AiProviderCapabilities(
             SupportsStreaming: true, SupportsToolCalling: false, SupportsVision: false,
-            MaxContextTokens: 32_000, LocalOnly: endpoint.Host is "localhost" or "127.0.0.1");
+            MaxContextTokens: 32_000, LocalOnly: _endpoint.IsLoopback);
     }
 
     public async Task<bool> HealthCheckAsync(CancellationToken ct)
     {
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, "models");
+            using var req = new HttpRequestMessage(HttpMethod.Get, new Uri(_endpoint, "models"));
             ApplyAuth(req);
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             return resp.IsSuccessStatusCode;
@@ -55,7 +64,7 @@ public class OpenAiCompatibleProvider : IAiProvider
 
     public async Task<string> CompleteAsync(AiPrompt prompt, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, "chat/completions");
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(_endpoint, "chat/completions"));
         ApplyAuth(req);
         req.Content = JsonContent.Create(BuildBody(prompt, stream: false));
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
@@ -66,7 +75,7 @@ public class OpenAiCompatibleProvider : IAiProvider
 
     public async IAsyncEnumerable<string> StreamCompletionAsync(AiPrompt prompt, [EnumeratorCancellation] CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, "chat/completions");
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(_endpoint, "chat/completions"));
         ApplyAuth(req);
         req.Content = JsonContent.Create(BuildBody(prompt, stream: true));
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);

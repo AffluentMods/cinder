@@ -46,17 +46,82 @@ public sealed class NaturalLanguageQuery
         {
             return null;
         }
+        return Parse(json);
+    }
+
+    private static readonly JsonSerializerOptions QueryJson = new()
+    {
+        // The schema the model is given is snake_case (from_utc, text_contains). Case-insensitive
+        // matching alone does not bridge that to FromUtc/TextContains: those members stayed null
+        // and the date and text filters were silently dropped from every translated query.
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+    };
+
+    private static readonly string[] AllowedKinds = ["timeline", "search", "browser_history", "user_activity"];
+
+    /// <summary>
+    /// Parses and validates the model's JSON. Returns null — "could not translate" — rather than
+    /// a query with a filter quietly missing: an unknown kind, an unparseable or inverted date
+    /// range, or malformed JSON all fail closed. <c>limit</c> is clamped to the schema's 1..1000.
+    /// </summary>
+    public static StructuredQuery? Parse(string json)
+    {
+        StructuredQuery? query;
         try
         {
-            return JsonSerializer.Deserialize<StructuredQuery>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true,
-            });
+            query = JsonSerializer.Deserialize<StructuredQuery>(json, QueryJson);
         }
         catch (JsonException)
         {
             return null;
         }
+
+        if (query?.Kind is null)
+        {
+            return null;
+        }
+        var kind = AllowedKinds.FirstOrDefault(k => k.Equals(query.Kind.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (kind is null)
+        {
+            return null;
+        }
+
+        if (!TryParseInstant(query.FromUtc, out var from) || !TryParseInstant(query.ToUtc, out var to))
+        {
+            return null;
+        }
+        if (from is not null && to is not null && from > to)
+        {
+            return null;
+        }
+
+        return query with
+        {
+            Kind = kind,
+            User = string.IsNullOrWhiteSpace(query.User) ? null : query.User,
+            FromUtc = from?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            ToUtc = to?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            TextContains = string.IsNullOrEmpty(query.TextContains) ? null : query.TextContains,
+            Limit = query.Limit is { } limit ? Math.Clamp(limit, 1, 1000) : null,
+        };
+    }
+
+    private static bool TryParseInstant(string? text, out DateTimeOffset? instant)
+    {
+        instant = null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+        if (DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var parsed))
+        {
+            instant = parsed;
+            return true;
+        }
+        return false;
     }
 
     private static string ExtractJson(string raw)

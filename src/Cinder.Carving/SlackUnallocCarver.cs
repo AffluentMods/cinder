@@ -17,14 +17,31 @@ public sealed class SlackUnallocCarver(FileCarver carver)
         string? outputDirectory = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(image);
+        ArgumentNullException.ThrowIfNull(regions);
+
         foreach (var region in regions)
         {
             ct.ThrowIfCancellationRequested();
-            image.Position = region.Offset;
-            var slice = new SubStream(image, region.Length);
-            await foreach (var hit in _carver.CarveAsync(slice, outputDirectory, null, ct).ConfigureAwait(false))
+
+            // Region lists come from a parser reading the evidence; a region that is not
+            // inside the image is skipped rather than allowed to throw out of the whole carve.
+            if (region.Offset < 0 || region.Length <= 0 || (image.CanSeek && region.Offset >= image.Length))
             {
-                yield return hit with { Offset = region.Offset + hit.Offset };
+                continue;
+            }
+            var length = image.CanSeek ? Math.Min(region.Length, image.Length - region.Offset) : region.Length;
+
+            image.Position = region.Offset;
+            var slice = new SubStream(image, length);
+
+            // The region's offset is handed to the carver, which uses it for the reported
+            // offsets and for the output file names. Naming files by the slice-relative
+            // offset, as before, made every region's object at relative offset N overwrite
+            // the previous region's — with both hits left pointing at the survivor.
+            await foreach (var hit in _carver.CarveAsync(slice, region.Offset, outputDirectory, null, ct).ConfigureAwait(false))
+            {
+                yield return hit;
             }
         }
     }

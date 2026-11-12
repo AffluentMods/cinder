@@ -300,21 +300,22 @@ public sealed class HexViewer : Control, ILogicalScrollable
         var read = pool.Rent(capacity);
         try
         {
-            var bytesRead = buffer.Read(ScrollOffset, read.AsSpan(0, capacity));
-
-            var caretRow = BytesPerRow > 0 ? CaretOffset / BytesPerRow : -1;
-            var firstVisibleRow = ScrollOffset / Math.Max(1, BytesPerRow);
+            // Read-only here: a bound property must not be written during Render. A scroll
+            // offset pushed in from a binding is used as given, except that it is never
+            // allowed below zero — the buffer is not asked for bytes before its start.
+            var scrollOffset = Math.Max(0, ScrollOffset);
+            var caretOffset = CaretOffset;
+            var bytesRead = buffer.Read(scrollOffset, read.AsSpan(0, capacity));
 
             for (int row = 0; row < visibleRows; row++)
             {
-                var rowOffset = ScrollOffset + (long)row * bytesPerRow;
+                var rowOffset = scrollOffset + (long)row * bytesPerRow;
                 if (rowOffset >= buffer.Length)
                 {
                     break;
                 }
 
                 var y = HeaderHeight + row * _rowHeight;
-                var absoluteRow = firstVisibleRow + row;
 
                 // Sector boundaries (every 512 bytes) on disk-sized files: the unit partition
                 // tables, MFT records and carvers all think in.
@@ -323,8 +324,10 @@ public sealed class HexViewer : Control, ILogicalScrollable
                     context.FillRectangle(BrushSector, new Rect(0, y, bounds.Width, 1));
                 }
 
-                // Caret row gets a faint wash across its full width; no zebra striping.
-                if (absoluteRow == caretRow)
+                // Caret row gets a faint wash across its full width; no zebra striping. Decided
+                // by which row holds the caret byte, not by row-index division, so it is right
+                // even for a scroll offset that is not on the row grid.
+                if (HexViewerMath.RowContains(rowOffset, bytesPerRow, caretOffset))
                 {
                     context.FillRectangle(BrushCaretRow, new Rect(0, y, bounds.Width, _rowHeight));
                 }
@@ -386,8 +389,10 @@ public sealed class HexViewer : Control, ILogicalScrollable
 
             if (TextIsUtf16)
             {
-                // One glyph per little-endian code unit, drawn in the pair's first cell.
-                if ((i & 1) == 0 && i + 1 < row.Length)
+                // One glyph per little-endian code unit, drawn in the pair's first cell. Units
+                // are paired on even file offsets, not on position within the row, so the
+                // same bytes decode to the same text wherever the view is scrolled.
+                if ((byteOffset & 1) == 0 && i + 1 < row.Length)
                 {
                     var ch = (char)(row[i] | (row[i + 1] << 8));
                     var useful = IsUsefulUtf16Char(ch);
@@ -578,12 +583,17 @@ public sealed class HexViewer : Control, ILogicalScrollable
         {
             return;
         }
+        var bytesPerRow = BytesPerRow;
+        if (bytesPerRow <= 0)
+        {
+            return;
+        }
         var visibleRows = Math.Max(1, (int)((Bounds.Height - HeaderHeight) / _rowHeight));
-        var caretRow = CaretOffset / BytesPerRow;
-        var firstVisibleRow = ScrollOffset / BytesPerRow;
+        var caretRow = Math.Max(0, CaretOffset) / bytesPerRow;
+        var firstVisibleRow = Math.Max(0, ScrollOffset) / bytesPerRow;
         if (caretRow < firstVisibleRow || caretRow >= firstVisibleRow + visibleRows)
         {
-            ScrollOffset = caretRow * BytesPerRow;
+            ScrollOffset = HexViewerMath.ClampScrollOffset(caretRow * bytesPerRow, buffer.Length, bytesPerRow);
             Dispatcher.UIThread.Post(InvalidateVisual);
         }
     }
@@ -596,28 +606,30 @@ public sealed class HexViewer : Control, ILogicalScrollable
             return;
         }
         var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-        var step = shift ? 1 : 1;
+        var length = Buffer.Length;
         long? targetOffset = null;
         switch (e.Key)
         {
+            // MoveCaret keeps the caret inside the buffer and at 0 when the buffer is empty;
+            // Math.Min(length - 1, …) on an empty file produced a caret of -1.
             case Key.Left:
-                targetOffset = Math.Max(0, CaretOffset - step);
+                targetOffset = HexViewerMath.MoveCaret(CaretOffset, -1, length);
                 break;
             case Key.Right:
-                targetOffset = Math.Min(Buffer.Length - 1, CaretOffset + step);
+                targetOffset = HexViewerMath.MoveCaret(CaretOffset, 1, length);
                 break;
             case Key.Up:
-                targetOffset = Math.Max(0, CaretOffset - BytesPerRow);
+                targetOffset = HexViewerMath.MoveCaret(CaretOffset, -BytesPerRow, length);
                 break;
             case Key.Down:
-                targetOffset = Math.Min(Buffer.Length - 1, CaretOffset + BytesPerRow);
+                targetOffset = HexViewerMath.MoveCaret(CaretOffset, BytesPerRow, length);
                 break;
             case Key.PageDown:
-                ScrollOffset = ClampScrollOffset(ScrollOffset + BytesPerRow * 32);
+                ScrollOffset = ClampScrollOffset(ScrollOffset + (long)BytesPerRow * 32);
                 e.Handled = true;
                 return;
             case Key.PageUp:
-                ScrollOffset = ClampScrollOffset(ScrollOffset - BytesPerRow * 32);
+                ScrollOffset = ClampScrollOffset(ScrollOffset - (long)BytesPerRow * 32);
                 e.Handled = true;
                 return;
             case Key.Home when e.KeyModifiers.HasFlag(KeyModifiers.Control):
@@ -640,13 +652,8 @@ public sealed class HexViewer : Control, ILogicalScrollable
 
         if (targetOffset is { } target)
         {
-            if (shift)
+            if (shift && length > 0)
             {
-                if (SelectionStart < 0)
-                {
-                    SelectionStart = CaretOffset;
-                    SelectionEnd = CaretOffset;
-                }
                 ExtendSelection(target);
             }
             else
@@ -661,6 +668,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
 
     private void ClearSelection()
     {
+        _selectionAnchor = -1;
         SelectionStart = -1;
         SelectionEnd = -1;
     }
@@ -673,7 +681,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
             return;
         }
         var rows = (int)Math.Round(e.Delta.Y * 3);
-        ScrollOffset = ClampScrollOffset(ScrollOffset - rows * BytesPerRow);
+        ScrollOffset = ClampScrollOffset(ScrollOffset - (long)rows * BytesPerRow);
         e.Handled = true;
     }
 
@@ -699,9 +707,9 @@ public sealed class HexViewer : Control, ILogicalScrollable
         }
         else
         {
+            _selectionAnchor = hit;
             CaretOffset = hit;
-            SelectionStart = hit;
-            SelectionEnd = hit;
+            SetSelection(hit, hit);
         }
         _dragging = true;
         e.Pointer.Capture(this);
@@ -770,8 +778,10 @@ public sealed class HexViewer : Control, ILogicalScrollable
         int byteInRow;
         if (p.X >= asciiStart)
         {
-            // Clicks in the ASCII pane select the same byte.
-            byteInRow = (int)Math.Floor((p.X - asciiStart) / _glyphAdvance);
+            // Clicks in the text pane select the byte whose glyph is under the pointer.
+            // asciiStart only marks where the pane begins to take clicks; the cells
+            // themselves are measured from where they are drawn.
+            byteInRow = HexViewerMath.TextPaneByteIndex(p.X, TextColumnX, _glyphAdvance, BytesPerRow);
         }
         else if (p.X < hexStart)
         {
@@ -804,36 +814,40 @@ public sealed class HexViewer : Control, ILogicalScrollable
         return Math.Min(offset, Buffer.Length - 1);
     }
 
-    private void ExtendSelection(long pivotEnd)
+    // The byte a selection was started from. A selection is always the range between this
+    // and the caret; without it, extending backwards past the start could only swap the two
+    // ends, and each further step dropped the far end of the range.
+    private long _selectionAnchor = -1;
+
+    private void ExtendSelection(long pivot)
     {
-        CaretOffset = pivotEnd;
-        if (SelectionStart < 0)
+        var anchor = HexViewerMath.ResolveAnchor(_selectionAnchor, SelectionStart, SelectionEnd, CaretOffset);
+        _selectionAnchor = anchor;
+        var (start, end) = HexViewerMath.SelectionBetween(anchor, pivot);
+        CaretOffset = pivot;
+        SetSelection(start, end);
+    }
+
+    /// <summary>
+    /// Writes both ends in an order that never passes through Start &gt; End, so a listener that
+    /// reacts to each property separately does not see the selection vanish mid-update.
+    /// </summary>
+    private void SetSelection(long start, long end)
+    {
+        if (start > SelectionEnd)
         {
-            SelectionStart = pivotEnd;
-            SelectionEnd = pivotEnd;
-            return;
-        }
-        if (pivotEnd >= SelectionStart)
-        {
-            SelectionEnd = pivotEnd;
+            SelectionEnd = end;
+            SelectionStart = start;
         }
         else
         {
-            // Drag/extend backwards — flip the anchor so SelectionStart <= SelectionEnd holds.
-            SelectionEnd = SelectionStart;
-            SelectionStart = pivotEnd;
+            SelectionStart = start;
+            SelectionEnd = end;
         }
     }
 
     private long ClampScrollOffset(long value)
-    {
-        if (Buffer is null || Buffer.Length == 0)
-        {
-            return 0;
-        }
-        var maxStart = Math.Max(0, Buffer.Length - BytesPerRow);
-        return Math.Clamp(value, 0, maxStart);
-    }
+        => Buffer is { } buffer ? HexViewerMath.ClampScrollOffset(value, buffer.Length, BytesPerRow) : 0;
 
     // ============================ ILogicalScrollable ============================
     //

@@ -11,9 +11,13 @@ using Markdig;
 namespace Cinder.Reader;
 
 /// <summary>
-/// CinderReader — read-only viewer for shared encrypted bundles. Free, separately distributed,
-/// no parsing engines bundled. Verifies the chain-of-custody log on open and surfaces a big
-/// red banner if it's broken.
+/// CinderReader — the shell of a read-only viewer for shared encrypted bundles. Free, separately
+/// distributed, no parsing engines bundled.
+///
+/// <para><b>Not implemented yet:</b> this build opens a window and nothing else. It does not
+/// open a bundle, and it does not verify the chain-of-custody log — do not treat having opened
+/// a case in CinderReader as a custody check. Until the open/verify flow lands, use
+/// <c>cinder custody verify &lt;case-path&gt;</c>.</para>
 /// </summary>
 public static class Program
 {
@@ -55,15 +59,14 @@ public partial class ReaderWindow : Window
         Foreground = Brushes.White;
         Content = new TextBlock
         {
-            Text = "CinderReader · Open a .cinderbundle to view a sealed case (read-only).",
+            Text = "CinderReader · Viewer not implemented in this build. It does not open bundles or verify custody.",
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             FontSize = 16,
             Foreground = Brushes.Gainsboro,
         };
-        // Full open/verify/render flow lives in CinderReader.ReaderViewModel — wired in 8.1.
-        // For Phase 8 the executable demonstrates the binary surface and dependency tree;
-        // the report-rendering UI reuses Cinder.Reports rendering so there's no logic dup.
+        // The open/verify/render flow is planned for 8.1 and does not exist yet. For Phase 8
+        // the executable only demonstrates the binary surface and dependency tree.
         _ = typeof(EncryptedBundle);
         _ = typeof(CustodyLog);
         _ = typeof(Markdown);

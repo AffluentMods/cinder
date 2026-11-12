@@ -35,6 +35,9 @@ internal static class EwfBuilder
         /// <summary>Overrides the recorded MD5, to simulate a container whose hash doesn't match.</summary>
         internal byte[]? ForcedMd5 { get; init; }
 
+        /// <summary>Overrides the recorded SHA-1; twenty zero bytes model a writer that computed MD5 only.</summary>
+        internal byte[]? ForcedSha1 { get; init; }
+
         /// <summary>Corrupts the payload of this chunk index after the table is written.</summary>
         internal int? CorruptChunkIndex { get; init; }
     }
@@ -149,7 +152,7 @@ internal static class EwfBuilder
         {
             var digest = new byte[36];
             (o.ForcedMd5 ?? MD5.HashData(media)).CopyTo(digest, 0);
-            SHA1.HashData(media).CopyTo(digest, 16);
+            (o.ForcedSha1 ?? SHA1.HashData(media)).CopyTo(digest, 16);
             WriteSection(ms, "digest", digest);
         }
 
@@ -198,6 +201,21 @@ internal static class EwfBuilder
             z.Write(input, 0, input.Length);
         }
         return outMs.ToArray();
+    }
+
+    /// <summary>
+    /// Deterministic media that compresses to roughly half its size (sixteen distinct byte
+    /// values), for tests that need chunks a writer will actually store compressed.
+    /// </summary>
+    internal static byte[] CompressibleMedia(int bytes, int seed = 1234)
+    {
+        var rnd = new Random(seed);
+        var b = new byte[bytes];
+        for (int i = 0; i < b.Length; i++)
+        {
+            b[i] = (byte)('a' + rnd.Next(16));
+        }
+        return b;
     }
 
     /// <summary>Deterministic pseudo-random media so tests are reproducible.</summary>

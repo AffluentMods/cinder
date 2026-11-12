@@ -8,4 +8,9 @@
     <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
     <ProjectReference Include="..\Cinder.Artifacts\Cinder.Artifacts.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Converter argument builders and the pipe-draining process runner are internal;
+         the tests pin both. -->
+    <InternalsVisibleTo Include="Cinder.Core.Tests" />
+  </ItemGroup>
 </Project>

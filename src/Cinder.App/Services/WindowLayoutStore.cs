@@ -47,8 +47,7 @@ public sealed class WindowLayoutStore(string? path = null)
     {
         try
         {
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, JsonSerializer.Serialize(layout));
+            AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(layout));
         }
         catch
         {

@@ -15,6 +15,8 @@ internal static class ToolExport
     public static async Task<string?> SaveRowsAsync(
         string toolId, string baseName, string format, IReadOnlyList<object> rows, CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         if (rows.Count == 0)
         {
             return "Nothing to export yet.";
@@ -37,7 +39,7 @@ internal static class ToolExport
                 using var w = new StreamWriter(path, false, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
                 return TabularExporter.WriteCsv(rows, w);
             }, ct);
-            await ActiveCaseContext.LogAsync(CustodyAction.DataExported, new { Tool = toolId, Format = ext, Path = path, Rows = n }, ct);
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.DataExported, new { Tool = toolId, Format = ext, Path = path, Rows = n }, ct);
             return $"Exported {n:N0} row{(n == 1 ? "" : "s")} to {path}";
         }
         catch (OperationCanceledException)

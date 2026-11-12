@@ -5,16 +5,15 @@
              x:Class="Cinder.App.Views.Tools.SidecarRunnerView"
              x:DataType="tools:SidecarToolViewModel">
     <!--
-        The shared surface for every grid-producing parser (registry, EVTX, prefetch, LNK, …).
-        Toolbar: what was parsed · filter · act on it. Banners for truncation and errors sit
-        between toolbar and grid, where they can't be missed. Picking or dropping evidence runs
-        the parser straight away.
+        The shared surface for every grid-producing parser (registry, event log, prefetch, …).
+        Toolbar: what was read · filter · act on it. Banners for a cut-short grid and for errors
+        sit between toolbar and grid, where they can't be missed. Picking or dropping evidence
+        runs the parser straight away; while it runs, picking is disabled and Stop is offered.
     -->
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
 
         <!-- ============================ Toolbar ============================ -->
-        <Border Grid.Row="0" Height="44" Padding="14,0,12,0"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1"
+        <Border Grid.Row="0" Classes="toolbar"
                 IsVisible="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
@@ -26,12 +25,30 @@
                                        MaxWidth="280" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
-                    <Button Classes="tb" Content="Change…" Click="OnPickEvidenceClick"
-                            ToolTip.Tip="Parse a different file" />
-                    <Button Classes="tb icon" ToolTip.Tip="Run again"
-                            Command="{Binding LoadEvidenceCommand}" CommandParameter="{Binding EvidencePath}">
+                    <!-- A tool that reads only files gets one "Change…"; one that also reads folders gets both. -->
+                    <Button Classes="tb" Content="Change…" Click="OnPickFileClick"
+                            IsEnabled="{Binding !IsLoading}" IsVisible="{Binding !AcceptsFolder}"
+                            ToolTip.Tip="Read a different file" />
+                    <Button Classes="tb" Content="Pick file…" Click="OnPickFileClick"
+                            IsEnabled="{Binding !IsLoading}"
+                            ToolTip.Tip="Read a single file">
+                        <Button.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="AcceptsFolder" />
+                                <Binding Path="AcceptsFile" />
+                            </MultiBinding>
+                        </Button.IsVisible>
+                    </Button>
+                    <Button Classes="tb" Content="Pick folder…" Click="OnPickFolderClick"
+                            IsEnabled="{Binding !IsLoading}" IsVisible="{Binding AcceptsFolder}"
+                            ToolTip.Tip="Read every matching file in a folder" />
+                    <Button Classes="tb icon" ToolTip.Tip="Read it again"
+                            Command="{Binding LoadEvidenceCommand}" CommandParameter="{Binding EvidencePath}"
+                            IsVisible="{Binding !IsLoading}">
                         <c:CinderIcon Data="{x:Static c:Icons.Swap}" Width="14" Height="14" />
                     </Button>
+                    <Button Classes="tb" Content="Stop" Command="{Binding LoadEvidenceCancelCommand}"
+                            IsVisible="{Binding IsLoading}" ToolTip.Tip="Stop reading. Nothing is loaded." />
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
@@ -43,12 +60,12 @@
                             <TextBox Grid.Column="1" Classes="bare" Margin="8,0,0,0" FontSize="12.5"
                                      Watermark="Filter rows"
                                      Text="{Binding RowFilter, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip.Tip="Substring across every column. Export writes what the filter shows." />
+                                     ToolTip.Tip="Shows rows with this text in any column. Export writes the rows the filter shows." />
                         </Grid>
                     </Border>
 
                     <!-- Bookmark: the note is part of the finding, so it lives with the action. -->
-                    <Button Classes="tb" ToolTip.Tip="Flag the selected row as a finding in the open case. Reports turns bookmarks into exhibits.">
+                    <Button Classes="tb" ToolTip.Tip="Keep the selected row as a finding in the open case. Reports turns bookmarks into exhibits.">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <c:CinderIcon Data="{x:Static c:Icons.Bookmark}" Width="14" Height="14" />
                             <TextBlock Text="Bookmark" VerticalAlignment="Center" />
@@ -57,7 +74,7 @@
                             <Flyout Placement="BottomEdgeAlignedRight">
                                 <StackPanel Width="300" Spacing="10">
                                     <TextBlock Text="BOOKMARK SELECTED ROW" Classes="section" />
-                                    <TextBox Watermark="Note (optional) — why this row matters"
+                                    <TextBox Watermark="Note (optional): why this row matters"
                                              Text="{Binding BookmarkNote}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" />
                                     <Button Classes="accent" HorizontalAlignment="Right" Content="Add bookmark"
                                             Command="{Binding BookmarkSelectedCommand}" />
@@ -66,35 +83,24 @@
                         </Button.Flyout>
                     </Button>
 
-                    <Button Classes="tb" ToolTip.Tip="Write the filtered rows to a file">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <c:CinderIcon Data="{x:Static c:Icons.Download}" Width="14" Height="14" />
-                            <TextBlock Text="Export" VerticalAlignment="Center" />
-                            <c:CinderIcon Data="{x:Static c:Icons.ChevronDown}" Width="12" Height="12" />
-                        </StackPanel>
-                        <Button.Flyout>
-                            <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                <MenuItem Header="CSV (formula-injection safe)" Command="{Binding ExportCommand}" CommandParameter="csv" />
-                                <MenuItem Header="JSON array" Command="{Binding ExportCommand}" CommandParameter="json" />
-                            </MenuFlyout>
-                        </Button.Flyout>
-                    </Button>
+                    <c:ExportButton ExportCommand="{Binding ExportCommand}" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Truncation: what you see is not the whole artefact. Must be impossible to miss. -->
+        <!-- Cut short: what you see is not the whole artifact. Must be impossible to miss, and must
+             stay put when the status line moves on to "Bookmarked" or "Exported". -->
         <Border Grid.Row="1" IsVisible="{Binding IsTruncated}" Padding="14,8"
                 Background="{DynamicResource CinderWarnSoftBrush}"
                 BorderBrush="{DynamicResource CinderWarnBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,*">
                 <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
                               Foreground="{DynamicResource CinderWarnBrush}" />
-                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" TextWrapping="Wrap" FontWeight="500" />
+                <TextBlock Grid.Column="1" Text="{Binding TruncationNotice}" TextWrapping="Wrap" FontWeight="500" />
             </Grid>
         </Border>
 
-        <!-- Parser error -->
+        <!-- Error: the heading says what failed (reading the evidence, or saving an export). -->
         <Border Grid.Row="2" Padding="14,8"
                 BorderBrush="{DynamicResource CinderDangerBrush}" BorderThickness="0,0,0,1"
                 IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
@@ -105,8 +111,8 @@
                 <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
                               Foreground="{DynamicResource CinderDangerBrush}" />
                 <StackPanel Grid.Column="1" Spacing="3">
-                    <TextBlock Text="The parser couldn't read this file." FontWeight="500" />
-                    <SelectableTextBlock Text="{Binding ErrorMessage}" Classes="mono" TextWrapping="Wrap" FontSize="12"
+                    <TextBlock Text="{Binding ErrorTitle}" FontWeight="500" />
+                    <SelectableTextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" FontSize="12.5"
                                          Foreground="{DynamicResource CinderForegroundMutedBrush}" />
                 </StackPanel>
             </Grid>
@@ -115,35 +121,32 @@
         <!-- ============================ Empty state ============================ -->
         <Panel Grid.Row="3" IsVisible="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNull}}"
                Background="{DynamicResource CinderBackground0Brush}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Spacing="14">
-                <Border Width="52" Height="52" CornerRadius="12" HorizontalAlignment="Center"
-                        Background="{DynamicResource CinderSurface2Brush}"
-                        BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
-                    <c:CinderIcon Data="{Binding IconGeometry}" Width="24" Height="24"
-                                  Foreground="{DynamicResource CinderAccentBrush}" />
-                </Border>
-                <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="600" HorizontalAlignment="Center" />
-                <TextBlock Text="{Binding EmptyStateHint}" Classes="muted" FontSize="13"
-                           TextAlignment="Center" TextWrapping="Wrap" />
-                <StackPanel Spacing="6" HorizontalAlignment="Center" IsVisible="{Binding RequiredPythonPackages.Count}">
-                    <TextBlock Text="NEEDS" Classes="section" HorizontalAlignment="Center" />
-                    <ItemsControl ItemsSource="{Binding RequiredPythonPackages}" HorizontalAlignment="Center">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate><WrapPanel HorizontalAlignment="Center" /></ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Classes="chip" Margin="3">
-                                    <TextBlock Text="{Binding}" Classes="mono" FontSize="12" VerticalAlignment="Center" />
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="{Binding Title}" Message="{Binding EmptyStateHint}">
+                <StackPanel Spacing="12" HorizontalAlignment="Center">
+                    <StackPanel Spacing="6" HorizontalAlignment="Center" IsVisible="{Binding RequiredPythonPackages.Count}">
+                        <TextBlock Text="NEEDS" Classes="section" HorizontalAlignment="Center" />
+                        <ItemsControl ItemsSource="{Binding RequiredPythonPackages}" HorizontalAlignment="Center">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel HorizontalAlignment="Center" /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Classes="chip" Margin="3">
+                                        <TextBlock Text="{Binding}" Classes="mono" FontSize="12" VerticalAlignment="Center" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                        <Button Classes="accent" Height="30" Padding="14,0" Content="Pick file…"
+                                Click="OnPickFileClick" IsVisible="{Binding AcceptsFile}" />
+                        <Button Classes="accent" Height="30" Padding="14,0" Content="Pick folder…"
+                                Click="OnPickFolderClick" IsVisible="{Binding AcceptsFolder}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding DropHint}" Classes="dim" FontSize="12" HorizontalAlignment="Center" />
                 </StackPanel>
-                <Button Classes="accent" HorizontalAlignment="Center" Height="30" Padding="14,0"
-                        Content="Pick evidence…" Click="OnPickEvidenceClick" />
-                <TextBlock Text="or drop a file here" Classes="dim" FontSize="12" HorizontalAlignment="Center" />
-            </StackPanel>
+            </c:EmptyState>
         </Panel>
 
         <!-- ============================ Grid ============================ -->
@@ -154,20 +157,27 @@
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10"
                         IsVisible="{Binding IsLoading}">
                 <ProgressBar IsIndeterminate="True" Width="160" />
-                <TextBlock Text="Parsing…" Classes="muted" HorizontalAlignment="Center" />
+                <TextBlock Text="{Binding StatusLine}" Classes="muted" HorizontalAlignment="Center"
+                           MaxWidth="460" TextWrapping="Wrap" TextAlignment="Center" />
+                <Button Classes="tb" Content="Stop" HorizontalAlignment="Center"
+                        Command="{Binding LoadEvidenceCancelCommand}" />
+            </StackPanel>
+            <!-- Read without error and found nothing: say so, with the reason, instead of a blank grid. -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6" MaxWidth="520"
+                        IsVisible="{Binding ShowNoRows}">
+                <TextBlock Text="Nothing to show" FontSize="15" FontWeight="600" HorizontalAlignment="Center" />
+                <TextBlock Text="{Binding StatusLine}" Classes="muted" FontSize="13"
+                           TextAlignment="Center" TextWrapping="Wrap" />
             </StackPanel>
         </Panel>
 
         <!-- ============================ Footer ============================ -->
-        <Border Grid.Row="4" Height="28" Padding="14,0"
-                Background="{DynamicResource CinderSurface1Brush}"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0"
+        <Border Grid.Row="4" Classes="footer"
                 IsVisible="{Binding EvidencePath, Converter={x:Static ObjectConverters.IsNotNull}}">
             <Grid ColumnDefinitions="Auto,*">
-                <TextBlock Text="{Binding RowCountDisplay}" Classes="mono muted" FontSize="11.5" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Classes="dim" FontSize="11.5" Margin="16,0,0,0"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           IsVisible="{Binding !IsTruncated}" />
+                <TextBlock Text="{Binding RowCountDisplay}" Classes="mono" />
+                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Margin="16,0,0,0"
+                           ToolTip.Tip="{Binding StatusLine}" />
             </Grid>
         </Border>
     </Grid>

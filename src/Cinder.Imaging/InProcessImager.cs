@@ -11,9 +11,28 @@ namespace Cinder.Imaging;
 /// In-process acquisition: a source file, block device or existing container is read once,
 /// hashed as it streams, and written either flat (<c>.dd</c>) or as an EnCase-layout EWF chain
 /// (<c>.E01</c>, <c>.E02</c>, …) through <see cref="EwfWriter"/>. Unreadable regions are
-/// retried, then read sector by sector so a single bad sector costs one sector of zeros rather
-/// than a whole block, and every zero-filled sector is counted, listed in the log written
-/// beside the image and — for EWF — recorded in the container's <c>error2</c> section.
+/// retried, then read in 4 KiB units and finally sector by sector so a single bad sector costs
+/// one sector of zeros rather than a whole block, and every zero-filled sector is counted,
+/// listed in the log written beside the image and — for EWF — recorded in the container's
+/// <c>error2</c> section.
+///
+/// <para><b>Nothing unfinished sits at the output path.</b> Every format is written to
+/// <c>&lt;output&gt;.partial</c> (each EWF segment to <c>&lt;segment&gt;.partial</c>) and renamed
+/// only when the image is complete. A cancelled job deletes its partial files. A job that fails
+/// keeps them — what was recovered from a dying disk is still worth having — under the
+/// <c>.partial</c> name, with a log that says the image is incomplete and why.</para>
+///
+/// <para><b>A source that stops answering ends the job.</b> Zero-filling is for bad sectors, not
+/// for a disk that has dropped off the bus: after <see cref="MaxConsecutiveFailedBlocks"/>
+/// blocks in a row without one readable sector the acquisition is aborted with
+/// <see cref="AcquisitionAbortedException"/>, and no sector past the source's known length is
+/// ever zero-filled.</para>
+///
+/// <para><b>Sector-granular formats.</b> EWF, VHD and VHDX store whole 512-byte sectors. When
+/// the source does not end on a sector boundary the image is padded with zeros and the padding
+/// is hashed, so the recorded digests are those of the stored media and any verifier (Cinder's,
+/// ewfverify, FTK Imager) reproduces them. The log records the logical source length, the
+/// padding, and the digests of the unpadded source.</para>
 ///
 /// <para>Companions: <c>&lt;image&gt;.sha256</c> in <c>sha256sum</c> format for raw output
 /// (the Verify tool reads it; EWF carries its digests inside), and <c>&lt;image&gt;.log.json</c>
@@ -25,8 +44,25 @@ public sealed class InProcessImager : IDiskImager
     private const int BlockSize = 1 << 20;
     private const int SectorSize = 512;
 
+    /// <summary>
+    /// First step down from a failed block. 4 KiB is the logical sector size of 4Kn drives, on
+    /// which a 512-byte read is refused outright, and a whole number of sectors on every other
+    /// drive — so this size is readable wherever the medium is, whatever the sector size.
+    /// </summary>
+    private const int CoarseUnit = 4096;
+
     /// <summary>Bad sectors listed individually in the log before the list is capped.</summary>
     private const int MaxLoggedBadSectors = 10_000;
+
+    /// <summary>Suffix carried by every output file until the image is complete.</summary>
+    public const string PartialSuffix = ".partial";
+
+    /// <summary>
+    /// Consecutive 1 MiB blocks without a single readable sector after which the source is
+    /// taken to have failed or been disconnected, and the acquisition is aborted rather than
+    /// zero-filled to the end. 64 leaves room for a 64 MiB dead region on a damaged disk.
+    /// </summary>
+    public int MaxConsecutiveFailedBlocks { get; init; } = 64;
 
     public static bool Supports(ImageFormat format) =>
         format is ImageFormat.Raw or ImageFormat.Ewf or ImageFormat.Vhd or ImageFormat.Vhdx or ImageFormat.Aff4;
@@ -55,6 +91,10 @@ public sealed class InProcessImager : IDiskImager
         {
             throw new NotSupportedException($"InProcessImager writes raw, EWF, AFF4, VHD and VHDX images; {job.Format} is not supported in-process.");
         }
+        if (MaxConsecutiveFailedBlocks < 1)
+        {
+            throw new InvalidOperationException($"{nameof(MaxConsecutiveFailedBlocks)} must be at least 1.");
+        }
 
         var started = DateTimeOffset.UtcNow;
         var sw = Stopwatch.StartNew();
@@ -71,138 +111,268 @@ public sealed class InProcessImager : IDiskImager
         var badSectorOffsets = new List<long>();
         long badSectors = 0;
         long written = 0;
+        var padding = 0;
+        long sourceDamaged = 0;
+        string? md5Hex = null, sha1Hex = null, sha256Hex = null;
+        string? logicalMd5 = null, logicalSha1 = null, logicalSha256 = null;
         var block = new byte[BlockSize];
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(job.OutputPath))!);
-        using var sink = OpenSink(job, total);
-        long position = 0;
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
+        var sink = OpenSink(job, total);
 
-            var (n, newlyBad) = await ReadBlockAsync(source, position, block, job, badSectorOffsets, sink, ct).ConfigureAwait(false);
-            badSectors += newlyBad;
-            if (n <= 0)
-            {
-                break;
-            }
-
-            md5?.AppendData(block, 0, n);
-            sha1?.AppendData(block, 0, n);
-            sha256?.AppendData(block, 0, n);
-            await sink.WriteAsync(block.AsMemory(0, n), ct).ConfigureAwait(false);
-
-            position += n;
-            written += n;
-            progress?.Report(new ImageJobProgress(written, total, written / Math.Max(0.001, sw.Elapsed.TotalSeconds), badSectors, "reading"));
-        }
-
-        var md5Bytes = md5?.GetHashAndReset();
-        var sha1Bytes = sha1?.GetHashAndReset();
-        var sha256Bytes = sha256?.GetHashAndReset();
-        var md5Hex = md5Bytes is null ? null : Convert.ToHexStringLower(md5Bytes);
-        var sha1Hex = sha1Bytes is null ? null : Convert.ToHexStringLower(sha1Bytes);
-        var sha256Hex = sha256Bytes is null ? null : Convert.ToHexStringLower(sha256Bytes);
-
-        sink.Finish(md5Bytes, sha1Bytes, sha256Bytes);
-
-        // Companions: the digest file the Verify tool reads (formats that do not carry their
-        // own digest), and the acquisition log.
-        if (sha256Hex is not null && !container)
-        {
-            await File.WriteAllTextAsync(job.OutputPath + ".sha256",
-                $"{sha256Hex}  {Path.GetFileName(job.OutputPath)}\n", ct).ConfigureAwait(false);
-        }
-        var log = new
+        object BuildLog(bool complete, string? error) => new
         {
             tool = "Cinder InProcessImager",
             format = job.Format.ToString(),
             source = job.SourceDevice,
             output = job.OutputPath,
-            segments = sink.Paths,
+            complete,
+            status = complete ? "complete" : "incomplete",
+            error,
+            segments = complete ? sink.Paths : sink.PartialPaths.Where(File.Exists).ToList(),
             started_utc = started.ToString("O", CultureInfo.InvariantCulture),
             finished_utc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
             elapsed_seconds = sw.Elapsed.TotalSeconds,
             bytes_written = written,
+            logical_source_bytes = written,
+            padding_bytes = padding,
+            image_media_bytes = written + padding,
             source_length = total,
             md5 = md5Hex,
             sha1 = sha1Hex,
             sha256 = sha256Hex,
+            logical_md5 = logicalMd5 ?? md5Hex,
+            logical_sha1 = logicalSha1 ?? sha1Hex,
+            logical_sha256 = logicalSha256 ?? sha256Hex,
             bad_sectors = badSectors,
             bad_sector_offsets = badSectorOffsets,
             bad_sector_list_truncated = badSectors > badSectorOffsets.Count,
+            bad_sectors_not_recorded_in_container = sink.BadSectorsNotRecorded,
+            source_damaged_chunks = sourceDamaged,
             examiner = job.ExaminerName,
             case_number = job.CaseNumber,
             evidence_number = job.EvidenceNumber,
             description = job.Description,
             notes = job.Notes,
         };
-        await File.WriteAllTextAsync(job.OutputPath + ".log.json",
-            JsonSerializer.Serialize(log, new JsonSerializerOptions { WriteIndented = true }), ct).ConfigureAwait(false);
+
+        // The log is small and describes work already done; it is written whether or not the
+        // caller has since cancelled.
+        Task WriteLogAsync(object log) => File.WriteAllTextAsync(job.OutputPath + ".log.json",
+            JsonSerializer.Serialize(log, new JsonSerializerOptions { WriteIndented = true }), CancellationToken.None);
+
+        try
+        {
+            long position = 0;
+            var failedRun = 0;
+            while (true)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var read = await ReadBlockAsync(source, position, block, total, job, badSectorOffsets, sink, ct).ConfigureAwait(false);
+                badSectors += read.BadSectors;
+                var n = read.Bytes;
+                if (n <= 0)
+                {
+                    break;
+                }
+
+                md5?.AppendData(block, 0, n);
+                sha1?.AppendData(block, 0, n);
+                sha256?.AppendData(block, 0, n);
+                await sink.WriteAsync(block.AsMemory(0, n), ct).ConfigureAwait(false);
+
+                position += n;
+                written += n;
+                progress?.Report(new ImageJobProgress(written, total, written / Math.Max(0.001, sw.Elapsed.TotalSeconds), badSectors, "reading"));
+
+                if (!read.EntirelyUnreadable)
+                {
+                    failedRun = 0;
+                }
+                else if (++failedRun >= MaxConsecutiveFailedBlocks)
+                {
+                    throw new AcquisitionAbortedException(
+                        $"Acquisition aborted at offset {position:N0}: the last {failedRun} blocks ({(long)failedRun * BlockSize:N0} bytes) " +
+                        "had no readable sector, so the source has failed or been disconnected. " +
+                        $"The image is INCOMPLETE; what was read is in {string.Join(", ", sink.PartialPaths)}.",
+                        written, sink.PartialPaths);
+                }
+            }
+
+            // Sector-granular formats store whole sectors. Pad here, and hash the padding, so
+            // the digests describe the media the container actually holds.
+            padding = (int)((sink.SectorGranularity - (written % sink.SectorGranularity)) % sink.SectorGranularity);
+            if (padding > 0)
+            {
+                logicalMd5 = md5 is null ? null : Convert.ToHexStringLower(md5.GetCurrentHash());
+                logicalSha1 = sha1 is null ? null : Convert.ToHexStringLower(sha1.GetCurrentHash());
+                logicalSha256 = sha256 is null ? null : Convert.ToHexStringLower(sha256.GetCurrentHash());
+
+                var zeros = new byte[padding];
+                md5?.AppendData(zeros);
+                sha1?.AppendData(zeros);
+                sha256?.AppendData(zeros);
+                await sink.WriteAsync(zeros, ct).ConfigureAwait(false);
+            }
+
+            var md5Bytes = md5?.GetHashAndReset();
+            var sha1Bytes = sha1?.GetHashAndReset();
+            var sha256Bytes = sha256?.GetHashAndReset();
+            md5Hex = md5Bytes is null ? null : Convert.ToHexStringLower(md5Bytes);
+            sha1Hex = sha1Bytes is null ? null : Convert.ToHexStringLower(sha1Bytes);
+            sha256Hex = sha256Bytes is null ? null : Convert.ToHexStringLower(sha256Bytes);
+
+            // A container source zero-fills chunks it cannot decode. Those are not bad sectors
+            // of this acquisition, but the image now holds filler where evidence was.
+            sourceDamaged = (source as IEvidenceDamageSource)?.DamagedChunks.Count ?? 0;
+
+            ct.ThrowIfCancellationRequested();
+            sink.Finish(md5Bytes, sha1Bytes, sha256Bytes);
+        }
+        catch (OperationCanceledException)
+        {
+            sink.Dispose();
+            sink.DeletePartial();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            sink.Dispose();
+            try { await WriteLogAsync(BuildLog(complete: false, error: ex.Message)).ConfigureAwait(false); }
+            catch { /* the original failure is the one to report */ }
+            throw;
+        }
+        finally
+        {
+            sink.Dispose();
+        }
+
+        // Companions: the digest file the Verify tool reads (formats that do not carry their
+        // own digest), and the acquisition log. The image is finished and in place by now, so
+        // these are written regardless of a late cancellation.
+        if (sha256Hex is not null && !container)
+        {
+            await File.WriteAllTextAsync(job.OutputPath + ".sha256",
+                $"{sha256Hex}  {Path.GetFileName(job.OutputPath)}\n", CancellationToken.None).ConfigureAwait(false);
+        }
+        await WriteLogAsync(BuildLog(complete: true, error: null)).ConfigureAwait(false);
 
         progress?.Report(new ImageJobProgress(written, total, written / Math.Max(0.001, sw.Elapsed.TotalSeconds), badSectors, "done"));
-        return new ImageJobResult(job.OutputPath, written, md5Hex, sha1Hex, sha256Hex, null, badSectors, sw.Elapsed);
+        return new ImageJobResult(job.OutputPath, written, md5Hex, sha1Hex, sha256Hex, null, badSectors, sw.Elapsed,
+            SourceDamagedChunks: sourceDamaged, PaddingBytes: padding);
     }
+
+    /// <summary>What one pass of <see cref="ReadBlockAsync"/> produced.</summary>
+    /// <param name="Bytes">Bytes placed in the block; 0 at the end of the source.</param>
+    /// <param name="BadSectors">Sectors that could not be read and were zero-filled.</param>
+    /// <param name="EntirelyUnreadable">True when bytes were produced and every one of them is filler.</param>
+    private readonly record struct BlockRead(int Bytes, long BadSectors, bool EntirelyUnreadable);
 
     /// <summary>
     /// Fills <paramref name="block"/> from <paramref name="position"/>. A read failure is
-    /// retried per the job, then the block is re-read one sector at a time; sectors that still
-    /// fail are zero-filled and counted. Returns the number of bytes produced (0 at end).
+    /// retried per the job, then the block is re-read in 4 KiB units, and a unit that still
+    /// fails one sector at a time; sectors that cannot be read are zero-filled and counted.
+    ///
+    /// <para><paramref name="total"/>, when known, bounds the damage handling: a read is never
+    /// asked to cross the end of the source, and a failure at or past the end is the end of the
+    /// source rather than bad sectors — raw devices on Windows report an error there instead of
+    /// a zero-length read. The source is still probed past its declared length, so one that
+    /// turns out longer (a file that grew) is read to its real end.</para>
     /// </summary>
-    private static async Task<(int Read, long BadSectors)> ReadBlockAsync(Stream source, long position, byte[] block, ImageJob job,
+    private static async Task<BlockRead> ReadBlockAsync(Stream source, long position, byte[] block, long? total, ImageJob job,
         List<long> badSectorOffsets, ImageSink sink, CancellationToken ct)
     {
+        var want = block.Length;
+        var pastDeclaredEnd = false;
+        if (total is { } length)
+        {
+            if (position < length)
+            {
+                want = (int)Math.Min(want, length - position);
+            }
+            else
+            {
+                pastDeclaredEnd = true;
+            }
+        }
+
         var attempts = job.ReadErrorRetry ? job.ReadErrorRetries + 1 : 1;
         for (int attempt = 0; attempt < attempts; attempt++)
         {
             try
             {
                 Seek(source, position);
-                return (await ReadFullAsync(source, block, block.Length, ct).ConfigureAwait(false), 0);
+                return new BlockRead(await ReadFullAsync(source, block.AsMemory(0, want), ct).ConfigureAwait(false), 0, false);
+            }
+            catch (IOException) when (pastDeclaredEnd)
+            {
+                return new BlockRead(0, 0, false);
             }
             catch (IOException)
             {
-                // fall through to retry, then to sector granularity
+                // fall through to retry, then to finer granularity
             }
         }
 
-        // Sector fallback: recover everything readable around the damage.
+        // Fallback: recover everything readable around the damage.
         var localBad = 0L;
         var produced = 0;
-        var sector = new byte[SectorSize];
-        for (int off = 0; off < block.Length; off += SectorSize)
+        var readable = 0;
+        var ended = false;
+        for (int off = 0; off < want && !ended; off += CoarseUnit)
         {
             ct.ThrowIfCancellationRequested();
+            var unit = Math.Min(CoarseUnit, want - off);
             int n;
             try
             {
                 Seek(source, position + off);
-                n = await ReadFullAsync(source, sector, SectorSize, ct).ConfigureAwait(false);
+                n = await ReadFullAsync(source, block.AsMemory(off, unit), ct).ConfigureAwait(false);
+                readable += n;
             }
             catch (IOException)
             {
-                Array.Clear(sector);
-                n = SectorSize;
-                localBad++;
-                if (badSectorOffsets.Count < MaxLoggedBadSectors)
+                // Something in this unit is unreadable; find out which sectors.
+                n = 0;
+                for (int so = 0; so < unit; so += SectorSize)
                 {
-                    badSectorOffsets.Add(position + off);
+                    var len = Math.Min(SectorSize, unit - so);
+                    var at = position + off + so;
+                    int m;
+                    try
+                    {
+                        Seek(source, at);
+                        m = await ReadFullAsync(source, block.AsMemory(off + so, len), ct).ConfigureAwait(false);
+                        readable += m;
+                    }
+                    catch (IOException)
+                    {
+                        block.AsSpan(off + so, len).Clear();
+                        m = len;
+                        localBad++;
+                        if (badSectorOffsets.Count < MaxLoggedBadSectors)
+                        {
+                            badSectorOffsets.Add(at);
+                        }
+                        sink.NoteBadSector(at / SectorSize);
+                    }
+
+                    n += m;
+                    if (m < len)
+                    {
+                        break;   // genuine end of source inside this sector
+                    }
                 }
-                sink.NoteBadSector((position + off) / SectorSize);
             }
 
-            if (n <= 0)
-            {
-                break;   // genuine end of source inside this block
-            }
-            Buffer.BlockCopy(sector, 0, block, off, n);
             produced += n;
-            if (n < SectorSize)
+            if (n < unit)
             {
-                break;
+                ended = true;   // genuine end of source inside this block
             }
         }
-        return (produced, localBad);
+        return new BlockRead(produced, localBad, produced > 0 && readable == 0);
     }
 
     private static void Seek(Stream s, long position)
@@ -213,12 +383,12 @@ public sealed class InProcessImager : IDiskImager
         }
     }
 
-    private static async Task<int> ReadFullAsync(Stream s, byte[] buffer, int count, CancellationToken ct)
+    private static async Task<int> ReadFullAsync(Stream s, Memory<byte> buffer, CancellationToken ct)
     {
         var filled = 0;
-        while (filled < count)
+        while (filled < buffer.Length)
         {
-            var n = await s.ReadAsync(buffer.AsMemory(filled, count - filled), ct).ConfigureAwait(false);
+            var n = await s.ReadAsync(buffer[filled..], ct).ConfigureAwait(false);
             if (n <= 0)
             {
                 break;
@@ -228,23 +398,41 @@ public sealed class InProcessImager : IDiskImager
         return filled;
     }
 
+    /// <summary>
+    /// The source's length when it reports a usable one. Zero is treated as unknown: block
+    /// devices and other special files can report a length of 0 while holding data, and
+    /// believing it would end the acquisition before the first byte.
+    /// </summary>
     private static long? TryLength(Stream s)
     {
-        try { return s.CanSeek ? s.Length : null; } catch { return null; }
+        try
+        {
+            if (!s.CanSeek)
+            {
+                return null;
+            }
+            var length = s.Length;
+            return length > 0 ? length : null;
+        }
+        catch { return null; }
     }
 
     /// <summary>
     /// Opens a source for reading. A path that <see cref="EvidenceOpener"/> recognises as an
     /// EWF container is decoded transparently (this is how E01 → raw conversion works); a block
-    /// device path (<c>\\.\PhysicalDrive0</c>, <c>/dev/sda</c>) is opened shared and unbuffered
-    /// beyond the block size; anything else is a plain file.
+    /// device path (<c>\\.\PhysicalDrive0</c>, <c>/dev/sda</c>) is opened shared and unbuffered;
+    /// anything else is a plain file.
     /// </summary>
     public static Stream OpenSource(string sourcePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         if (IsDevicePath(sourcePath))
         {
-            return new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, BlockSize, FileOptions.SequentialScan);
+            // No FileStream buffer on a device. With one, a single-sector read during damage
+            // recovery is really a buffer-sized read ahead: it fails for every readable sector
+            // that precedes a bad one, and those sectors are then zero-filled as if they were
+            // bad too. Unbuffered, each read reaches the device exactly as asked.
+            return new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 0, FileOptions.None);
         }
         return EvidenceOpener.Open(sourcePath);
     }
@@ -263,13 +451,38 @@ public sealed class InProcessImager : IDiskImager
         _ => new RawSink(job.OutputPath),
     };
 
+    /// <summary>
+    /// A format writer. Everything is written to <see cref="PartialPaths"/>;
+    /// <see cref="Finish"/> completes the image and moves it to <see cref="Paths"/>. Disposing
+    /// without finishing leaves only the partial files.
+    /// </summary>
     private abstract class ImageSink : IDisposable
     {
+        /// <summary>The files of the finished image.</summary>
         public abstract IReadOnlyList<string> Paths { get; }
+
+        /// <summary>Where the data is until <see cref="Finish"/> succeeds.</summary>
+        public abstract IReadOnlyList<string> PartialPaths { get; }
+
+        /// <summary>The media must be a whole multiple of this many bytes (1 = any length).</summary>
+        public virtual int SectorGranularity => 1;
+
+        /// <summary>Bad sectors the container format had no way to record.</summary>
+        public virtual long BadSectorsNotRecorded => 0;
+
         public abstract ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct);
         public virtual void NoteBadSector(long sector) { }
         public abstract void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256);
         public abstract void Dispose();
+
+        /// <summary>Removes whatever an unfinished run left behind. Call after <see cref="Dispose"/>.</summary>
+        public void DeletePartial()
+        {
+            foreach (var p in PartialPaths)
+            {
+                try { File.Delete(p); } catch { /* best effort; the name still says partial */ }
+            }
+        }
     }
 
     /// <summary>
@@ -294,7 +507,7 @@ public sealed class InProcessImager : IDiskImager
             capacity = (capacity + 511) / 512 * 512;
 
             _path = job.OutputPath;
-            _file = new FileStream(_path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, BlockSize);
+            _file = new FileStream(_path + PartialSuffix, FileMode.Create, FileAccess.ReadWrite, FileShare.None, BlockSize);
             _disk = job.Format == ImageFormat.Vhd
                 ? DiscUtils.Vhd.Disk.InitializeDynamic(_file, DiscUtils.Streams.Ownership.None, capacity)
                 : DiscUtils.Vhdx.Disk.InitializeDynamic(_file, DiscUtils.Streams.Ownership.None, capacity);
@@ -303,6 +516,8 @@ public sealed class InProcessImager : IDiskImager
         }
 
         public override IReadOnlyList<string> Paths => [_path];
+        public override IReadOnlyList<string> PartialPaths => [_path + PartialSuffix];
+        public override int SectorGranularity => SectorSize;
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
         {
@@ -316,6 +531,8 @@ public sealed class InProcessImager : IDiskImager
             // writes the block allocation table and metadata for both formats.
             _disk.Dispose();
             _file.Flush();
+            _file.Dispose();
+            File.Move(_path + PartialSuffix, _path, overwrite: true);
         }
 
         public override void Dispose()
@@ -328,10 +545,12 @@ public sealed class InProcessImager : IDiskImager
     private sealed class Aff4Sink : ImageSink
     {
         private readonly Aff4.Aff4Writer _writer;
+        private readonly string _path;
 
         public Aff4Sink(ImageJob job)
         {
-            _writer = new Aff4.Aff4Writer(job.OutputPath, new Aff4.Aff4Writer.Options
+            _path = Path.GetFullPath(job.OutputPath);
+            _writer = new Aff4.Aff4Writer(_path + PartialSuffix, new Aff4.Aff4Writer.Options
             {
                 Compress = job.CompressionLevel > 0,
                 CaseNumber = job.CaseNumber,
@@ -343,7 +562,8 @@ public sealed class InProcessImager : IDiskImager
             });
         }
 
-        public override IReadOnlyList<string> Paths => [_writer.Path];
+        public override IReadOnlyList<string> Paths => [_path];
+        public override IReadOnlyList<string> PartialPaths => [_path + PartialSuffix];
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
         {
@@ -351,7 +571,12 @@ public sealed class InProcessImager : IDiskImager
             return ValueTask.CompletedTask;
         }
 
-        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256) => _writer.Finish(md5, sha1, sha256);
+        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256)
+        {
+            _writer.Finish(md5, sha1, sha256);
+            File.Move(_path + PartialSuffix, _path, overwrite: true);
+        }
+
         public override void Dispose() => _writer.Dispose();
     }
 
@@ -363,12 +588,20 @@ public sealed class InProcessImager : IDiskImager
         public RawSink(string path)
         {
             _path = path;
-            _out = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, BlockSize, FileOptions.SequentialScan);
+            _out = new FileStream(path + PartialSuffix, FileMode.Create, FileAccess.Write, FileShare.None, BlockSize, FileOptions.SequentialScan);
         }
 
         public override IReadOnlyList<string> Paths => [_path];
+        public override IReadOnlyList<string> PartialPaths => [_path + PartialSuffix];
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct) => _out.WriteAsync(data, ct);
-        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256) => _out.Flush();
+
+        public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256)
+        {
+            _out.Flush();
+            _out.Dispose();
+            File.Move(_path + PartialSuffix, _path, overwrite: true);
+        }
+
         public override void Dispose() => _out.Dispose();
     }
 
@@ -391,10 +624,14 @@ public sealed class InProcessImager : IDiskImager
                 Notes = job.Notes,
                 MediaFlags = IsDevicePath(job.SourceDevice) ? (byte)0x02 : (byte)0x01,
                 AcquisitionTool = "Cinder " + (typeof(InProcessImager).Assembly.GetName().Version?.ToString(3) ?? ""),
+                PartialSuffix = PartialSuffix,
             });
         }
 
         public override IReadOnlyList<string> Paths => _writer.SegmentPaths;
+        public override IReadOnlyList<string> PartialPaths => _writer.WorkingPaths;
+        public override int SectorGranularity => SectorSize;
+        public override long BadSectorsNotRecorded => _writer.BadSectorsNotRecorded;
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
         {
@@ -406,6 +643,28 @@ public sealed class InProcessImager : IDiskImager
         public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256) => _writer.Finish(md5, sha1);
         public override void Dispose() => _writer.Dispose();
     }
+}
+
+/// <summary>
+/// Thrown when an acquisition is stopped because the source stopped returning data — block
+/// after block with no readable sector — rather than carried on as an image of zeros. The
+/// partial image is kept under its <c>.partial</c> name and the acquisition log marks it
+/// incomplete.
+/// </summary>
+public sealed class AcquisitionAbortedException : IOException
+{
+    public AcquisitionAbortedException(string message, long bytesAcquired, IReadOnlyList<string> partialPaths)
+        : base(message)
+    {
+        BytesAcquired = bytesAcquired;
+        PartialPaths = partialPaths;
+    }
+
+    /// <summary>Bytes written to the partial image, including zero-filled sectors.</summary>
+    public long BytesAcquired { get; }
+
+    /// <summary>The files holding the incomplete image.</summary>
+    public IReadOnlyList<string> PartialPaths { get; }
 }
 
 /// <summary>
@@ -421,6 +680,12 @@ public static class ImageConverter
     /// <see cref="MatchesRecorded"/>: the written output, re-read, reproduces the digest computed
     /// while writing. <see cref="SourceMatchesRecorded"/>: the source container's own recorded
     /// acquisition hash reproduced while reading (null when the source recorded none).
+    ///
+    /// <para>A source container with chunks that could not be decoded yields an output with
+    /// zeros where evidence was. That is never a success: both flags are then false whatever
+    /// the hashes say, and <see cref="SourceDamagedChunks"/> says how many chunks were lost.
+    /// <see cref="DamagedChunks"/> is the total across source and output, so a caller that only
+    /// looks at it still sees the damage.</para>
     /// </summary>
     public sealed record ConversionResult(
         ImageJobResult Image,
@@ -428,7 +693,9 @@ public static class ImageConverter
         string? RecordedSha1,
         int DamagedChunks,
         bool? MatchesRecorded,
-        bool? SourceMatchesRecorded = null);
+        bool? SourceMatchesRecorded = null,
+        int SourceDamagedChunks = 0,
+        int OutputDamagedChunks = 0);
 
     /// <summary>
     /// Any supported source (raw, E01, AFF4, VHD, VHDX) to any in-process target. The output
@@ -482,26 +749,40 @@ public static class ImageConverter
         {
             result = await new InProcessImager().ImageAsync(job, progress, ct).ConfigureAwait(false);
         }
+        sourceDamaged = (int)Math.Min(int.MaxValue, Math.Max(sourceDamaged, result.SourceDamagedChunks));
 
         bool? sourceOk = null;
         if (recordedMd5 is not null && result.Md5 is not null)
         {
-            sourceOk = string.Equals(recordedMd5, result.Md5, StringComparison.OrdinalIgnoreCase) && sourceDamaged == 0;
+            sourceOk = string.Equals(recordedMd5, result.Md5, StringComparison.OrdinalIgnoreCase);
         }
         else if (recordedSha1 is not null && result.Sha1 is not null)
         {
-            sourceOk = string.Equals(recordedSha1, result.Sha1, StringComparison.OrdinalIgnoreCase) && sourceDamaged == 0;
+            sourceOk = string.Equals(recordedSha1, result.Sha1, StringComparison.OrdinalIgnoreCase);
+        }
+        if (sourceDamaged > 0)
+        {
+            // Zero-filled source chunks are a failed read of the source whether or not it
+            // recorded a hash to disagree with.
+            sourceOk = false;
         }
 
         if (!verify)
         {
-            return new ConversionResult(result, recordedMd5, recordedSha1, sourceDamaged, null, sourceOk);
+            return new ConversionResult(result, recordedMd5, recordedSha1, sourceDamaged,
+                sourceDamaged > 0 ? false : null, sourceOk, sourceDamaged, 0);
         }
 
-        var (rereadMd5, damaged) = await RereadMd5Async(output, format, ct).ConfigureAwait(false);
+        var (rereadMd5, outputDamaged) = await RereadMd5Async(output, format, ct).ConfigureAwait(false);
         var outputOk = rereadMd5 is null ? (bool?)null
-            : string.Equals(rereadMd5, result.Md5, StringComparison.OrdinalIgnoreCase) && damaged == 0;
-        return new ConversionResult(result, recordedMd5, recordedSha1, damaged, outputOk, sourceOk);
+            : string.Equals(rereadMd5, result.Md5, StringComparison.OrdinalIgnoreCase) && outputDamaged == 0;
+        if (sourceDamaged > 0)
+        {
+            // The output faithfully holds what was read, but what was read is not the evidence.
+            outputOk = false;
+        }
+        return new ConversionResult(result, recordedMd5, recordedSha1, sourceDamaged + outputDamaged, outputOk, sourceOk,
+            sourceDamaged, outputDamaged);
     }
 
     private static async Task<(string? Md5, int Damaged)> RereadMd5Async(string path, ImageFormat format, CancellationToken ct)
@@ -579,12 +860,14 @@ public static class ImageConverter
         {
             matches = string.Equals(ewf.RecordedSha1, result.Sha1, StringComparison.OrdinalIgnoreCase);
         }
-        if (ewf.DamagedChunks.Count > 0)
+        var damaged = ewf.DamagedChunks.Count;
+        if (damaged > 0)
         {
             matches = false;
         }
 
-        return new ConversionResult(result, ewf.RecordedMd5, ewf.RecordedSha1, ewf.DamagedChunks.Count, matches);
+        return new ConversionResult(result, ewf.RecordedMd5, ewf.RecordedSha1, damaged, matches,
+            SourceDamagedChunks: damaged);
     }
 
     /// <summary>
@@ -599,15 +882,19 @@ public static class ImageConverter
         var job = new ImageJob(sourceRaw, outputE01, ImageFormat.Ewf, CompressionLevel: compressionLevel, SegmentSizeMiB: segmentSizeMiB,
             ExaminerName: examiner, Description: "Converted from raw");
         var result = await new InProcessImager().ImageAsync(job, progress, ct).ConfigureAwait(false);
+        var sourceDamaged = (int)Math.Min(int.MaxValue, result.SourceDamagedChunks);
 
         if (!verify)
         {
-            return new ConversionResult(result, result.Md5, result.Sha1, 0, null);
+            return new ConversionResult(result, result.Md5, result.Sha1, sourceDamaged, sourceDamaged > 0 ? false : null,
+                SourceDamagedChunks: sourceDamaged);
         }
 
         using var ewf = EwfReader.Open(outputE01);
         var v = await ewf.VerifyAsync(null, ct).ConfigureAwait(false);
-        var matches = v.Verified && string.Equals(ewf.RecordedMd5, result.Md5, StringComparison.OrdinalIgnoreCase);
-        return new ConversionResult(result, ewf.RecordedMd5, ewf.RecordedSha1, ewf.DamagedChunks.Count, matches);
+        var outputDamaged = ewf.DamagedChunks.Count;
+        var matches = sourceDamaged == 0 && v.Verified && string.Equals(ewf.RecordedMd5, result.Md5, StringComparison.OrdinalIgnoreCase);
+        return new ConversionResult(result, ewf.RecordedMd5, ewf.RecordedSha1, sourceDamaged + outputDamaged, matches,
+            SourceDamagedChunks: sourceDamaged, OutputDamagedChunks: outputDamaged);
     }
 }

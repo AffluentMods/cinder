@@ -5,43 +5,25 @@
              x:Class="Cinder.App.Views.Tools.DocumentsView"
              x:DataType="tools:DocumentsTool">
     <Grid RowDefinitions="Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Classes="toolbar">
             <Grid ColumnDefinitions="Auto,*,Auto">
-                <Button Grid.Column="0" Content="Pick document…" Classes="accent" Command="{Binding PickCommand}" />
-                <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
-                           Text="{Binding Path, TargetNullValue='No document loaded'}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBlock Grid.Column="2" VerticalAlignment="Center"
-                           Text="{Binding StatusLine}"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                <Button Classes="tb" VerticalAlignment="Center" Command="{Binding PickCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14" />
+                        <TextBlock Text="Pick document…" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <TextBlock Grid.Column="1" Classes="path" Margin="14,0" Text="{Binding Path}"
+                           ToolTip.Tip="{Binding Path}" />
+                <TextBlock Grid.Column="2" Text="{Binding StatusLine}" Classes="dim" FontSize="11.5" VerticalAlignment="Center" />
             </Grid>
         </Border>
         <Panel Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
-                        Spacing="14" MaxWidth="460"
-                        IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNull}}">
-                <Border Width="64" Height="64" CornerRadius="8"
-                        Background="{DynamicResource CinderSurface3Brush}"
-                        BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1"
-                        HorizontalAlignment="Center">
-                    <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="28" Height="28"
-                                  Foreground="{DynamicResource CinderAccentBrush}" />
-                </Border>
-                <TextBlock Text="No document loaded"
-                           FontSize="{DynamicResource CinderFontSizeXl}" FontWeight="600"
-                           LetterSpacing="-0.4"
-                           Foreground="{DynamicResource CinderForegroundBrush}"
-                           HorizontalAlignment="Center" />
-                <TextBlock TextAlignment="Center" TextWrapping="Wrap"
-                           FontSize="{DynamicResource CinderFontSizeSm}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                           Text="Preview a PDF, Word, Excel, RTF, or ODF document without launching Office or Acrobat. Cinder also surfaces hidden metadata: original author, revisions, embedded files, unresolved comments." />
-                <Button Classes="accent" Content="Pick document…"
-                        Command="{Binding PickCommand}"
-                        HorizontalAlignment="Center" Padding="20,10" />
-            </StackPanel>
+            <c:EmptyState Icon="{x:Static c:Icons.Doc}" Title="Read a document without opening it"
+                          IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNull}}"
+                          Message="Shows the text inside a PDF, Word, Excel, PowerPoint, OpenDocument, EPUB or RTF file without starting Office or a PDF reader, so nothing in the document can run. Text only: no layout, pictures or document properties.">
+                <Button Classes="accent" Height="30" Padding="14,0" Content="Pick document…" Command="{Binding PickCommand}" />
+            </c:EmptyState>
 
             <ScrollViewer Padding="20"
                           IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}">

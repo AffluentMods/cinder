@@ -25,14 +25,38 @@ public sealed class PcapSidecar
         _logger = logger ?? NullLogger.Instance;
     }
 
-    public static ProcessStartInfo DefaultSidecar(string parsersDir) => new()
+    /// <summary>Path of the worker module this wrapper launches, relative to the parsers directory.</summary>
+    public const string WorkerRelativePath = "network/pcap_worker.py";
+
+    /// <summary>
+    /// True when the worker this wrapper drives is actually present under
+    /// <paramref name="parsersDir"/>. It is not shipped in current builds — PCAP analysis in
+    /// the app runs in-process — so callers should check before offering the sidecar path.
+    /// </summary>
+    public static bool IsAvailable(string parsersDir) =>
+        !string.IsNullOrEmpty(parsersDir) && File.Exists(Path.Combine(parsersDir, "network", "pcap_worker.py"));
+
+    /// <exception cref="SidecarException">
+    /// The worker module is not present. Launching <c>python -m network.pcap_worker</c> anyway
+    /// would die on import and surface as an opaque "Sidecar process ended."
+    /// </exception>
+    public static ProcessStartInfo DefaultSidecar(string parsersDir)
     {
-        FileName = ExecutableResolver.ResolveRequired(
-            OperatingSystem.IsWindows() ? "python.exe" : "python3",
-            "Install Python 3.12+ and make sure it is on PATH."),
-        ArgumentList = { "-m", "network.pcap_worker" },
-        WorkingDirectory = parsersDir,
-    };
+        if (!IsAvailable(parsersDir))
+        {
+            throw new SidecarException(
+                $"PCAP analysis via the Python sidecar is not available in this build: '{WorkerRelativePath}' " +
+                $"was not found under '{parsersDir}'. Use the in-process PCAP reader instead.");
+        }
+        return new ProcessStartInfo
+        {
+            FileName = ExecutableResolver.ResolveRequired(
+                OperatingSystem.IsWindows() ? "python.exe" : "python3",
+                "Install Python 3.12+ and make sure it is on PATH."),
+            ArgumentList = { "-m", "network.pcap_worker" },
+            WorkingDirectory = parsersDir,
+        };
+    }
 
     private static DateTimeOffset Ts(JsonNode? n)
         => DateTimeOffset.TryParse(n?.GetValue<string?>(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto) ? dto : DateTimeOffset.MinValue;

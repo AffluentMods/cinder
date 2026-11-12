@@ -116,6 +116,8 @@ public sealed partial class SearchToolViewModel : ViewModelBase
     [RelayCommand(IncludeCancelCommand = true)]
     private async Task BuildIndexAsync(CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = ActiveCaseContext.Current;
         var sourcePath = await PickFolderAsync("Pick the folder to index");
         if (string.IsNullOrEmpty(sourcePath)) return;
 
@@ -167,7 +169,7 @@ public sealed partial class SearchToolViewModel : ViewModelBase
             }
             IsIndexing = false;
         }
-        await ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.ParserRan,
+        await ActiveCaseContext.LogAsync(custodyCase, Cinder.Core.Custody.CustodyAction.ParserRan,
             new { Tool = "search", Action = "index", Source = sourcePath, Index = IndexPath, Files = result.Indexed }, CancellationToken.None);
     }
 

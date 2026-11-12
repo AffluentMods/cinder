@@ -1,81 +1,97 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.YaraView"
              x:DataType="tools:YaraTool">
-    <Grid ColumnDefinitions="*,4,*">
+    <!-- Rules on the left, the scan and its results on the right. -->
+    <Grid RowDefinitions="*,Auto">
+        <Grid ColumnDefinitions="2*,4,3*">
 
-        <!-- ============================ RULES (left) ============================ -->
-        <DockPanel Grid.Column="0">
-            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,8"
-                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="RULES" Classes="section" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="Load .yar…" Command="{Binding LoadRulesFileCommand}" />
-                </Grid>
-            </Border>
-            <TextBox Text="{Binding Rules}" AcceptsReturn="True" TextWrapping="NoWrap"
-                     FontFamily="{DynamicResource CinderFontFamilyMono}"
-                     FontSize="{DynamicResource CinderFontSizeXs}"
-                     VerticalContentAlignment="Top"
-                     Background="{DynamicResource CinderBackground0Brush}" />
-        </DockPanel>
+            <!-- ============================ Rules ============================ -->
+            <DockPanel Grid.Column="0">
+                <Border DockPanel.Dock="Top" Classes="toolbar">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="RULES" Classes="section" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Classes="tb" VerticalAlignment="Center" Content="Load rules file…"
+                                Command="{Binding LoadRulesFileCommand}"
+                                ToolTip.Tip="Replace the editor contents with a .yar file" />
+                    </Grid>
+                </Border>
+                <TextBox Text="{Binding Rules}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap"
+                         FontFamily="{DynamicResource CinderFontFamilyMono}" FontSize="12.5"
+                         VerticalContentAlignment="Top" Padding="14,10" BorderThickness="0" CornerRadius="0"
+                         Background="{DynamicResource CinderBackground0Brush}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto" />
+            </DockPanel>
 
-        <GridSplitter Grid.Column="1" Background="{DynamicResource CinderBorderBrush}" />
+            <GridSplitter Grid.Column="1" />
 
-        <!-- ============================ RESULTS (right) ============================ -->
-        <DockPanel Grid.Column="2">
-            <Border DockPanel.Dock="Top" Background="{DynamicResource CinderBackground1Brush}" Padding="14,8"
-                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="Auto,*,Auto">
-                    <Button Grid.Column="0" Classes="accent" Content="Pick file + scan…"
-                            Command="{Binding PickAndScanCommand}" />
-                    <TextBlock Grid.Column="1" Margin="14,0" VerticalAlignment="Center"
-                               Text="{Binding ScanTarget, TargetNullValue='No file scanned'}"
-                               Classes="mono"
-                               FontSize="{DynamicResource CinderFontSizeXs}"
-                               TextTrimming="CharacterEllipsis"
-                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                    <ProgressBar Grid.Column="2" Width="80" IsIndeterminate="True"
-                                 IsVisible="{Binding IsScanning}" />
-                </Grid>
-            </Border>
-            <Border DockPanel.Dock="Bottom" Background="{DynamicResource CinderSurface1Brush}" Padding="14,4"
-                    BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0">
-                <TextBlock Text="{Binding StatusLine}"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-            </Border>
+            <!-- ============================ Scan ============================ -->
+            <DockPanel Grid.Column="2">
+                <Border DockPanel.Dock="Top" Classes="toolbar">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Button Classes="accent" Height="26" Padding="12,0" Content="Scan a file…"
+                                    Command="{Binding PickAndScanCommand}" />
+                            <Button Classes="tb" Content="Stop" Command="{Binding PickAndScanCancelCommand}"
+                                    IsVisible="{Binding IsScanning}" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Classes="path" Margin="14,0" Text="{Binding ScanTarget}"
+                                   ToolTip.Tip="{Binding ScanTarget}" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <ProgressBar Width="80" IsIndeterminate="True" IsVisible="{Binding IsScanning}" />
+                            <c:ExportButton ExportCommand="{Binding ExportCommand}" IsVisible="{Binding Hits.Count}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
 
-            <Grid RowDefinitions="*,4,180">
-                <DataGrid Grid.Row="0" ItemsSource="{Binding Hits}" AutoGenerateColumns="False" IsReadOnly="True"
-                          Background="{DynamicResource CinderBackground0Brush}">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Rule"      Binding="{Binding Rule}"       Width="160" />
-                        <DataGridTextColumn Header="Pattern"   Binding="{Binding Identifier}" Width="80" />
-                        <DataGridTextColumn Header="Offset"    Binding="{Binding OffsetHex}"  Width="140" />
-                        <DataGridTextColumn Header="Matched"   Binding="{Binding Matched}"    Width="*" />
-                    </DataGrid.Columns>
-                </DataGrid>
-                <GridSplitter Grid.Row="1" Background="{DynamicResource CinderBorderBrush}" />
-                <Border Grid.Row="2" Background="{DynamicResource CinderSurface1Brush}">
-                    <DockPanel>
-                        <Border DockPanel.Dock="Top" Padding="14,6"
-                                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-                            <TextBlock Text="RULE SUMMARY" Classes="section" />
-                        </Border>
-                        <DataGrid ItemsSource="{Binding RuleSummary}" AutoGenerateColumns="False" IsReadOnly="True"
-                                  Background="{DynamicResource CinderBackground0Brush}">
+                <Panel>
+                    <Grid RowDefinitions="*,4,190" IsVisible="{Binding RuleSummary.Count}">
+                        <DataGrid Grid.Row="0" ItemsSource="{Binding Hits}" SelectedItem="{Binding SelectedHit}"
+                                  AutoGenerateColumns="False" IsReadOnly="True" DoubleTapped="OnHitDoubleTapped">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="Rule"   Binding="{Binding Name}"   Width="180" />
-                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100" />
-                                <DataGridTextColumn Header="Hits"   Binding="{Binding Hits}"   Width="80" />
-                                <DataGridTextColumn Header="Note"   Binding="{Binding Note}"   Width="*" />
+                                <DataGridTextColumn Header="Rule" Binding="{Binding Rule}" Width="180" />
+                                <DataGridTextColumn Header="String" Binding="{Binding Identifier}" Width="90"
+                                                    FontFamily="{StaticResource CinderFontFamilyMono}" />
+                                <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="140"
+                                                    FontFamily="{StaticResource CinderFontFamilyMono}" />
+                                <DataGridTextColumn Header="Matched bytes" Binding="{Binding Matched}" Width="*"
+                                                    FontFamily="{StaticResource CinderFontFamilyMono}" />
                             </DataGrid.Columns>
                         </DataGrid>
-                    </DockPanel>
-                </Border>
+                        <GridSplitter Grid.Row="1" />
+                        <DockPanel Grid.Row="2">
+                            <Border DockPanel.Dock="Top" Padding="14,8" BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
+                                <TextBlock Text="WHAT EACH RULE DID" Classes="section" />
+                            </Border>
+                            <DataGrid ItemsSource="{Binding RuleSummary}" AutoGenerateColumns="False" IsReadOnly="True">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Rule" Binding="{Binding Name}" Width="200" />
+                                    <DataGridTextColumn Header="Result" Binding="{Binding Status}" Width="110" />
+                                    <DataGridTextColumn Header="Matches" Binding="{Binding Hits}" Width="90"
+                                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                                    <DataGridTextColumn Header="Note" Binding="{Binding Note}" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </Grid>
+                    <c:EmptyState Icon="{Binding IconGeometry}" Title="Scan a file with these rules"
+                                  IsVisible="{Binding !RuleSummary.Count}"
+                                  Message="Write or load YARA rules on the left, then pick a file: a disk image, a memory dump, a suspicious program. Cinder lists every place a rule's strings occur and what each rule did. Only part of the YARA language is supported; rules that use anything else are listed as skipped, with the reason.">
+                        <Button Classes="accent" Height="30" Padding="14,0" Content="Scan a file…" Command="{Binding PickAndScanCommand}" />
+                    </c:EmptyState>
+                </Panel>
+            </DockPanel>
+        </Grid>
+
+        <Border Grid.Row="1" Classes="footer">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Text="{Binding Hits.Count, StringFormat='{}{0:N0} matches'}" Classes="mono" IsVisible="{Binding Hits.Count}" />
+                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Margin="16,0,0,0" />
+                <TextBlock Grid.Column="2" Text="Double-click a match to see it in the Hex Viewer" IsVisible="{Binding Hits.Count}"
+                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
             </Grid>
-        </DockPanel>
+        </Border>
     </Grid>
 </UserControl>

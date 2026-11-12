@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MetadataExtractor;
@@ -16,7 +15,7 @@ public sealed partial class GalleryTool : ToolViewModel
     public override string Id => "gallery";
     public override string Title => "Image gallery";
     public override string Icon => "🖼";
-    public override string Subtitle => "Folder of images → thumbnails · click to preview · EXIF · GPS.";
+    public override string Subtitle => "Browse the pictures in a folder as thumbnails and read each one's camera details and GPS position.";
     public override string Phase => "1";
     public override string Kind => "gallery";
 
@@ -39,6 +38,12 @@ public sealed partial class GalleryTool : ToolViewModel
     [
         ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".avif", ".tiff", ".tif", ".ico",
     ];
+
+    /// <summary>Thumbnails shown for one folder. Reaching it is stated in the status line.</summary>
+    internal const int MaxImages = 500;
+
+    /// <summary>Identifies the newest preview request, so a slow earlier image cannot land on a later one.</summary>
+    private int _previewSerial;
 
     partial void OnSelectedItemChanged(GalleryItem? value)
     {
@@ -73,52 +78,36 @@ public sealed partial class GalleryTool : ToolViewModel
     private async Task LoadAsync(string folder, CancellationToken ct)
     {
         IsLoading = true;
-        StatusLine = "Scanning…";
+        StatusLine = "Looking for images…";
         Items.Clear();
         SelectedItem = null;
         try
         {
-            var paths = await Task.Run(() =>
-            {
-                var found = new List<string>();
-                try
-                {
-                    foreach (var f in System.IO.Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories))
-                    {
-                        if (Extensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
-                        {
-                            found.Add(f);
-                        }
-                        if (found.Count >= 500) break;
-                    }
-                }
-                catch { }
-                return found;
-            }, ct);
+            var (paths, more) = await Task.Run(() => FindImages(folder, MaxImages, ct), ct);
 
-            foreach (var p in paths)
+            // Decoding is the slow part and runs on the thread pool, a few images at a time, so
+            // the window stays responsive and thumbnails appear as they are ready.
+            const int Batch = 16;
+            for (var i = 0; i < paths.Count; i += Batch)
             {
                 ct.ThrowIfCancellationRequested();
-                Bitmap? thumb = null;
-                try
+                var slice = paths.GetRange(i, Math.Min(Batch, paths.Count - i));
+                var items = await Task.Run(() => slice.ConvertAll(MakeItem), ct);
+                foreach (var item in items)
                 {
-                    await using var fs = File.OpenRead(p);
-                    thumb = Bitmap.DecodeToWidth(fs, 160);
+                    Items.Add(item);
                 }
-                catch { /* unreadable image — skip thumbnail */ }
-                var info = new FileInfo(p);
-                await Dispatcher.UIThread.InvokeAsync(() => Items.Add(new GalleryItem(
-                    Path: p,
-                    Name: info.Name,
-                    SizeBytes: info.Length,
-                    Modified: info.LastWriteTimeUtc,
-                    Thumbnail: thumb)));
+                StatusLine = $"Loading thumbnails… {Items.Count:N0} of {paths.Count:N0}";
             }
-            StatusLine = $"{Items.Count:N0} image{(Items.Count == 1 ? "" : "s")} loaded.";
+            StatusLine = DescribeLoad(Items.Count, more);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = $"Stopped. {Items.Count:N0} image{(Items.Count == 1 ? "" : "s")} loaded before stopping.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not read {folder}: {ex.Message}";
         }
         finally
         {
@@ -126,8 +115,56 @@ public sealed partial class GalleryTool : ToolViewModel
         }
     }
 
+    /// <summary>
+    /// The first <paramref name="max"/> image files under <paramref name="folder"/>, and whether
+    /// there are more than that. Subfolders that cannot be opened are skipped, not fatal.
+    /// </summary>
+    internal static (List<string> Paths, bool More) FindImages(string folder, int max, CancellationToken ct)
+    {
+        var found = new List<string>();
+        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true };
+        foreach (var f in System.IO.Directory.EnumerateFiles(folder, "*", options))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!Extensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (found.Count >= max)
+            {
+                return (found, true);
+            }
+            found.Add(f);
+        }
+        return (found, false);
+    }
+
+    /// <summary>The status line after a load. When the cap was reached it says so, and what to do about it.</summary>
+    internal static string DescribeLoad(int shown, bool more) => more
+        ? $"Showing the first {shown:N0} images. This folder holds more than that; pick a subfolder to see the others."
+        : shown == 0
+            ? "No images were found in this folder or its subfolders."
+            : $"{shown:N0} image{(shown == 1 ? "" : "s")}.";
+
+    private static GalleryItem MakeItem(string path)
+    {
+        Bitmap? thumb = null;
+        try
+        {
+            using var fs = File.OpenRead(path);
+            thumb = Bitmap.DecodeToWidth(fs, 160);
+        }
+        catch
+        {
+            // Not an image Cinder can draw (HEIC, AVIF, damaged file): listed without a thumbnail.
+        }
+        var info = new FileInfo(path);
+        return new GalleryItem(path, info.Name, info.Length, info.LastWriteTimeUtc, thumb);
+    }
+
     private async Task LoadPreviewAsync(GalleryItem? item)
     {
+        var serial = ++_previewSerial;
         PreviewBitmap?.Dispose();
         PreviewBitmap = null;
         ExifRows.Clear();
@@ -149,6 +186,13 @@ public sealed partial class GalleryTool : ToolViewModel
         try
         {
             var (bmp, exif, dims, gps) = await Task.Run(() => LoadFullSize(item.Path));
+            if (serial != _previewSerial)
+            {
+                // Another image was selected while this one was loading. Its details must not
+                // appear under the other image's name.
+                bmp?.Dispose();
+                return;
+            }
             PreviewBitmap = bmp;
             PreviewDimensions = dims;
             PreviewGps = gps;
@@ -159,7 +203,10 @@ public sealed partial class GalleryTool : ToolViewModel
         }
         catch (Exception ex)
         {
-            ExifRows.Add(new ExifRow("Preview", $"Failed to load: {ex.Message}"));
+            if (serial == _previewSerial)
+            {
+                ExifRows.Add(new ExifRow("Preview", $"Could not load this image: {ex.Message}"));
+            }
         }
     }
 
@@ -219,7 +266,7 @@ public sealed partial class GalleryTool : ToolViewModel
         }
         catch (Exception ex)
         {
-            exif.Add(new ExifRow("EXIF", $"Read failed: {ex.Message}"));
+            exif.Add(new ExifRow("EXIF", $"Could not read the image's metadata: {ex.Message}"));
         }
 
         return (bmp, exif, dims, gps);

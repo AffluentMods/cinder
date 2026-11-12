@@ -63,6 +63,24 @@ public sealed class BookmarkStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task A_case_scoped_delete_with_the_wrong_case_id_removes_nothing()
+    {
+        // Bookmark ids are per-file AUTOINCREMENT integers, so id 1 exists in every case that
+        // has a bookmark. A list loaded from case A and acted on after the session moved to
+        // case B must not delete B's row of the same id.
+        var (store, caseId) = await NewCaseAsync();
+        var bm = new BookmarkStore(store);
+        var a = await bm.AddAsync(caseId, "alice", "evtx", null, "keep me", null, "{}");
+
+        (await bm.DeleteAsync(Guid.NewGuid(), a.Id)).Should().BeFalse();
+        (await bm.ListAsync(caseId)).Should().ContainSingle(b => b.Title == "keep me");
+
+        (await bm.DeleteAsync(caseId, a.Id)).Should().BeTrue("the right case id deletes it");
+        (await bm.ListAsync(caseId)).Should().BeEmpty();
+        (await bm.DeleteAsync(caseId, a.Id)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Migration_adds_the_table_to_a_version_one_case()
     {
         // A case file created before the bookmarks migration existed must gain the table on

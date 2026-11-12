@@ -93,7 +93,13 @@ public sealed class PythonBootstrap
         return installed;
     }
 
-    private static async Task<bool> RunAsync(string file, IReadOnlyList<string> args, IProgress<string> report, CancellationToken ct)
+    /// <summary>
+    /// Runs a child process to completion, streaming its output to <paramref name="report"/>.
+    /// Cancelling kills the child and everything it started before the cancellation is
+    /// rethrown. <paramref name="onStarted"/> receives the process id (used by tests).
+    /// </summary>
+    internal static async Task<bool> RunAsync(
+        string file, IReadOnlyList<string> args, IProgress<string> report, CancellationToken ct, Action<int>? onStarted = null)
     {
         using var p = new Process
         {
@@ -116,9 +122,36 @@ public sealed class PythonBootstrap
             report.Report($"Failed to start {file}.");
             return false;
         }
+        onStarted?.Invoke(p.Id);
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
-        await p.WaitForExitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await p.WaitForExitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelling the wait does not stop the child. Left alone, pip keeps writing into
+            // the venv, and a second run started after "cancel" races it in the same directory.
+            KillTree(p);
+            throw;
+        }
         return p.ExitCode == 0;
+    }
+
+    private static void KillTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(5000);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException or AggregateException)
+        {
+            // Already gone, or not ours to kill: nothing further can be done from here.
+        }
     }
 }

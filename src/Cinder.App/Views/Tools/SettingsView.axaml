@@ -4,24 +4,9 @@
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.SettingsView"
              x:DataType="tools:SettingsTool">
-    <Border Padding="40" Background="{DynamicResource CinderBackground0Brush}">
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" MaxWidth="520">
-            <Border Width="52" Height="52" CornerRadius="12" HorizontalAlignment="Center"
-                    Background="{DynamicResource CinderSurface2Brush}"
-                    BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
-                <c:CinderIcon Data="{x:Static c:Icons.Cog}" Width="24" Height="24"
-                              Foreground="{DynamicResource CinderAccentBrush}" />
-            </Border>
-            <TextBlock Text="Settings"
-                       FontWeight="600"
-                       FontSize="{DynamicResource CinderFontSizeXl}"
-                       HorizontalAlignment="Center" />
-            <TextBlock Text="Theme · density · vim mode · Python · AI provider · cloud client_ids."
-                       Foreground="{DynamicResource CinderForegroundMutedBrush}"
-                       TextAlignment="Center" />
-            <Button Classes="accent" Content="Open settings…" ToolTip.Tip="Ctrl+,"
-                    Command="{Binding OpenSettingsCommand}"
-                    HorizontalAlignment="Center" />
-        </StackPanel>
-    </Border>
+    <c:EmptyState Icon="{x:Static c:Icons.Cog}" Title="Settings"
+                  Message="Theme, the hash-set database, the custody time-stamp service, the AI assistant's model, and cloud sign-in IDs.">
+        <Button Classes="accent" Height="30" Padding="14,0" Content="Open settings…" ToolTip.Tip="Ctrl+,"
+                Command="{Binding OpenSettingsCommand}" />
+    </c:EmptyState>
 </UserControl>

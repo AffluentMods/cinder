@@ -36,6 +36,18 @@ public sealed class Aff4Writer : IDisposable
     public const string ZlibCompression = "https://www.ietf.org/rfc/rfc1950.txt";
     public const string StoredCompression = "http://aff4.org/Schema#NullCompressor";
 
+    /// <summary>
+    /// Predicate this writer puts on a compressed image stream to say that incompressible
+    /// chunks are stored raw, as the AFF4 standard has it. Cinder's first AFF4 writer
+    /// compressed every chunk unconditionally and did not write this, which is how
+    /// <see cref="Aff4Reader"/> tells the two apart and keeps reading the older containers
+    /// correctly. Other readers ignore a predicate they do not know.
+    /// </summary>
+    public const string StoredChunkMarker = "urn:cinder:aff4:incompressibleChunks";
+
+    /// <summary>The value written for <see cref="StoredChunkMarker"/>.</summary>
+    public const string StoredChunkMarkerValue = "stored";
+
     private readonly Options _o;
     private readonly FileStream _file;
     private readonly ZipArchive _zip;
@@ -145,9 +157,7 @@ public sealed class Aff4Writer : IDisposable
         _bevyIndex.Add((uint)_bevy.Length);
         if (_o.Compress)
         {
-            // With zlib declared every chunk is zlib — readers do not probe per chunk.
-            using var z = new ZLibStream(_bevy, CompressionLevel.Optimal, leaveOpen: true);
-            z.Write(plain);
+            _bevy.Write(Encode(plain));
         }
         else
         {
@@ -161,6 +171,52 @@ public sealed class Aff4Writer : IDisposable
         {
             throw new InvalidOperationException("AFF4: bevy exceeds the 32-bit index; lower chunks per segment.");
         }
+    }
+
+    /// <summary>
+    /// The stored form of one chunk of a compressed stream, following the convention every
+    /// AFF4 reader applies: a chunk whose stored length equals the chunk size is raw, anything
+    /// else is compressed. A full chunk that does not shrink by at least
+    /// <see cref="StoredMargin"/> bytes is therefore written raw, and a compressed payload is
+    /// never allowed to be exactly one chunk long — pyaff4, libaff4 and Evimetry would hand its
+    /// zlib bytes back as media.
+    /// </summary>
+    private byte[] Encode(ReadOnlySpan<byte> plain)
+    {
+        var packed = Deflate(plain, CompressionLevel.Optimal);
+        if (plain.Length == _o.ChunkSize)
+        {
+            return packed.Length < _o.ChunkSize - StoredMargin ? packed : plain.ToArray();
+        }
+
+        // The short final chunk cannot be stored raw (its length would not mark it as such), so
+        // it stays compressed; only the one ambiguous length has to be avoided.
+        foreach (var level in (ReadOnlySpan<CompressionLevel>)[CompressionLevel.NoCompression, CompressionLevel.Fastest, CompressionLevel.SmallestSize])
+        {
+            if (packed.Length != _o.ChunkSize)
+            {
+                break;
+            }
+            packed = Deflate(plain, level);
+        }
+        if (packed.Length == _o.ChunkSize)
+        {
+            throw new InvalidOperationException("AFF4: the final chunk cannot be encoded without being mistaken for a stored chunk.");
+        }
+        return packed;
+    }
+
+    /// <summary>pyaff4's threshold: compressed output must beat the chunk size by more than this to be kept.</summary>
+    private const int StoredMargin = 16;
+
+    private static byte[] Deflate(ReadOnlySpan<byte> input, CompressionLevel level)
+    {
+        using var ms = new MemoryStream(input.Length / 2 + 64);
+        using (var z = new ZLibStream(ms, level, leaveOpen: true))
+        {
+            z.Write(input);
+        }
+        return ms.ToArray();
     }
 
     private void FlushBevy()
@@ -238,6 +294,10 @@ public sealed class Aff4Writer : IDisposable
         sb.Append("    aff4:chunkSize \"").Append(_o.ChunkSize).Append("\"^^xsd:int ;\n");
         sb.Append("    aff4:chunksInSegment \"").Append(_o.ChunksPerSegment).Append("\"^^xsd:int ;\n");
         sb.Append("    aff4:compressionMethod <").Append(_o.Compress ? ZlibCompression : StoredCompression).Append("> ;\n");
+        if (_o.Compress)
+        {
+            sb.Append("    <").Append(StoredChunkMarker).Append("> \"").Append(StoredChunkMarkerValue).Append("\" ;\n");
+        }
         sb.Append("    aff4:size \"").Append(_size).Append("\"^^xsd:long ;\n");
         sb.Append("    aff4:stored <").Append(VolumeUrn).Append("> ;\n");
         sb.Append("    aff4:version \"1\"^^xsd:int .\n");

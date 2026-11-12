@@ -88,8 +88,8 @@ internal static class DocxReportWriter
         writer.WriteAttributeString("xmlns", "dc", null, "http://purl.org/dc/elements/1.1/");
         writer.WriteAttributeString("xmlns", "dcterms", null, "http://purl.org/dc/terms/");
         writer.WriteAttributeString("xmlns", "xsi", null, "http://www.w3.org/2001/XMLSchema-instance");
-        writer.WriteElementString("dc", "title", "http://purl.org/dc/elements/1.1/", report.Title);
-        writer.WriteElementString("dc", "creator", "http://purl.org/dc/elements/1.1/", report.Examiner);
+        writer.WriteElementString("dc", "title", "http://purl.org/dc/elements/1.1/", XmlSafe(report.Title));
+        writer.WriteElementString("dc", "creator", "http://purl.org/dc/elements/1.1/", XmlSafe(report.Examiner));
         writer.WriteElementString("dc", "subject", "http://purl.org/dc/elements/1.1/", "Cinder forensic report");
         writer.WriteStartElement("dcterms", "created", "http://purl.org/dc/terms/");
         writer.WriteAttributeString("xsi", "type", null, "dcterms:W3CDTF");
@@ -99,9 +99,56 @@ internal static class DocxReportWriter
         writer.WriteEndDocument();
     }
 
+    /// <summary>
+    /// A text run that is safe to serialise. Evidence strings routinely carry C0 control
+    /// characters (an ESC in a file name, a NUL in a registry value, a lone surrogate from a
+    /// truncated UTF-16 buffer). XML 1.0 cannot represent them at all, and the Open XML SDK
+    /// throws on save — one such character in one bookmark used to fail the whole export.
+    /// </summary>
+    private static Text SafeText(string? text) =>
+        new(XmlSafe(text)) { Space = SpaceProcessingModeValues.Preserve };
+
+    /// <summary>
+    /// Replaces every character XML 1.0 forbids (§2.2 Char) with U+FFFD, so the reader sees
+    /// that something unprintable was there rather than a silently shortened value.
+    /// </summary>
+    internal static string XmlSafe(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return "";
+        }
+
+        System.Text.StringBuilder? sb = null;
+        for (int i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                sb?.Append(c).Append(text[i + 1]);
+                i++;
+                continue;
+            }
+
+            var ok = c is '\t' or '\n' or '\r'
+                || (c >= 0x20 && c <= 0xD7FF)
+                || (c >= 0xE000 && c <= 0xFFFD);
+            if (ok)
+            {
+                sb?.Append(c);
+            }
+            else
+            {
+                sb ??= new System.Text.StringBuilder(text, 0, i, text.Length);
+                sb.Append('\uFFFD');
+            }
+        }
+        return sb?.ToString() ?? text;
+    }
+
     private static void AppendHeading(Body body, string text, int level)
     {
-        var run = new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+        var run = new Run(SafeText(text));
         var runProps = new RunProperties(
             new Bold(),
             new FontSize { Val = level switch { 0 => "44", 1 => "32", _ => "26" } },
@@ -115,7 +162,7 @@ internal static class DocxReportWriter
 
     private static void AppendParagraph(Body body, string text, bool italic = false)
     {
-        var run = new Run(new Text(text ?? "") { Space = SpaceProcessingModeValues.Preserve });
+        var run = new Run(SafeText(text));
         if (italic)
         {
             run.PrependChild(new RunProperties(new Italic(), new Color { Val = "666666" }));
@@ -127,7 +174,7 @@ internal static class DocxReportWriter
 
     private static void AppendBullet(Body body, string text)
     {
-        var para = new Paragraph(new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve }));
+        var para = new Paragraph(new Run(SafeText(text)));
         para.PrependChild(new ParagraphProperties(
             new Indentation { Left = "360" },
             new NumberingProperties(new NumberingLevelReference { Val = 0 }, new NumberingId { Val = 1 })));
@@ -136,9 +183,9 @@ internal static class DocxReportWriter
 
     private static void AppendMetadataRow(Body body, string label, string value)
     {
-        var labelRun = new Run(new Text(label + ": ") { Space = SpaceProcessingModeValues.Preserve });
+        var labelRun = new Run(SafeText(label + ": "));
         labelRun.PrependChild(new RunProperties(new Bold(), new Color { Val = "9CA0AB" }));
-        var valueRun = new Run(new Text(value) { Space = SpaceProcessingModeValues.Preserve });
+        var valueRun = new Run(SafeText(value));
         body.AppendChild(new Paragraph(labelRun, valueRun));
     }
 
@@ -195,7 +242,7 @@ internal static class DocxReportWriter
         var row = new TableRow();
         foreach (var c in cells)
         {
-            var run = new Run(new Text(c) { Space = SpaceProcessingModeValues.Preserve });
+            var run = new Run(SafeText(c));
             if (header)
             {
                 run.PrependChild(new RunProperties(new Bold(), new Color { Val = "FF7A1A" }));

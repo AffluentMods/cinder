@@ -11,6 +11,9 @@ public sealed class DropboxConnector : ICloudConnector
     public string ClientId { get; init; } = "";
     public string Scope { get; } = "files.metadata.read";
 
+    /// <summary>Value of <see cref="CloudFile.ProviderHashAlgorithm"/> for the block-wise Dropbox digest.</summary>
+    public const string ContentHashAlgorithm = "dropbox-content-hash";
+
     private readonly HttpClient _http;
     public DropboxConnector(HttpClient http) => _http = http;
 
@@ -79,8 +82,14 @@ public sealed class DropboxConnector : ICloudConnector
                     Size: e["size"]?.GetValue<long>() ?? 0,
                     Created: null,
                     Modified: DateTimeOffset.TryParse(e["client_modified"]?.GetValue<string?>(), out var m) ? m : null,
-                    Sha256: e["content_hash"]?.GetValue<string?>(),
-                    RemoteId: e["id"]?.GetValue<string?>());
+                    // Dropbox's content_hash is SHA-256 over the concatenated SHA-256s of each
+                    // 4 MiB block: 64 hex characters, but not the SHA-256 of the file, for any
+                    // file of any size. Labelling it Sha256 made every hash-set lookup and every
+                    // comparison with a locally computed hash miss.
+                    Sha256: null,
+                    RemoteId: e["id"]?.GetValue<string?>(),
+                    ProviderHash: e["content_hash"]?.GetValue<string?>(),
+                    ProviderHashAlgorithm: e["content_hash"] is null ? null : ContentHashAlgorithm);
             }
             url = "https://api.dropboxapi.com/2/files/list_folder/continue";
             nextCursor = (json?["has_more"]?.GetValue<bool>() ?? false) ? json!["cursor"]!.GetValue<string>() : "";

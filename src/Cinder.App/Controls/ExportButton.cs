@@ -26,6 +26,10 @@ public class ExportButton : Button
         ["jsonl"] = "JSON Lines",
         ["kml"] = "KML (Google Earth)",
         ["bodyfile"] = "Bodyfile (mactime)",
+        ["pdf"] = "PDF (archival PDF/A)",
+        ["docx"] = "Word (DOCX)",
+        ["html"] = "HTML",
+        ["md"] = "Markdown",
     };
 
     protected override Type StyleKeyOverride => typeof(Button);

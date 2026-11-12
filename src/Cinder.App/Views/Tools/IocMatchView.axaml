@@ -84,7 +84,7 @@
             <Grid ColumnDefinitions="Auto,*">
                 <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
                               Foreground="{DynamicResource CinderWarnBrush}" />
-                <TextBlock Grid.Column="1" Text="{Binding StatusLine}" TextWrapping="Wrap" FontWeight="500" />
+                <TextBlock Grid.Column="1" Text="{Binding TruncationNotice}" TextWrapping="Wrap" FontWeight="500" />
             </Grid>
         </Border>
 
@@ -112,7 +112,7 @@
             <Grid ColumnDefinitions="Auto,*">
                 <TextBlock Text="{Binding RowCountDisplay}" Classes="mono muted" FontSize="11.5" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding StatusLine}" Classes="dim" FontSize="11.5" Margin="16,0,0,0"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsVisible="{Binding !IsTruncated}" />
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </Grid>
         </Border>
     </Grid>

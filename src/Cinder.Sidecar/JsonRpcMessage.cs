@@ -5,7 +5,10 @@ namespace Cinder.Sidecar;
 
 /// <summary>
 /// JSON-RPC 2.0 over newline-delimited JSON on stdio. Cinder sidecars must read one JSON object
-/// per line on stdin and write one per line on stdout.
+/// per line on stdin and write one per line on stdout, both as UTF-8 without a BOM, and must
+/// write nothing else to stdout. A sidecar answers a line it cannot parse with an error that
+/// has no <c>id</c>, and may send <c>$/progress</c> notifications (no <c>id</c>) while a long
+/// call is running; see <see cref="SidecarClient"/> for how both are handled.
 /// </summary>
 public sealed class JsonRpcRequest
 {

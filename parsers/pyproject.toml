@@ -26,6 +26,10 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["echo*", "shared*"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 [tool.black]
 line-length = 100
 target-version = ["py312"]

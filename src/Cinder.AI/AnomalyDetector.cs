@@ -34,7 +34,11 @@ public sealed class AnomalyDetector
             }
 
             // Burst detection: more than 3× the median per-day count is suspicious.
-            var perDay = grp.GroupBy(e => e.Timestamp!.Value.Date).Select(g => (Date: g.Key, Count: g.Count())).ToList();
+            // Days are UTC days, like the hours above. DateTimeOffset.Date is the calendar date
+            // in the event's own offset and comes back with Kind=Unspecified, which the implicit
+            // conversion to DateTimeOffset then reads as the workstation's local time — the
+            // reported window moved by the examiner's UTC offset.
+            var perDay = grp.GroupBy(e => e.Timestamp!.Value.UtcDateTime.Date).Select(g => (Date: g.Key, Count: g.Count())).ToList();
             if (perDay.Count >= 5)
             {
                 var ordered = perDay.Select(p => p.Count).OrderBy(c => c).ToList();
@@ -46,7 +50,8 @@ public sealed class AnomalyDetector
                         yield return new Anomaly(
                             grp.Key, "activity-burst",
                             $"User {grp.Key} on {d.Date:yyyy-MM-dd}: {d.Count} events vs median {median}/day.",
-                            d.Date, d.Date.AddDays(1));
+                            new DateTimeOffset(d.Date, TimeSpan.Zero),
+                            new DateTimeOffset(d.Date.AddDays(1), TimeSpan.Zero));
                     }
                 }
             }

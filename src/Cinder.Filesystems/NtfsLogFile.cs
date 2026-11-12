@@ -57,6 +57,10 @@ public sealed record LogFileRecord(
 public static class NtfsLogFile
 {
     private const int DefaultPageSize = 4096;
+    private const int DefaultDataOffset = 0x40;
+    private const int RestartAreaLength = 0x28;   // through log_page_data_offset
+    private const int FirstRecordPage = 2;        // after the two restart pages
+    private const int FirstNormalPage = 4;        // after the two tail-copy pages
     private const int RecordHeaderLength = 0x30;
     private const int MaxClientDataLength = 1 << 20;
 
@@ -91,24 +95,41 @@ public static class NtfsLogFile
 
         var length = logFile.Length;
         var pageSize = DefaultPageSize;
-        var dataOffset = 0x40;
+        var dataOffset = DefaultDataOffset;
         var seqBits = 0;
 
-        // Restart page: page size, log-page data offset, sequence-number bits.
+        // Restart page: page size, then the restart area's sequence-number bits and log-page
+        // data offset. Field offsets are those of the on-disk RESTART_AREA:
+        //   +0x00 current_lsn (8)          +0x08 log_clients (2)          +0x0A client_free_list (2)
+        //   +0x0C client_in_use_list (2)   +0x0E flags (2)                +0x10 seq_number_bits (4)
+        //   +0x14 restart_area_length (2)  +0x16 client_array_offset (2)  +0x18 file_size (8)
+        //   +0x20 last_lsn_data_length (4) +0x24 log_record_header_length (2)
+        //   +0x26 log_page_data_offset (2)
         var first = ReadPage(logFile, 0, pageSize);
         if (first is not null && first.AsSpan(0, 4).SequenceEqual("RSTR"u8))
         {
+            ApplyFixups(first);
             var logPageSize = BinaryPrimitives.ReadUInt32LittleEndian(first.AsSpan(0x14));
             if (logPageSize is >= 512 and <= 65536 && (logPageSize & (logPageSize - 1)) == 0)
             {
                 pageSize = (int)logPageSize;
             }
             var raOffset = BinaryPrimitives.ReadUInt16LittleEndian(first.AsSpan(0x18));
-            if (raOffset + 0x30 <= first.Length)
+            if (raOffset + RestartAreaLength <= first.Length)
             {
-                seqBits = (int)BinaryPrimitives.ReadUInt32LittleEndian(first.AsSpan(raOffset + 0x0C));
-                var dOff = BinaryPrimitives.ReadUInt16LittleEndian(first.AsSpan(raOffset + 0x1A));
-                if (dOff >= 0x28 && dOff < pageSize)
+                var bits = BinaryPrimitives.ReadUInt32LittleEndian(first.AsSpan(raOffset + 0x10));
+                if (bits is >= 1 and <= 63)
+                {
+                    seqBits = (int)bits;
+                }
+
+                // The data offset decides how much of every page is payload, so a hostile
+                // value near the page end would turn one megabyte of claimed client data
+                // into tens of thousands of continuation-page reads. Real logs use 0x40;
+                // anything that is not an aligned offset in the first half of the page is
+                // ignored in favour of that.
+                var dOff = BinaryPrimitives.ReadUInt16LittleEndian(first.AsSpan(raOffset + 0x26));
+                if (dOff >= 0x28 && dOff <= pageSize / 2 && (dOff & 7) == 0)
                 {
                     dataOffset = dOff;
                 }
@@ -118,14 +139,26 @@ public static class NtfsLogFile
         var seen = new HashSet<long>();
         var pageCount = length / pageSize;
         var page = new byte[pageSize];
+        var cont = new byte[pageSize];
         var payloadPerPage = pageSize - dataOffset;
 
-        for (long p = 2; p < pageCount; p++)
+        // Records that run off the end of a tail-copy page. Their continuation lives after the
+        // page's home position, not after the copy, so they are held back and only reported
+        // (truncated) if the home page never yields the complete record.
+        var deferred = new List<(long Lsn, LogFileRecord Record)>();
+
+        // Continuation pages are re-read for every spanning record that cannot be completed,
+        // which a crafted log can arrange for every page. The budget keeps the whole parse
+        // linear in the size of the file; once it is spent, spanning records are reported
+        // truncated with the bytes their own page holds.
+        var continuationBudget = pageCount * 2 + 64;
+
+        for (long p = FirstRecordPage; p < pageCount; p++)
         {
             ct.ThrowIfCancellationRequested();
             if (!TryReadPage(logFile, p * pageSize, page))
             {
-                yield break;
+                break;
             }
             if (!page.AsSpan(0, 4).SequenceEqual("RCRD"u8))
             {
@@ -133,6 +166,10 @@ public static class NtfsLogFile
             }
             ApplyFixups(page);
             var nextRecordOffset = NextRecordOffset(page, dataOffset, pageSize);
+
+            // Pages 2 and 3 are tail copies: the most recently written record pages, mirrored
+            // ahead of the circular area. They hold the newest records in the log.
+            var tailCopy = p < FirstNormalPage;
 
             var pos = dataOffset;
             while (pos + RecordHeaderLength <= pageSize)
@@ -155,7 +192,7 @@ public static class NtfsLogFile
                 // slack that has been partially overwritten — still worth a row, but one whose
                 // header we no longer trust enough to follow across pages.
                 var recordFileOffset = p * pageSize + pos;
-                if (seqBits > 0 && seqBits < 64 && (long)(((ulong)lsn << seqBits) >> seqBits) * 8 != recordFileOffset)
+                if (seqBits > 0 && !LsnMatchesPosition(lsn, seqBits, p, pos, pageSize, tailCopy))
                 {
                     stale = true;
                 }
@@ -184,16 +221,28 @@ public static class NtfsLogFile
                     break;
                 }
 
+                if (tailCopy)
+                {
+                    if (!seen.Contains(lsn))
+                    {
+                        deferred.Add((lsn, Build(header, page.AsSpan(pos + RecordHeaderLength, available).ToArray(), lsn, recordType, clusterSize, stale, truncated: true, recordFileOffset)));
+                    }
+                    break;
+                }
+
                 // Live record continuing into the following page(s): the tail of the client
-                // data sits at each next page's data offset.
-                var full = new byte[dataLen];
+                // data sits at each next page's data offset. The buffer is sized by what can
+                // actually be read, not by the length the record claims.
+                var pagesNeeded = (dataLen - available + payloadPerPage - 1) / payloadPerPage;
+                var pagesReachable = Math.Min(pagesNeeded, Math.Min(pageCount - (p + 1), continuationBudget));
+                var full = new byte[(int)Math.Min(dataLen, available + pagesReachable * payloadPerPage)];
                 page.AsSpan(pos + RecordHeaderLength, available).CopyTo(full);
                 var filled = available;
                 var q = p + 1;
                 var lastTake = 0;
-                var cont = new byte[pageSize];
-                while (filled < dataLen && q < pageCount)
+                while (filled < dataLen && q < pageCount && continuationBudget > 0)
                 {
+                    continuationBudget--;
                     if (!TryReadPage(logFile, q * pageSize, cont) || !cont.AsSpan(0, 4).SequenceEqual("RCRD"u8))
                     {
                         break;
@@ -209,7 +258,7 @@ public static class NtfsLogFile
                 {
                     if (seen.Add(lsn))
                     {
-                        yield return Build(header, full[..filled], lsn, recordType, clusterSize, stale, truncated: true, recordFileOffset);
+                        yield return Build(header, filled == full.Length ? full : full[..filled], lsn, recordType, clusterSize, stale, truncated: true, recordFileOffset);
                     }
                     break;
                 }
@@ -226,6 +275,32 @@ public static class NtfsLogFile
                 pos = lastTake == payloadPerPage ? pageSize : Align8(dataOffset + lastTake);
             }
         }
+
+        foreach (var (lsn, record) in deferred)
+        {
+            if (seen.Add(lsn))
+            {
+                yield return record;
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when the offset an LSN encodes agrees with where the record was read. The low
+    /// <c>64 - seqBits</c> bits of an LSN are the record's file offset in 8-byte units. In the
+    /// circular area that must equal the record's position exactly. A tail-copy page sits at
+    /// page 2 or 3 but mirrors a page whose home is in the circular area, so there only the
+    /// offset within the page can be compared, and the home must lie past the tail copies.
+    /// </summary>
+    internal static bool LsnMatchesPosition(long lsn, int seqBits, long pageIndex, int offsetInPage, int pageSize, bool tailCopy)
+    {
+        var encoded = (((ulong)lsn << seqBits) >> seqBits) << 3;
+        if (!tailCopy)
+        {
+            return encoded == (ulong)(pageIndex * pageSize + offsetInPage);
+        }
+        return encoded % (ulong)pageSize == (ulong)offsetInPage
+            && encoded >= (ulong)(FirstNormalPage * pageSize);
     }
 
     private static int NextRecordOffset(byte[] page, int dataOffset, int pageSize)

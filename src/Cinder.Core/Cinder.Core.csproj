@@ -10,4 +10,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Sql\Migrations\*.sql" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Internal helpers are unit-tested directly. -->
+    <InternalsVisibleTo Include="Cinder.Core.Tests" />
+  </ItemGroup>
 </Project>

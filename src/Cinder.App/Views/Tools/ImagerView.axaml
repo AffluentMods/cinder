@@ -34,6 +34,9 @@
                     <TextBlock Text="Start imaging" VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
+            <Button Classes="tb" HorizontalAlignment="Left" Height="30" Margin="120,0,0,0" Content="Stop"
+                    Command="{Binding StartCancelCommand}" IsVisible="{Binding StartCommand.IsRunning}"
+                    ToolTip.Tip="Stops and deletes the unfinished output" />
             <ProgressBar IsIndeterminate="True" IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />
             <TextBlock Text="{Binding BytesRead, StringFormat='{}{0:N0} bytes read'}" Classes="mono dim" FontSize="12"
                        IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />

@@ -141,10 +141,145 @@ public sealed class UsnJournalTests
         records.Select(r => r.Usn).Should().BeInAscendingOrder();
     }
 
+    // ---- termination and hostile lengths ----------------------------------------------------
+    //
+    // These run on a timed task: the failure mode they guard against is a parse that never
+    // returns, which would otherwise hang the test host instead of failing a test.
+
+    private const int TimeoutMs = 30_000;
+
+    [Theory(Timeout = TimeoutMs)]
+    [InlineData(60)]
+    [InlineData(64)]
+    [InlineData(80)]
+    public Task A_final_record_cut_off_after_its_fixed_header_does_not_hang(int keep) => Task.Run(() =>
+    {
+        // 60 or more bytes of a record whose length field says 88. The old loop only stopped
+        // when fewer than 60 bytes were left, so this spun forever with nothing to consume
+        // and nothing to read.
+        var whole = Record(2, Ref(1, 1), Ref(5, 1), 1, T0, 0x100, 0x20, "keep.txt");
+        var cut = Record(2, Ref(4, 1), Ref(5, 1), 4, T0, 0x100, 0x20, "cut-off-name.txt");
+        cut.Length.Should().BeGreaterThan(keep);
+
+        var records = UsnJournal.Parse(new MemoryStream(Concat(whole, cut[..keep]))).ToList();
+
+        records.Should().ContainSingle().Which.FileName.Should().Be("keep.txt");
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task A_stream_that_ends_before_its_advertised_length_does_not_hang() => Task.Run(() =>
+    {
+        // What a truncated image looks like through a stream layer that reports the size the
+        // filesystem recorded: Length says more than Read will ever deliver.
+        var whole = Record(2, Ref(1, 1), Ref(5, 1), 1, T0, 0x100, 0x20, "keep.txt");
+        var cut = Record(2, Ref(4, 1), Ref(5, 1), 4, T0, 0x100, 0x20, "cut-off-name.txt")[..70];
+
+        using var lying = new LyingLengthStream(Concat(whole, cut), advertised: 1 << 20);
+        var records = UsnJournal.Parse(lying).ToList();
+
+        records.Should().ContainSingle().Which.FileName.Should().Be("keep.txt");
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task A_length_field_that_overruns_the_end_does_not_hide_the_records_after_it() => Task.Run(() =>
+    {
+        // Eight bytes that read as "a 4096-byte record starts here", close enough to the end
+        // that it can never be satisfied. The real records behind it must still be returned.
+        var a = Record(2, Ref(1, 1), Ref(5, 1), 1, T0, 0x100, 0x20, "a.txt");
+        var planted = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(planted, 4096);
+        BinaryPrimitives.WriteUInt16LittleEndian(planted.AsSpan(4), 2);
+        var b = Record(2, Ref(2, 1), Ref(5, 1), 2, T0, 0x100, 0x20, "b.txt");
+
+        var records = UsnJournal.Parse(new MemoryStream(Concat(a, planted, b))).ToList();
+
+        records.Select(r => r.FileName).Should().Equal("a.txt", "b.txt");
+    });
+
+    [Theory(Timeout = TimeoutMs)]
+    [InlineData(64)]
+    [InlineData(72)]
+    public Task A_v3_record_shorter_than_the_v3_header_is_skipped_and_parsing_continues(int claimedLength) => Task.Run(() =>
+    {
+        // A V3 header is 76 bytes. A record that says "V3, 64 bytes" passed the V2-sized length
+        // check and was then read past its end, which threw and — because every caller treats
+        // an exception as "unreadable volume" — silently dropped the rest of the journal.
+        var before = Record(2, Ref(1, 1), Ref(5, 1), 1, T0, 0x100, 0x20, "before.txt");
+        var shortV3 = new byte[claimedLength];
+        BinaryPrimitives.WriteInt32LittleEndian(shortV3, claimedLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(shortV3.AsSpan(4), 3);
+        var after = Record(3, Ref(2, 1), Ref(5, 1), 2, T0, 0x100, 0x20, "after.txt");
+
+        List<UsnRecord>? records = null;
+        var act = () => records = UsnJournal.Parse(new MemoryStream(Concat(before, shortV3, after))).ToList();
+
+        act.Should().NotThrow();
+        records!.Select(r => r.FileName).Should().Equal("before.txt", "after.txt");
+        UsnJournal.TryParseRecord(shortV3, out _).Should().BeFalse();
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public Task A_non_seekable_stream_is_parsed_front_to_back() => Task.Run(() =>
+    {
+        var a = Record(2, Ref(1, 1), Ref(5, 1), 1, T0, 0x100, 0x20, "a.txt");
+        var b = Record(3, Ref(2, 1), Ref(5, 1), 2, T0, 0x100, 0x20, "b.txt");
+
+        using var forward = new LyingLengthStream(Concat(a, b), advertised: -1);
+        UsnJournal.Parse(forward).Select(r => r.FileName).Should().Equal("a.txt", "b.txt");
+    });
+
+    [Fact(Timeout = TimeoutMs)]
+    public async Task Cancellation_is_observed()
+    {
+        var a = Record(2, Ref(1, 1), Ref(5, 1), 1, T0, 0x100, 0x20, "a.txt");
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var act = () => UsnJournal.Parse(new MemoryStream(a), cts.Token).ToList();
+        act.Should().Throw<OperationCanceledException>();
+    }
+
     private static byte[] Concat(params byte[][] parts)
     {
         var ms = new MemoryStream();
         foreach (var p in parts) ms.Write(p);
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Read-only stream whose <see cref="Length"/> is whatever the test says. A negative
+    /// <c>advertised</c> makes it forward-only (no Length, no Position).
+    /// </summary>
+    private sealed class LyingLengthStream(byte[] data, long advertised) : Stream
+    {
+        private long _pos;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => advertised >= 0;
+        public override bool CanWrite => false;
+        public override long Length => advertised >= 0 ? advertised : throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => advertised >= 0 ? _pos : throw new NotSupportedException();
+            set => _pos = advertised >= 0 ? value : throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var n = (int)Math.Max(0, Math.Min(count, data.Length - _pos));
+            if (n == 0)
+            {
+                return 0;
+            }
+            Array.Copy(data, _pos, buffer, offset, n);
+            _pos += n;
+            return n;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void Flush() { }
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

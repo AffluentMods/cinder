@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Tests for the libraries Cinder.Core.Tests does not reference: Cinder.AI, Cinder.Workflow,
+    Cinder.Network, Cinder.Mobile and the Cinder.Cli entry point. Kept as its own project so
+    that Cinder.Core.Tests does not have to take a dependency on the CLI executable and
+    everything it pulls in.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cinder.Core\Cinder.Core.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Artifacts\Cinder.Artifacts.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.AI\Cinder.AI.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Workflow\Cinder.Workflow.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Network\Cinder.Network.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Mobile\Cinder.Mobile.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Sidecar\Cinder.Sidecar.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Cli\Cinder.Cli.csproj" />
+  </ItemGroup>
+</Project>

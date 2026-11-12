@@ -61,9 +61,21 @@ public sealed class OneDriveConnector : ICloudConnector
             token.ExpiresIn is { } e ? DateTimeOffset.UtcNow.AddSeconds(e) : null, token.Scope ?? Scope);
     }
 
+    /// <summary>Value of <see cref="CloudFile.ProviderHashAlgorithm"/> for OneDrive's QuickXorHash.</summary>
+    public const string QuickXorHashAlgorithm = "onedrive-quickxorhash";
+
+    /// <summary>
+    /// Every file in the drive, at any depth.
+    ///
+    /// <para>Uses the drive <c>delta</c> feed rather than <c>root/children</c>: children lists one
+    /// folder level, so everything inside a subfolder was missing from the collection with no
+    /// indication. A first delta call (no token) enumerates the whole hierarchy; it is followed
+    /// through <c>@odata.nextLink</c> until the page that carries <c>@odata.deltaLink</c>.
+    /// Folders, the root item and tombstones for deleted items are skipped — this lists files.</para>
+    /// </summary>
     public async IAsyncEnumerable<CloudFile> ListFilesAsync(CloudAuthorization auth, [EnumeratorCancellation] CancellationToken ct)
     {
-        var url = "https://graph.microsoft.com/v1.0/me/drive/root/children?$top=200";
+        var url = "https://graph.microsoft.com/v1.0/me/drive/root/delta?$top=200";
         while (!string.IsNullOrEmpty(url))
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -73,17 +85,48 @@ public sealed class OneDriveConnector : ICloudConnector
             var json = await resp.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct).ConfigureAwait(false);
             foreach (var f in (json?["value"] as JsonArray)?.OfType<JsonObject>() ?? [])
             {
+                if (f["folder"] is not null || f["root"] is not null || f["deleted"] is not null || f["file"] is null)
+                {
+                    continue;
+                }
+                var hashes = (f["file"] as JsonObject)?["hashes"] as JsonObject;
+                var quickXor = hashes?["quickXorHash"]?.GetValue<string?>();
                 yield return new CloudFile(
                     Provider: ProviderId, AccountId: auth.AccountId,
-                    Path: f["name"]?.GetValue<string>() ?? "",
+                    Path: FullPath(f),
                     Size: f["size"]?.GetValue<long>() ?? 0,
                     Created: DateTimeOffset.TryParse(f["createdDateTime"]?.GetValue<string?>(), out var c) ? c : null,
                     Modified: DateTimeOffset.TryParse(f["lastModifiedDateTime"]?.GetValue<string?>(), out var m) ? m : null,
-                    Sha256: (f["file"] as JsonObject)?["hashes"]?["sha256Hash"]?.GetValue<string?>(),
-                    RemoteId: f["id"]?.GetValue<string?>());
+                    Sha256: hashes?["sha256Hash"]?.GetValue<string?>(),
+                    RemoteId: f["id"]?.GetValue<string?>(),
+                    ProviderHash: quickXor,
+                    ProviderHashAlgorithm: quickXor is null ? null : QuickXorHashAlgorithm);
             }
-            url = json?["@odata.nextLink"]?.GetValue<string?>() ?? "";
+
+            // Only follow links back to Graph: the bearer token goes wherever this URL points.
+            var next = json?["@odata.nextLink"]?.GetValue<string?>() ?? "";
+            if (next.Length > 0 &&
+                !(Uri.TryCreate(next, UriKind.Absolute, out var nextUri) &&
+                  nextUri.Scheme == Uri.UriSchemeHttps &&
+                  nextUri.Host.Equals("graph.microsoft.com", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"OneDrive returned a next-page link outside Microsoft Graph: {next}");
+            }
+            url = next;
         }
+    }
+
+    /// <summary>
+    /// Path within the drive: <c>parentReference.path</c> is <c>/drive/root:/Folder/Sub</c>
+    /// (percent-encoded); the part after <c>root:</c> plus the item name is what a user sees.
+    /// </summary>
+    private static string FullPath(JsonObject item)
+    {
+        var name = item["name"]?.GetValue<string>() ?? "";
+        var parent = (item["parentReference"] as JsonObject)?["path"]?.GetValue<string?>() ?? "";
+        var marker = parent.IndexOf("root:", StringComparison.Ordinal);
+        var folder = marker >= 0 ? Uri.UnescapeDataString(parent[(marker + 5)..]) : "";
+        return folder.TrimEnd('/') + "/" + name;
     }
 
     public async IAsyncEnumerable<CloudActivity> ListActivityAsync(CloudAuthorization auth, DateTimeOffset since, [EnumeratorCancellation] CancellationToken ct)

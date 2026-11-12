@@ -60,13 +60,125 @@ public partial class MainWindow : Window
         {
             _vm.PropertyChanged -= OnVmPropertyChanged;
             _vm.FocusFindRequested -= OnFocusFindRequested;
+            _vm.Workspace.PropertyChanged -= OnWorkspacePropertyChanged;
         }
         _vm = DataContext as MainWindowViewModel;
         if (_vm is not null)
         {
             _vm.PropertyChanged += OnVmPropertyChanged;
             _vm.FocusFindRequested += OnFocusFindRequested;
+            _vm.Workspace.PropertyChanged += OnWorkspacePropertyChanged;
             ApplyPaneLayout();
+        }
+    }
+
+    private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ViewModels.Tools.WorkspaceViewModel.SelectedTool))
+        {
+            RevealSelectedToolInRail();
+        }
+    }
+
+    /// <summary>
+    /// Scrolls the rail to the selected tool. A tool opened from the command palette, the
+    /// rail filter or another tool is often in a group below the fold; without this the rail
+    /// showed nothing highlighted and gave no clue which tool was on screen.
+    /// </summary>
+    private void RevealSelectedToolInRail()
+    {
+        // Background priority: the group expands (and its buttons are created) in response
+        // to the same selection change, so wait for that layout pass.
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_vm?.Workspace.SelectedTool is not { } tool || this.FindControl<Control>("Rail") is not { } rail)
+            {
+                return;
+            }
+            var button = rail.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(b => ReferenceEquals(b.CommandParameter, tool) && b.IsEffectivelyVisible);
+            button?.BringIntoView();
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Hex Viewer shortcuts, live only while the Hex Viewer is the tool on screen, plus Ctrl+F,
+    /// which goes to whatever "find" means in the current tool. Runs in the bubble phase, so a
+    /// focused text box or grid that handles the key (Ctrl+C to copy its own text) wins.
+    /// </summary>
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.Handled || _vm is null || _vm.Palette.IsOpen || _vm.IsHelpOpen)
+        {
+            return;
+        }
+        var ctrl = e.KeyModifiers == KeyModifiers.Control;
+        var hex = _vm.Workspace.IsHexSelected;
+
+        if (ctrl && e.Key == Key.F)
+        {
+            if (hex)
+            {
+                _vm.FocusFindCommand.Execute(null);
+            }
+            else
+            {
+                FocusToolSearchBox();
+            }
+            e.Handled = true;
+            return;
+        }
+        if (!hex)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case Key.F3 when e.KeyModifiers == KeyModifiers.None:
+                _vm.Hex.FindNextCommand.Execute(null);
+                break;
+            case Key.F3 when e.KeyModifiers == KeyModifiers.Shift:
+                _vm.Hex.FindPreviousCommand.Execute(null);
+                break;
+            case Key.G when ctrl:
+                _vm.OpenGotoCommand.Execute(null);
+                break;
+            case Key.D when ctrl:
+                _vm.Hex.AddBookmarkCommand.Execute(null);
+                break;
+            case Key.C when ctrl:
+                _vm.Hex.CopySelectionAsHexCommand.Execute(null);
+                break;
+            case Key.W when ctrl:
+                _vm.CloseBufferCommand.Execute(_vm.Hex);
+                break;
+            case Key.Left when e.KeyModifiers == KeyModifiers.Alt:
+                _vm.Hex.NavigateBackCommand.Execute(null);
+                break;
+            case Key.Right when e.KeyModifiers == KeyModifiers.Alt:
+                _vm.Hex.NavigateForwardCommand.Execute(null);
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
+    }
+
+    /// <summary>Ctrl+F outside the Hex Viewer: put the caret in the current tool's filter or search box.</summary>
+    private void FocusToolSearchBox()
+    {
+        if (this.FindControl<Control>("ToolArea") is not { } area)
+        {
+            return;
+        }
+        var box = area.GetVisualDescendants().OfType<TextBox>()
+            .FirstOrDefault(t => t.IsEffectivelyVisible && t.IsEffectivelyEnabled && !t.IsReadOnly && !t.AcceptsReturn);
+        if (box is not null)
+        {
+            box.Focus();
+            box.SelectAll();
         }
     }
 

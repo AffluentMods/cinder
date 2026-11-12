@@ -9,12 +9,30 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Cinder.App.ViewModels;
 
-/// <summary>UI wrapper for <see cref="SuperTimeline"/>. Sources are pluggable; for v0.1 we
-/// ship the wrapper and let parsers feed into it. Demo seed adds a few fake events on demand
-/// so the histogram + range UI is testable without a real case loaded.</summary>
+/// <summary>
+/// The super-timeline: every timestamped event read from one or more evidence folders, in time
+/// order, with date, user, source, text and ATT&amp;CK filters.
+///
+/// <para>Two rules keep what is on screen and what is written to disk honest:</para>
+/// <list type="bullet">
+/// <item>An ingest never changes the timeline the grid is reading. It builds a new one on the
+/// thread pool (the existing events plus the new folder's) and the finished timeline replaces
+/// the old one on the UI thread. While it runs, Refresh and Export are disabled.</item>
+/// <item>Filters take effect when applied (Refresh, or Enter in a filter box). Export writes the
+/// events matching the filter that was last applied, which is the filter the grid is showing,
+/// not whatever has been typed since.</item>
+/// </list>
+/// </summary>
 public sealed partial class TimelineToolViewModel : ViewModelBase
 {
-    public SuperTimeline Timeline { get; } = new();
+    /// <summary>Events shown in the grid. The status line says so when more match.</summary>
+    internal const int MaxShown = 5_000;
+
+    private const int HistogramBuckets = 64;
+    private const int HistogramHeight = 44;
+
+    /// <summary>The current timeline. Replaced, never modified in place, once events are in it.</summary>
+    public SuperTimeline Timeline { get; private set; } = new();
 
     public ObservableCollection<TimelineEvent> Events { get; } = new();
     public ObservableCollection<int> Histogram { get; } = new();
@@ -31,6 +49,7 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
     [ObservableProperty]
     private string? _textFilter;
 
+    /// <summary>One or more source names or parts of names, separated by commas: <c>evtx, browser</c>.</summary>
     [ObservableProperty]
     private string? _sourceFilter;
 
@@ -42,7 +61,7 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
     private string? _mitreFilter;
 
     [ObservableProperty]
-    private string _statusLine = "0 events.";
+    private string _statusLine = "No events yet.";
 
     [ObservableProperty]
     private TimelineEvent? _selectedEvent;
@@ -50,10 +69,51 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
     [ObservableProperty]
     private string? _bookmarkNote;
 
+    /// <summary>True while a folder is being read. Refresh and Export wait for it.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RefreshCommand), nameof(ExportCommand), nameof(ClearCommand))]
+    [NotifyPropertyChangedFor(nameof(ShowEmptyState), nameof(ShowNoMatches))]
+    private bool _isIngesting;
+
+    /// <summary>True when a filter box or date has been changed since the grid was last refreshed.</summary>
+    [ObservableProperty]
+    private bool _filtersEdited;
+
+    /// <summary>The filter the grid is showing. Export uses this, not the boxes.</summary>
+    private AppliedFilter _applied;
+
+    public TimelineToolViewModel()
+    {
+        _applied = Snapshot();
+        Events.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(ShowEmptyState));
+            OnPropertyChanged(nameof(ShowNoMatches));
+        };
+    }
+
+    /// <summary>True when at least one event has been ingested.</summary>
+    public bool HasEvents => Timeline.Count > 0;
+
+    /// <summary>Nothing ingested yet: the view offers "Ingest folder…".</summary>
+    public bool ShowEmptyState => !HasEvents && !IsIngesting;
+
+    /// <summary>Events exist but the applied filter matches none: the view says that, not "no events yet".</summary>
+    public bool ShowNoMatches => HasEvents && Events.Count == 0 && !IsIngesting;
+
+    partial void OnFromChanged(DateTimeOffset value) => FiltersEdited = true;
+    partial void OnToChanged(DateTimeOffset value) => FiltersEdited = true;
+    partial void OnUserFilterChanged(string? value) => FiltersEdited = true;
+    partial void OnTextFilterChanged(string? value) => FiltersEdited = true;
+    partial void OnSourceFilterChanged(string? value) => FiltersEdited = true;
+    partial void OnMitreFilterChanged(string? value) => FiltersEdited = true;
+
     /// <summary>Flags the selected event as a finding in the open case; Reports turns it into an exhibit.</summary>
     [RelayCommand]
     private async Task BookmarkSelectedAsync(CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = Cinder.App.Services.ActiveCaseContext.Current;
         var e = SelectedEvent;
         var session = ActiveCaseContext.Current;
         if (e is null)
@@ -80,7 +140,7 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
             var store = new Cinder.Core.Cases.BookmarkStore(new Cinder.Core.Cases.CaseStore(session.Path));
             var bm = await store.AddAsync(session.Id, Environment.UserName, "timeline", null, title, BookmarkNote,
                 System.Text.Json.JsonSerializer.Serialize(values), ct);
-            await ActiveCaseContext.LogAsync(CustodyAction.Annotation, new
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.Annotation, new
             {
                 Kind = "bookmark",
                 BookmarkId = bm.Id,
@@ -93,7 +153,7 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusLine = $"Bookmark failed: {ex.Message}";
+            StatusLine = $"Could not add the bookmark: {ex.Message}";
         }
     }
 
@@ -101,11 +161,55 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
     public IReadOnlyList<string> KnownMitreIds { get; } =
         MitreTagger.KnownIds.OrderBy(id => id, StringComparer.Ordinal).Select(MitreTagger.Describe).ToArray();
 
-    private TimelineFilter CurrentFilter() => new(
-        User: string.IsNullOrWhiteSpace(UserFilter) ? null : UserFilter,
-        Sources: string.IsNullOrWhiteSpace(SourceFilter) ? null : [SourceFilter],
-        TextContains: string.IsNullOrWhiteSpace(TextFilter) ? null : TextFilter,
-        MitreTechnique: NormaliseMitre(MitreFilter));
+    /// <summary>
+    /// A filter as applied: the date window, the library filter (user, text, technique) and the
+    /// source terms, which are matched here because a source is named like
+    /// <c>evtx.Security</c> and an examiner types <c>evtx</c>.
+    /// </summary>
+    internal readonly record struct AppliedFilter(
+        DateTimeOffset From, DateTimeOffset To, TimelineFilter Filter, IReadOnlyList<string> SourceTerms)
+    {
+        public bool Matches(TimelineEvent e) => SourceMatches(e.Source, SourceTerms);
+    }
+
+    private AppliedFilter Snapshot() => new(
+        From,
+        InclusiveEnd(To),
+        new TimelineFilter(
+            User: string.IsNullOrWhiteSpace(UserFilter) ? null : UserFilter.Trim(),
+            TextContains: string.IsNullOrWhiteSpace(TextFilter) ? null : TextFilter.Trim(),
+            MitreTechnique: NormaliseMitre(MitreFilter)),
+        ParseSourceTerms(SourceFilter));
+
+    /// <summary>
+    /// A "to" date picked in the calendar is midnight at the start of that day. The examiner
+    /// means the whole day, so the window runs to its last instant.
+    /// </summary>
+    internal static DateTimeOffset InclusiveEnd(DateTimeOffset to) =>
+        to.TimeOfDay == TimeSpan.Zero && to < DateTimeOffset.MaxValue.AddDays(-1) ? to.AddDays(1).AddTicks(-1) : to;
+
+    /// <summary>Splits "evtx, browser.history" into its terms. Empty input means "any source".</summary>
+    internal static IReadOnlyList<string> ParseSourceTerms(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>True when there are no terms, or the source contains any of them, ignoring case.</summary>
+    internal static bool SourceMatches(string source, IReadOnlyList<string> terms)
+    {
+        if (terms.Count == 0)
+        {
+            return true;
+        }
+        foreach (var term in terms)
+        {
+            if (source.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>Accepts "T1078", "T1078 Valid Accounts" (from the picker), or whitespace.</summary>
     private static string? NormaliseMitre(string? raw)
@@ -118,33 +222,89 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
         return first.Length == 0 ? null : first;
     }
 
-    [RelayCommand]
-    private void Refresh()
+    /// <summary>Every event matching <paramref name="filter"/>, in time order.</summary>
+    private IEnumerable<TimelineEvent> Matching(AppliedFilter filter)
     {
-        Events.Clear();
-        Histogram.Clear();
-        var filter = CurrentFilter();
-        foreach (var e in Timeline.Range(From, To, filter))
+        foreach (var e in Timeline.Range(filter.From, filter.To, filter.Filter))
         {
-            Events.Add(e);
-            if (Events.Count >= 5000)
+            if (filter.Matches(e))
             {
-                break;
+                yield return e;
             }
         }
-        var hist = Timeline.Histogram(From, To, 64, filter);
-        foreach (var h in hist) Histogram.Add(h);
-        StatusLine = $"{Events.Count:N0} events shown · {Timeline.Count:N0} indexed.";
+    }
+
+    /// <summary>What Export writes: everything matching the filter the grid is showing.</summary>
+    internal List<TimelineEvent> EventsForExport() => [.. Matching(_applied)];
+
+    private bool CanUseTimeline() => !IsIngesting;
+
+    /// <summary>Applies the filter boxes: the grid, the histogram and later exports all use this snapshot.</summary>
+    [RelayCommand(CanExecute = nameof(CanUseTimeline))]
+    private void Refresh()
+    {
+        _applied = Snapshot();
+        FiltersEdited = false;
+        Events.Clear();
+        Histogram.Clear();
+
+        var applied = _applied;
+        var counts = new int[HistogramBuckets];
+        var span = (applied.To - applied.From).Ticks;
+        var matched = 0;
+        foreach (var e in Matching(applied))
+        {
+            if (matched < MaxShown)
+            {
+                Events.Add(e);
+            }
+            matched++;
+            if (span > 0)
+            {
+                var bucket = (int)((e.Timestamp - applied.From).Ticks * (double)HistogramBuckets / span);
+                counts[Math.Clamp(bucket, 0, HistogramBuckets - 1)]++;
+            }
+        }
+        // Bar heights are scaled to the strip; raw counts would overflow it.
+        var peak = counts.Max();
+        foreach (var c in counts)
+        {
+            Histogram.Add(peak == 0 ? 0 : c == 0 ? 0 : Math.Max(2, c * HistogramHeight / peak));
+        }
+
+        StatusLine = DescribeShown(Events.Count, matched, Timeline.Count);
+        OnPropertyChanged(nameof(HasEvents));
+        OnPropertyChanged(nameof(ShowEmptyState));
+        OnPropertyChanged(nameof(ShowNoMatches));
+    }
+
+    /// <summary>The status line under the histogram. Says plainly when the grid is a prefix of what matched.</summary>
+    internal static string DescribeShown(int shown, int matched, int total)
+    {
+        if (total == 0)
+        {
+            return "No events yet.";
+        }
+        if (matched == 0)
+        {
+            return $"No events match the dates and filters. The timeline holds {total:N0} events.";
+        }
+        return matched > shown
+            ? $"Showing the first {shown:N0} of {matched:N0} matching events, earliest first. Narrow the dates or filters to see the rest. Export writes all {matched:N0}."
+            : matched == total
+                ? $"Showing all {total:N0} events."
+                : $"Showing {matched:N0} of {total:N0} events.";
     }
 
     /// <summary>
-    /// Writes every event matching the current filter — not just the 5,000 the grid shows — in
-    /// one of the ecosystem's interchange formats: Timesketch JSONL, Timesketch CSV, or the
-    /// Sleuth Kit body format that <c>mactime</c>, Autopsy and Plaso read.
+    /// Writes every event matching the applied filter — not only the rows the grid shows — as
+    /// Timesketch JSONL, Timesketch CSV, or the Sleuth Kit body format.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanUseTimeline))]
     private async Task ExportAsync(string format, CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = Cinder.App.Services.ActiveCaseContext.Current;
         var (ext, label) = format switch
         {
             "jsonl" => ("jsonl", "Timesketch JSONL"),
@@ -161,8 +321,8 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
         StatusLine = $"Exporting {label}…";
         try
         {
-            var filter = CurrentFilter();
-            var events = Timeline.Range(From, To, filter).ToList();
+            var applied = _applied;
+            var events = EventsForExport();
 
             var written = await Task.Run(() =>
             {
@@ -175,94 +335,158 @@ public sealed partial class TimelineToolViewModel : ViewModelBase
                 };
             }, ct);
 
-            StatusLine = $"Exported {written:N0} events → {path}";
-            await ActiveCaseContext.LogAsync(CustodyAction.DataExported, new
+            StatusLine = $"Exported {written:N0} events to {path}" +
+                         (FiltersEdited ? ". The export used the filters the grid is showing; the changes in the filter boxes have not been applied." : "");
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.DataExported, new
             {
                 Tool = "timeline",
                 Format = label,
                 Path = path,
                 Events = written,
-                From,
-                To,
-                Filter = new { filter.User, filter.TextContains, Source = SourceFilter, Mitre = filter.MitreTechnique },
+                applied.From,
+                applied.To,
+                Filter = new
+                {
+                    applied.Filter.User,
+                    applied.Filter.TextContains,
+                    Source = string.Join(", ", applied.SourceTerms),
+                    Mitre = applied.Filter.MitreTechnique,
+                },
             }, ct);
         }
         catch (OperationCanceledException)
         {
-            StatusLine = "Export cancelled.";
+            StatusLine = "Export stopped.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Export failed: {ex.Message}";
+            StatusLine = $"Could not export the timeline: {ex.Message}";
         }
     }
 
-    [RelayCommand]
+    /// <summary>
+    /// Reads a folder of evidence into the timeline. The new timeline is assembled away from the
+    /// one on screen and swapped in when complete; stopping part-way leaves the timeline exactly
+    /// as it was.
+    /// </summary>
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task IngestFolderAsync(CancellationToken ct)
     {
+        // Log to the case this work started under, even if the examiner switches case before it ends.
+        var custodyCase = Cinder.App.Services.ActiveCaseContext.Current;
         var owner = (Avalonia.Application.Current?.ApplicationLifetime
             as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
         if (owner is null) return;
         var folders = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Pick a triage folder to ingest",
+            Title = "Pick a folder of evidence to add to the timeline",
         });
         var path = folders.FirstOrDefault()?.TryGetLocalPath();
         if (string.IsNullOrEmpty(path)) return;
-        StatusLine = "Ingesting…";
-        var progress = new Progress<string>(s => StatusLine = $"Ingesting · {s}");
+
+        IsIngesting = true;
+        StatusLine = $"Reading {path}…";
+        var progress = new Progress<string>(s =>
+        {
+            if (IsIngesting)
+            {
+                StatusLine = $"Reading · {s}";
+            }
+        });
         try
         {
-            var stats = await TimelineIngester.IngestAsync(Timeline, path, progress, ct);
-            // From / To windows track widest range so all events show
-            if (Timeline.Count > 0)
+            var result = await IngestIntoCopyAsync(Timeline, path, progress, ct);
+            Timeline = result.Timeline;
+            OnPropertyChanged(nameof(Timeline));
+            if (result.Earliest is { } first && result.Latest is { } last)
             {
-                var window = Timeline.Range(DateTimeOffset.MinValue, DateTimeOffset.MaxValue).ToList();
-                if (window.Count > 0)
-                {
-                    From = window[0].Timestamp.AddDays(-1);
-                    To = window[^1].Timestamp.AddDays(1);
-                }
+                // Widen the window so everything just read is visible.
+                From = AddDaysClamped(first, -1);
+                To = AddDaysClamped(last, 1);
             }
+            IsIngesting = false;
             Refresh();
-            StatusLine = $"Ingested: {stats}. {Timeline.Count:N0} events on the timeline.";
-            await ActiveCaseContext.LogAsync(CustodyAction.ParserRan, new
+            var added = result.Timeline.Count - result.CountBefore;
+            StatusLine = added == 0
+                ? $"No timestamped events were found under {path}. {result.Stats}"
+                : $"Added {added:N0} events from {path} ({result.Stats}). {StatusLine}";
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.ParserRan, new
             {
                 Tool = "timeline.ingest",
                 Folder = path,
+                Added = added,
                 Events = Timeline.Count,
-                Stats = stats.ToString(),
-            }, ct);
+                Stats = result.Stats.ToString(),
+            }, CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Stopped. Nothing from this folder was added.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Ingest failed: {ex.Message}";
+            StatusLine = $"Could not read {path}: {ex.Message}";
         }
-    }
-
-    [RelayCommand]
-    private void AddDemoEvents()
-    {
-        // Until a case feeds artifacts in, this seeds the timeline with synthetic events so the
-        // histogram + range UI can be tested without real evidence.
-        var rng = new Random(42);
-        for (int i = 0; i < 250; i++)
+        finally
         {
-            var ts = DateTimeOffset.UtcNow.AddDays(-rng.Next(0, 365)).AddHours(-rng.Next(0, 23));
-            var src = (rng.Next(5)) switch
-            {
-                0 => "evtx",
-                1 => "browser.history",
-                2 => "registry.userassist",
-                3 => "memory.process",
-                _ => "linux.auth-log",
-            };
-            Timeline.Add(new SyntheticArtifact(src, $"user{rng.Next(1, 4)}", ts, $"Event #{i} from {src}"));
+            IsIngesting = false;
         }
-        Timeline.Sort();
-        Refresh();
     }
 
-    private sealed record SyntheticArtifact(string Source, string? User, DateTimeOffset? Timestamp, string Summary)
+    internal sealed record IngestResult(
+        SuperTimeline Timeline, IngestStats Stats, int CountBefore, DateTimeOffset? Earliest, DateTimeOffset? Latest);
+
+    /// <summary>
+    /// Builds a new timeline holding <paramref name="existing"/>'s events plus everything under
+    /// <paramref name="folder"/>, without modifying <paramref name="existing"/>. Runs entirely
+    /// on the thread pool.
+    /// </summary>
+    internal static Task<IngestResult> IngestIntoCopyAsync(
+        SuperTimeline existing, string folder, IProgress<string>? progress, CancellationToken ct) => Task.Run(async () =>
+    {
+        var next = new SuperTimeline();
+        foreach (var e in existing.Range(DateTimeOffset.MinValue, DateTimeOffset.MaxValue))
+        {
+            ct.ThrowIfCancellationRequested();
+            // Tags are passed through so events are not re-tagged, or tagged differently.
+            next.Add(new CarriedEvent(e.Source, e.User, e.Timestamp, e.Summary), e.Tags);
+        }
+        var before = next.Count;
+        var stats = await TimelineIngester.IngestAsync(next, folder, progress, ct);
+        ct.ThrowIfCancellationRequested();
+        next.Sort();
+
+        DateTimeOffset? earliest = null, latest = null;
+        foreach (var e in next.Range(DateTimeOffset.MinValue, DateTimeOffset.MaxValue))
+        {
+            earliest ??= e.Timestamp;
+            latest = e.Timestamp;
+        }
+        return new IngestResult(next, stats, before, earliest, latest);
+    }, ct);
+
+    private static DateTimeOffset AddDaysClamped(DateTimeOffset t, int days)
+    {
+        try
+        {
+            return t.AddDays(days);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return t;
+        }
+    }
+
+    /// <summary>Empties the timeline. Evidence is untouched; ingest the folders again to rebuild it.</summary>
+    [RelayCommand(CanExecute = nameof(CanUseTimeline))]
+    private void Clear()
+    {
+        Timeline = new SuperTimeline();
+        OnPropertyChanged(nameof(Timeline));
+        Refresh();
+        StatusLine = "Timeline cleared.";
+    }
+
+    private sealed record CarriedEvent(string Source, string? User, DateTimeOffset? Timestamp, string Summary)
         : Cinder.Artifacts.ArtifactBase(Source, User, Timestamp, Summary);
 }

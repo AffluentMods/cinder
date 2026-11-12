@@ -16,4 +16,8 @@
     <ProjectReference Include="..\Cinder.Core\Cinder.Core.csproj" />
     <ProjectReference Include="..\Cinder.Sidecar\Cinder.Sidecar.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Internal helpers are unit-tested directly. -->
+    <InternalsVisibleTo Include="Cinder.Core.Tests" />
+  </ItemGroup>
 </Project>

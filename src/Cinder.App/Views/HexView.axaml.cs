@@ -39,7 +39,15 @@ public partial class HexView : UserControl
             }
             else if (DataContext is HexViewModel vm)
             {
-                vm.OpenFile(path);
+                try
+                {
+                    vm.OpenFile(path);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // In use by another program, or no permission: leave the current tab as it is.
+                    Serilog.Log.Warning(ex, "Could not open dropped file {Path}", path);
+                }
             }
         }
         e.Handled = true;

@@ -101,7 +101,7 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
                 Title = "Case",
                 Tools =
                 [
-                    new CasesTool(),
+                    new CasesTool(Dashboard),
                     new BookmarksTool(),
                     new ReportsTool(),
                     new CustodyTool(),

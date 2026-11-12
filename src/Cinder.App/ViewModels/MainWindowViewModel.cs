@@ -101,7 +101,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isRailOpen = true;
 
-    /// <summary>Inspector pane requested (Ctrl+Alt+B). It only ever shows for the hex viewer.</summary>
+    /// <summary>Inspector pane requested (Ctrl+Shift+B). It only ever shows for the hex viewer.</summary>
     [ObservableProperty]
     private bool _isInspectorOpen = true;
 
@@ -129,9 +129,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         OpenBuffers.Add(_hex);
         Palette = new CommandPaletteViewModel(commands);
         // Tools reach the hex viewer through this: "open this search hit / carved file / match".
+        AppNavigator.CreateCase = () => CreateCaseCommand.ExecuteAsync(null);
+        AppNavigator.OpenCase = () => OpenCaseFromPickerCommand.ExecuteAsync(null);
+        AppNavigator.OpenCaseAtPath = OpenCaseFromPathAsync;
+        AppNavigator.CloseActiveCase = () => CloseCaseCommand.Execute(ActiveCase);
         AppNavigator.OpenInHex = (path, offset) =>
         {
-            OpenFileInNewBuffer(path);
+            if (!OpenFileInNewBuffer(path))
+            {
+                return;
+            }
             ShowHex();
             if (offset is { } o && Hex.Buffer is not null)
             {
@@ -163,33 +170,80 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// Open a file into a fresh hex buffer (a new tab). If the same path is already open the
     /// existing buffer is brought to focus instead. Also records the path on the Dashboard's
     /// "recent evidence" list so the user has a one-click path back to it.
+    ///
+    /// <para>Returns false, with the reason announced, when the file cannot be opened. Evidence
+    /// that is in use by another process, unreadable to this account, or not a file at all is
+    /// routine on a live system; none of it may throw out of here, because the callers are
+    /// dispatcher callbacks and command handlers where an escaped exception ends the session.</para>
     /// </summary>
-    public void OpenFileInNewBuffer(string path)
+    public bool OpenFileInNewBuffer(string path)
     {
+        string full;
+        try
+        {
+            full = System.IO.Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException or System.Security.SecurityException)
+        {
+            AnnounceError($"Could not open {path}: {ex.Message}");
+            return false;
+        }
+
         // Match on the full path, never the file name: two users' NTUSER.DAT, or the same hive
         // from two snapshots, share a name and are different evidence.
-        var full = System.IO.Path.GetFullPath(path);
         var existing = OpenBuffers.FirstOrDefault(b =>
-            b.SourcePath is not null && string.Equals(b.SourcePath, full,
+            b.Buffer is not null && b.SourcePath is not null && string.Equals(b.SourcePath, full,
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
         if (existing is not null)
         {
             Hex = existing;
             Workspace.Dashboard.NoteEvidenceOpened(path);
-            return;
+            return true;
         }
 
         // The very first slot starts empty (placeholder); reuse it.
         var slot = OpenBuffers.FirstOrDefault(b => b.Buffer is null);
-        if (slot is null)
+        var added = slot is null;
+        slot ??= new HexViewModel();
+        try
         {
-            slot = new HexViewModel();
+            // OpenFile builds the new buffer before it changes anything, so a failure here
+            // leaves the slot (and every other tab) exactly as it was.
+            slot.OpenFile(full);
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning(ex, "Could not open {Path} in the hex viewer", full);
+            AnnounceError($"Could not open {System.IO.Path.GetFileName(full)}: {DescribeOpenFailure(ex, full)}");
+            return false;
+        }
+        if (added)
+        {
             OpenBuffers.Add(slot);
         }
-        slot.OpenFile(path);
         Hex = slot;
         Workspace.Dashboard.NoteEvidenceOpened(path);
         Announce($"Opened {System.IO.Path.GetFileName(path)}");
+        return true;
+    }
+
+    /// <summary>
+    /// The reason a file would not open, short enough to read in the status bar. The framework's
+    /// own messages repeat the full path, which pushes the reason itself out of view.
+    /// </summary>
+    internal static string DescribeOpenFailure(Exception ex, string path)
+    {
+        const int SharingViolation = unchecked((int)0x80070020);
+        const int LockViolation = unchecked((int)0x80070021);
+        return ex switch
+        {
+            FileNotFoundException or DirectoryNotFoundException => "it no longer exists.",
+            UnauthorizedAccessException when Directory.Exists(path) => "it is a folder, not a file.",
+            UnauthorizedAccessException => "access was denied.",
+            IOException { HResult: SharingViolation or LockViolation } =>
+                "it is in use by another program. Close that program, or work on a copy.",
+            _ => ex.Message,
+        };
     }
 
     [RelayCommand]
@@ -223,17 +277,39 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public void Announce(string headline)
+    /// <summary>The activity log keeps this many lines; a session left open for days must not grow it without bound.</summary>
+    private const int ActivityLogLimit = 500;
+
+    public void Announce(string headline) => Announce(headline, TimeSpan.FromSeconds(4));
+
+    /// <summary>
+    /// Announce something that went wrong. Stays in the status bar long enough to be read; an
+    /// ordinary announcement replaces it as usual.
+    /// </summary>
+    public void AnnounceError(string headline) => Announce(headline, TimeSpan.FromSeconds(20));
+
+    private void Announce(string headline, TimeSpan visibleFor)
     {
+        // Callable from any thread: continuations that left the UI context (ConfigureAwait(false))
+        // report failures through here, and the log is a bound collection.
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => Announce(headline, visibleFor));
+            return;
+        }
         ActivityHeadline = headline;
         ActivityLog.Insert(0, headline);
+        while (ActivityLog.Count > ActivityLogLimit)
+        {
+            ActivityLog.RemoveAt(ActivityLog.Count - 1);
+        }
         DispatcherTimer.RunOnce(() =>
         {
             if (ActivityHeadline == headline)
             {
                 ActivityHeadline = "Ready";
             }
-        }, TimeSpan.FromSeconds(4));
+        }, visibleFor);
     }
 
     partial void OnActiveCaseNameChanged(string? value)
@@ -271,7 +347,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             // Fire-and-forget by design: LogAsync never throws, and opening a case must not
             // wait on a database write.
-            _ = Services.ActiveCaseContext.LogAsync(Cinder.Core.Custody.CustodyAction.CaseOpened, new
+            // Logged against this case by name, not "whichever case is active when the write runs".
+            _ = Services.ActiveCaseContext.LogAsync(existing, Cinder.Core.Custody.CustodyAction.CaseOpened, new
             {
                 Path = path,
                 Machine = Environment.MachineName,
@@ -394,7 +471,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             return;
         }
-        OpenFileInNewBuffer(row.Path);
+        if (!OpenFileInNewBuffer(row.Path))
+        {
+            return;
+        }
         var hexTool = Workspace.FindByKind("hex");
         if (hexTool is not null)
         {
@@ -413,7 +493,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         {
             return;
         }
-        OpenFileInNewBuffer(path);
+        if (!OpenFileInNewBuffer(path))
+        {
+            return;
+        }
         var hexTool = Workspace.FindByKind("hex");
         if (hexTool is not null)
         {
@@ -431,7 +514,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     {
         if (string.IsNullOrEmpty(casePath) || !File.Exists(casePath))
         {
-            Announce($"Case file not found: {System.IO.Path.GetFileName(casePath)}");
+            AnnounceError($"Case file not found: {System.IO.Path.GetFileName(casePath)}");
             return;
         }
         try
@@ -454,7 +537,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Announce($"Failed to open case: {ex.Message}");
+            AnnounceError($"Failed to open case: {ex.Message}");
         }
     }
 }

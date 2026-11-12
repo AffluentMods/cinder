@@ -41,7 +41,12 @@ public static class IocScanner
     private const long MaxContentBytes = 512L * 1024 * 1024;
     private const int MaxFiles = 200_000;
 
-    public static async Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanAsync(
+    /// <summary>
+    /// Runs the scan on the thread pool. Enumerating a large tree, building the automaton and
+    /// matching file bytes are all CPU- or disk-bound, and the callers are view-model commands
+    /// on the UI thread — none of that work may run there.
+    /// </summary>
+    public static Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanAsync(
         IReadOnlyList<Indicator> indicators,
         string folder,
         IProgress<string>? progress,
@@ -49,6 +54,16 @@ public static class IocScanner
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(indicators);
+        return Task.Run(() => ScanCoreAsync(indicators, folder, progress, maxRows, ct), ct);
+    }
+
+    private static async Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanCoreAsync(
+        IReadOnlyList<Indicator> indicators,
+        string folder,
+        IProgress<string>? progress,
+        int maxRows,
+        CancellationToken ct)
+    {
         var rows = new List<IocMatchRow>();
         var stats = new IocScanStats();
         if (indicators.Count == 0 || !Directory.Exists(folder))
@@ -56,8 +71,12 @@ public static class IocScanner
             return (rows, stats);
         }
 
-        var hashIocs = indicators.Where(i => i.IsHash)
-            .ToDictionary(i => i.Value.ToLowerInvariant(), i => i, StringComparer.OrdinalIgnoreCase);
+        // TryAdd, not ToDictionary: the same digest listed twice must not abort the scan.
+        var hashIocs = new Dictionary<string, Indicator>(StringComparer.OrdinalIgnoreCase);
+        foreach (var hash in indicators.Where(i => i.IsHash))
+        {
+            hashIocs.TryAdd(hash.Value, hash);
+        }
         var textIocs = indicators.Where(i => !i.IsHash).ToList();
 
         // ---- files: paths, hashes, content ----
@@ -164,8 +183,10 @@ public static class IocScanner
                 Name = "ioc_" + i.ToString(CultureInfo.InvariantCulture),
                 Strings =
                 [
-                    new YaraLiteString { Identifier = "$a", Pattern = Encoding.ASCII.GetBytes(v), NoCase = true },
-                    new YaraLiteString { Identifier = "$w", Pattern = Encoding.Unicode.GetBytes(v) },
+                    // Both forms are case-insensitive at any length: "Evil.Example" in a log
+                    // and "EVIL.EXAMPLE" in a registry value are the same indicator.
+                    new YaraLiteString { Identifier = "$a", Pattern = Encoding.UTF8.GetBytes(v), NoCase = true, Text = v },
+                    new YaraLiteString { Identifier = "$w", Pattern = Encoding.Unicode.GetBytes(v), NoCase = true, Text = v },
                 ],
                 Condition = "any of them",
             });

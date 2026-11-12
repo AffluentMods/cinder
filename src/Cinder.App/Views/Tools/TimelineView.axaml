@@ -6,8 +6,9 @@
              x:DataType="vm:TimelineToolViewModel">
     <!--
         Super-timeline. Toolbar: get events in (ingest) · act on them (bookmark, export).
-        Filter bar wraps instead of colliding with the toolbar at narrow widths. Histogram shows
-        where the activity is; the grid is every matching event.
+        Filter bar wraps instead of colliding with the toolbar at narrow widths. Filters apply on
+        Enter or Refresh, and Export writes what the applied filter matches. Histogram shows
+        where the activity is; the grid is the first 5,000 matching events.
     -->
     <Grid RowDefinitions="Auto,Auto,Auto,Auto,*">
 
@@ -17,15 +18,21 @@
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Button Classes="accent" Height="26" Padding="10,0" Command="{Binding IngestFolderCommand}"
-                            ToolTip.Tip="Walk a triage folder and merge EVTX, registry, Prefetch, LNK, browser, email, Recycle Bin, $J and $LogFile events">
+                            ToolTip.Tip="Read a folder of evidence and add its event logs, registry, Prefetch, shortcuts, browser history, mail, Recycle Bin and NTFS journal events to the timeline">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="14" Height="14" />
                             <TextBlock Text="Ingest folder…" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <Button Classes="tb icon" Command="{Binding RefreshCommand}" ToolTip.Tip="Re-apply filters">
+                    <Button Classes="tb" Content="Stop" Command="{Binding IngestFolderCancelCommand}"
+                            IsVisible="{Binding IsIngesting}"
+                            ToolTip.Tip="Stop reading. Nothing from this folder is added." />
+                    <Button Classes="tb icon" Command="{Binding RefreshCommand}"
+                            ToolTip.Tip="Apply the dates and filters (Enter in a filter box does the same)">
                         <c:CinderIcon Data="{x:Static c:Icons.Swap}" Width="14" Height="14" />
                     </Button>
+                    <TextBlock Text="Filters changed. Press Enter to apply." Classes="dim" FontSize="12"
+                               VerticalAlignment="Center" Margin="4,0,0,0" IsVisible="{Binding FiltersEdited}" />
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
@@ -46,7 +53,7 @@
                             </Flyout>
                         </Button.Flyout>
                     </Button>
-                    <Button Classes="tb" ToolTip.Tip="Everything matching the current filter, in formats the DFIR ecosystem reads">
+                    <Button Classes="tb" ToolTip.Tip="Write every event matching the applied filter, not only the rows shown, in a format other timeline tools read">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <c:CinderIcon Data="{x:Static c:Icons.Download}" Width="14" Height="14" />
                             <TextBlock Text="Export" VerticalAlignment="Center" />
@@ -64,7 +71,7 @@
                         <TextBlock Text="⋯" FontSize="16" Margin="0,-4,0,0" />
                         <Button.Flyout>
                             <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                <MenuItem Header="Add demo events (for trying the tool)" Command="{Binding AddDemoEventsCommand}" />
+                                <MenuItem Header="Clear the timeline" Command="{Binding ClearCommand}" />
                             </MenuFlyout>
                         </Button.Flyout>
                     </Button>
@@ -76,6 +83,9 @@
         <Border Grid.Row="1" Padding="14,8,14,10" Background="{DynamicResource CinderSurface1Brush}"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
             <WrapPanel Orientation="Horizontal">
+                <WrapPanel.KeyBindings>
+                    <KeyBinding Gesture="Return" Command="{Binding RefreshCommand}" />
+                </WrapPanel.KeyBindings>
                 <WrapPanel.Styles>
                     <Style Selector="WrapPanel > StackPanel">
                         <Setter Property="Margin" Value="0,2,14,2" />
@@ -92,15 +102,16 @@
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="USER" Classes="section" />
-                    <TextBox Text="{Binding UserFilter}" Watermark="any" Width="130" />
+                    <TextBox Text="{Binding UserFilter, UpdateSourceTrigger=PropertyChanged}" Watermark="any" Width="130" />
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="SOURCE" Classes="section" />
-                    <TextBox Text="{Binding SourceFilter}" Watermark="evtx, browser.history…" Width="170" />
+                    <TextBox Text="{Binding SourceFilter, UpdateSourceTrigger=PropertyChanged}" Watermark="evtx, browser…" Width="170"
+                             ToolTip.Tip="Part of a source name. Separate several with commas: evtx, prefetch" />
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="CONTAINS" Classes="section" />
-                    <TextBox Text="{Binding TextFilter}" Watermark="text in summary" Width="190" />
+                    <TextBox Text="{Binding TextFilter, UpdateSourceTrigger=PropertyChanged}" Watermark="text in summary" Width="190" />
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="ATT&amp;CK" Classes="section" />
@@ -130,9 +141,11 @@
             </ItemsControl>
         </Border>
 
-        <Border Grid.Row="3" Height="26" Padding="14,0" IsVisible="{Binding Events.Count}"
+        <!-- Always visible: progress while a folder is read, and "nothing matches" are both said here. -->
+        <Border Grid.Row="3" Height="26" Padding="14,0"
                 BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <TextBlock Text="{Binding StatusLine}" Classes="dim" FontSize="11.5" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding StatusLine}" Classes="dim" FontSize="11.5" VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding StatusLine}" />
         </Border>
 
         <!-- ===== Events ===== -->
@@ -151,19 +164,16 @@
         </DataGrid>
 
         <!-- ===== Empty ===== -->
-        <StackPanel Grid.Row="2" Grid.RowSpan="3" HorizontalAlignment="Center" VerticalAlignment="Center"
-                    MaxWidth="460" Spacing="14" IsVisible="{Binding !Events.Count}">
-            <Border Width="52" Height="52" CornerRadius="12" HorizontalAlignment="Center"
-                    Background="{DynamicResource CinderSurface2Brush}"
-                    BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
-                <c:CinderIcon Data="{x:Static c:Icons.Clock}" Width="24" Height="24"
-                              Foreground="{DynamicResource CinderAccentBrush}" />
-            </Border>
-            <TextBlock Text="No events yet" FontSize="18" FontWeight="600" HorizontalAlignment="Center" />
-            <TextBlock Classes="muted" FontSize="13" TextAlignment="Center" TextWrapping="Wrap"
-                       Text="Ingest a triage folder (a KAPE target collection, a mounted image, an exported user profile). Every timestamped artefact is parsed, tagged with ATT&amp;CK where it applies, and merged into one chronological view." />
+        <c:EmptyState Grid.Row="4" Icon="{x:Static c:Icons.Clock}" Title="No events yet"
+                      Message="Ingest a folder of evidence: a triage collection, a mounted image, or an exported user profile. Cinder reads the timestamped records it finds there and lists them in time order."
+                      IsVisible="{Binding ShowEmptyState}">
             <Button Classes="accent" HorizontalAlignment="Center" Height="30" Padding="14,0"
                     Content="Ingest folder…" Command="{Binding IngestFolderCommand}" />
-        </StackPanel>
+        </c:EmptyState>
+
+        <!-- Events exist, but the applied dates and filters match none of them. -->
+        <c:EmptyState Grid.Row="4" Icon="{x:Static c:Icons.Clock}" Title="No events match"
+                      Message="Nothing on the timeline falls inside these dates and filters. Widen the dates or clear a filter, then press Enter."
+                      IsVisible="{Binding ShowNoMatches}" />
     </Grid>
 </UserControl>

@@ -13,26 +13,34 @@ namespace Cinder.AI;
 public sealed class OllamaProvider : IAiProvider
 {
     private readonly HttpClient _http;
+    private readonly Uri _endpoint;
     public string Id => "ollama";
     public string DisplayName { get; }
     public string Model { get; }
-    public AiProviderCapabilities Capabilities { get; } = new(
-        SupportsStreaming: true, SupportsToolCalling: true, SupportsVision: true,
-        MaxContextTokens: 8_192, LocalOnly: true);
+    public AiProviderCapabilities Capabilities { get; }
+
+    /// <summary>The API root every request is resolved against; always ends in '/'.</summary>
+    public Uri Endpoint => _endpoint;
 
     public OllamaProvider(HttpClient http, string model = "llama3", Uri? endpoint = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
-        _http.BaseAddress = endpoint ?? new Uri("http://localhost:11434");
+        // The client is the caller's and may be shared or already in use: HttpClient.BaseAddress
+        // throws once a request has been sent, so the endpoint lives here and every request
+        // carries an absolute URI.
+        _endpoint = AiEndpoint.Normalize(endpoint ?? new Uri("http://localhost:11434"));
         Model = model;
         DisplayName = $"Ollama · {model}";
+        Capabilities = new AiProviderCapabilities(
+            SupportsStreaming: true, SupportsToolCalling: true, SupportsVision: true,
+            MaxContextTokens: 8_192, LocalOnly: _endpoint.IsLoopback);
     }
 
     public async Task<bool> HealthCheckAsync(CancellationToken ct)
     {
         try
         {
-            using var resp = await _http.GetAsync("api/tags", ct).ConfigureAwait(false);
+            using var resp = await _http.GetAsync(new Uri(_endpoint, "api/tags"), ct).ConfigureAwait(false);
             return resp.IsSuccessStatusCode;
         }
         catch
@@ -44,7 +52,7 @@ public sealed class OllamaProvider : IAiProvider
     public async Task<string> CompleteAsync(AiPrompt prompt, CancellationToken ct)
     {
         var body = BuildBody(prompt, stream: false);
-        using var resp = await _http.PostAsJsonAsync("api/chat", body, ct).ConfigureAwait(false);
+        using var resp = await _http.PostAsJsonAsync(new Uri(_endpoint, "api/chat"), body, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         var parsed = await resp.Content.ReadFromJsonAsync<ChatResponse>(cancellationToken: ct).ConfigureAwait(false);
         return parsed?.Message?.Content ?? "";
@@ -53,7 +61,7 @@ public sealed class OllamaProvider : IAiProvider
     public async IAsyncEnumerable<string> StreamCompletionAsync(AiPrompt prompt, [EnumeratorCancellation] CancellationToken ct)
     {
         var body = BuildBody(prompt, stream: true);
-        using var req = new HttpRequestMessage(HttpMethod.Post, "api/chat") { Content = JsonContent.Create(body) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(_endpoint, "api/chat")) { Content = JsonContent.Create(body) };
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);

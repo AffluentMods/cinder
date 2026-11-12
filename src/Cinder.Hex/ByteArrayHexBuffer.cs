@@ -16,7 +16,7 @@ public sealed class ByteArrayHexBuffer : IHexBuffer
 
     public int Read(long offset, Span<byte> destination)
     {
-        if (offset >= _bytes.Length)
+        if (offset < 0 || offset >= _bytes.Length)
         {
             return 0;
         }

@@ -1,58 +1,91 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
-             xmlns:cases="using:Cinder.Cases"
              x:Class="Cinder.App.Views.Tools.CasesView"
              x:DataType="tools:CasesTool">
-    <Grid RowDefinitions="Auto,*">
-        <Border Grid.Row="0" Background="{DynamicResource CinderBackground1Brush}" Padding="14,10"
-                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Classes="accent" Content="Create case…" Command="{Binding CreateCommand}" />
-                <Button Content="Open .cinder…" Command="{Binding OpenCommand}" />
-                <TextBlock Margin="14,0" VerticalAlignment="Center"
-                           Text="{Binding StatusLine}"
-                           Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+    <!-- The case you are in, and the ones you can go back to. -->
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <Border Grid.Row="0" Classes="toolbar">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button Classes="tb" Command="{Binding CreateCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <c:CinderIcon Data="{x:Static c:Icons.Plus}" Width="14" Height="14" />
+                        <TextBlock Text="New case…" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Classes="tb" Command="{Binding OpenCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="14" Height="14" />
+                        <TextBlock Text="Open case…" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Border>
-        <ScrollViewer Grid.Row="1" Background="{DynamicResource CinderBackground0Brush}" Padding="20">
-            <StackPanel Spacing="14">
-                <TextBlock Text="RECENT CASES"
-                           FontWeight="600"
-                           FontSize="{DynamicResource CinderFontSizeXs}"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}" />
-                <ItemsControl ItemsSource="{Binding Recents}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="cases:WorkspaceCase">
-                            <Button HorizontalAlignment="Stretch"
-                                    HorizontalContentAlignment="Left"
-                                    Background="{DynamicResource CinderBackground1Brush}"
-                                    BorderThickness="0"
-                                    Padding="14,10"
-                                    Margin="0,0,0,8"
-                                    CornerRadius="6"
-                                    Command="{Binding $parent[UserControl].((tools:CasesTool)DataContext).OpenRecentCommand}"
-                                    CommandParameter="{Binding}">
-                                <StackPanel Spacing="3">
-                                    <TextBlock Text="{Binding DisplayName}"
-                                               FontWeight="500"
-                                               Foreground="{DynamicResource CinderForegroundBrush}" />
-                                    <TextBlock Text="{Binding FilePath}"
-                                               FontFamily="{DynamicResource CinderFontFamilyMono}"
-                                               FontSize="{DynamicResource CinderFontSizeXs}"
-                                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                                    <TextBlock Text="{Binding LastOpenedUtc, StringFormat='last opened {0:u}'}"
-                                               FontSize="{DynamicResource CinderFontSizeXs}"
-                                               Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+
+        <Panel Grid.Row="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="22">
+
+                    <StackPanel Spacing="10" IsVisible="{Binding HasActiveCase}">
+                        <TextBlock Text="OPEN NOW" Classes="section" />
+                        <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="16,14"
+                                BorderBrush="{DynamicResource CinderAccentDimBrush}" BorderThickness="1">
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="18" Height="18" VerticalAlignment="Top" Margin="0,2,12,0"
+                                              Foreground="{DynamicResource CinderAccentBrush}" />
+                                <StackPanel Grid.Column="1" Spacing="4">
+                                    <TextBlock Text="{Binding ActiveCaseName}" FontSize="15" FontWeight="600" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding ActiveCasePath}" Classes="path" ToolTip.Tip="{Binding ActiveCasePath}" />
+                                    <TextBlock Text="{Binding ActiveCaseExaminer, StringFormat='Examiner: {0}'}" Classes="dim" FontSize="12" />
                                 </StackPanel>
-                            </Button>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <TextBlock Text="(no recent cases yet)"
-                           Foreground="{DynamicResource CinderForegroundDisabledBrush}"
-                           IsVisible="{Binding !Recents.Count}" />
-            </StackPanel>
-        </ScrollViewer>
+                                <Button Grid.Column="2" Classes="tb" VerticalAlignment="Top" Content="Close case"
+                                        Command="{Binding CloseActiveCommand}"
+                                        ToolTip.Tip="Stop recording to this case. Nothing is deleted; reopen it any time." />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Spacing="10" IsVisible="{Binding Recents.Count}">
+                        <TextBlock Text="RECENT CASES" Classes="section" />
+                        <ItemsControl ItemsSource="{Binding Recents}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="tools:RecentCaseRow">
+                                    <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                            Padding="12,9" Margin="0,0,0,2"
+                                            Command="{Binding $parent[UserControl].((tools:CasesTool)DataContext).OpenRecentCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="15" Height="15" Margin="0,0,12,0"
+                                                          Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                                            <StackPanel Grid.Column="1" Spacing="2">
+                                                <TextBlock Text="{Binding Name}" FontWeight="500" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Path}" Classes="path" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Classes="mono dim" FontSize="11.5" VerticalAlignment="Center" Margin="12,0,0,0"
+                                                       Text="{Binding OpenedUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm} UTC'}"
+                                                       ToolTip.Tip="Last opened" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <c:EmptyState Icon="{Binding IconGeometry}" Title="No cases yet" IsVisible="{Binding ShowEmpty}"
+                          Message="A case is one file (.cinder) that holds your bookmarks, notes and a tamper-evident log of everything you do to the evidence. Create one before you start examining, so your work is recorded.">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Classes="accent" Height="30" Padding="14,0" Content="New case…" Command="{Binding CreateCommand}" />
+                    <Button Classes="tb" Height="30" Padding="14,0" Content="Open case…" Command="{Binding OpenCommand}" />
+                </StackPanel>
+            </c:EmptyState>
+        </Panel>
+
+        <Border Grid.Row="2" Classes="footer" IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <TextBlock Text="{Binding StatusLine}" />
+        </Border>
     </Grid>
 </UserControl>

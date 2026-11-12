@@ -38,7 +38,9 @@ public sealed record UsnRecord(
 /// </summary>
 public static class UsnJournal
 {
-    private const int MinRecordLength = 60;
+    private const int V2HeaderLength = 60;
+    private const int V3HeaderLength = 76;
+    private const int MinRecordLength = V2HeaderLength;
     private const int MaxRecordLength = 4096;
 
     /// <summary>Opens <c>$Extend\$UsnJrnl:$J</c> on an NTFS volume, or null if the volume has no journal.</summary>
@@ -62,28 +64,48 @@ public static class UsnJournal
     {
         ArgumentNullException.ThrowIfNull(journal);
 
+        // One window buffer for the whole parse: a fragmented $J can have thousands of extents,
+        // and a megabyte per extent is allocation the input should not be able to drive.
+        var buffer = new byte[1 << 20];
+        var seekable = journal.CanSeek;
+
         foreach (var (start, length) in DataRegions(journal))
         {
-            journal.Position = start;
-            var end = start + length;
-            var buffer = new byte[1 << 20];
+            // Saturating: a non-seekable source reports an unbounded region.
+            var end = length > long.MaxValue - start ? long.MaxValue : start + length;
             var bufferStart = start;
             var have = 0;
+
+            // True once nothing more can arrive for this region: its end was reached, or the
+            // stream ran dry before the end it advertised (a truncated image does exactly
+            // that). Every exit from the loop below depends on it; without it a cut-off
+            // final record left the loop with nothing to consume and nothing to read.
+            var exhausted = false;
 
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
 
                 // Top the buffer up to a full window or the region end.
-                if (have < MaxRecordLength && bufferStart + have < end)
+                if (!exhausted && have < MaxRecordLength)
                 {
-                    var want = (int)Math.Min(buffer.Length - have, end - (bufferStart + have));
-                    journal.Position = bufferStart + have;
-                    var n = ReadFull(journal, buffer, have, want);
-                    have += n;
-                    if (n == 0 && have == 0)
+                    if (bufferStart + have >= end)
                     {
-                        break;
+                        exhausted = true;
+                    }
+                    else
+                    {
+                        var want = (int)Math.Min(buffer.Length - have, end - (bufferStart + have));
+                        if (seekable)
+                        {
+                            journal.Position = bufferStart + have;
+                        }
+                        var n = ReadFull(journal, buffer, have, want);
+                        have += n;
+                        if (n < want)
+                        {
+                            exhausted = true;
+                        }
                     }
                 }
                 if (have == 0)
@@ -111,7 +133,17 @@ public static class UsnJournal
                     }
                     if (recordLength > span.Length)
                     {
-                        break;           // need more bytes
+                        if (!exhausted)
+                        {
+                            break;       // need more bytes, and more can still be read
+                        }
+
+                        // The record claims bytes that will never arrive: a journal cut off
+                        // mid-record, or a length field planted near the end. Treat it like
+                        // any other implausible length and resynchronise, so whatever real
+                        // records follow inside the claimed extent are still found.
+                        consumed += 8;
+                        continue;
                     }
 
                     if (TryParseRecord(span[..recordLength], out var record))
@@ -122,23 +154,19 @@ public static class UsnJournal
                 }
 
                 // Slide the unconsumed tail down and refill.
-                if (consumed == 0 && have >= MaxRecordLength)
-                {
-                    consumed = 8;   // nothing parsed from a full window — force progress
-                }
                 var remaining = have - consumed;
-                if (remaining > 0)
+                if (remaining > 0 && consumed > 0)
                 {
                     System.Buffer.BlockCopy(buffer, consumed, buffer, 0, remaining);
                 }
                 bufferStart += consumed;
                 have = remaining;
 
-                if (bufferStart + have >= end && remaining < MinRecordLength)
-                {
-                    break;
-                }
-                if (bufferStart >= end)
+                // With nothing more to read, the scan above ran until fewer than 8 bytes were
+                // left, so this is the end of the region. Otherwise the leftover is shorter
+                // than one record (<= 4096 bytes) and the next pass must refill, which either
+                // adds bytes or sets `exhausted` — the loop cannot repeat a state.
+                if (exhausted)
                 {
                     break;
                 }
@@ -168,6 +196,10 @@ public static class UsnJournal
     internal static bool TryParseRecord(ReadOnlySpan<byte> r, out UsnRecord record)
     {
         record = null!;
+        if (r.Length < 8)
+        {
+            return false;
+        }
         var major = BinaryPrimitives.ReadUInt16LittleEndian(r[4..]);
         int refSize;
         switch (major)
@@ -175,6 +207,14 @@ public static class UsnJournal
             case 2: refSize = 8; break;
             case 3: refSize = 16; break;
             default: return false;   // V4 range-tracking records carry no name; unknown versions skipped
+        }
+
+        // The fixed part is 60 bytes for V2 and 76 for V3 (two 128-bit references). RecordLength
+        // is only checked against the V2 minimum by the caller, so a record that claims V3 with
+        // a length of 64 or 72 would otherwise be read past its end.
+        if (r.Length < (refSize == 16 ? V3HeaderLength : V2HeaderLength))
+        {
+            return false;
         }
 
         var o = 8;

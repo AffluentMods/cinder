@@ -69,7 +69,10 @@ public sealed class EvidenceOpenerHardeningTests : IDisposable
     [Fact]
     public void Corrupted_aff4_bevies_become_damaged_chunks_not_exceptions()
     {
-        var media = EwfBuilder.Media(200 * 1024);
+        // Compressible media, so the chunks are stored as zlib and a scrambled one fails to
+        // inflate. (A chunk that does not compress is stored raw, as the AFF4 standard has it,
+        // and a raw chunk has no checksum of its own — only the image hash covers it.)
+        var media = EwfBuilder.CompressibleMedia(200 * 1024);
         var path = Path.Combine(_dir, "ok.aff4");
         using (var w = new Aff4Writer(path, new Aff4Writer.Options { ChunkSize = 4096, ChunksPerSegment = 8 }))
         {

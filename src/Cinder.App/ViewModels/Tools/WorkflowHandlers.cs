@@ -1,137 +1,143 @@
 // =====================================================================================
-// In-process WorkflowRunner handler registry.
+// The steps a workflow file can contain.
 //
-// A workflow is a JSON-defined DAG of typed nodes. The base Cinder.Workflow.WorkflowRunner
-// walks it topologically and delegates each node's work to a registered handler. This file
-// provides the canonical handlers for the documented node kinds — open-image, hash,
-// registry, fs-enumerate, carve, report, index — so workflows actually execute end-to-end.
+// A workflow is a JSON list of typed steps and the order they depend on each other.
+// Cinder.Workflow.WorkflowRunner walks it and hands each step to the handler registered here
+// for its kind: open-image, hash, registry, fs-enumerate, carve, report, index, ai-summary.
 //
-// Handlers read parameters from the node and may read prior steps' outputs by node id from
-// the shared outputs dictionary. They return whatever object is useful for downstream
-// consumption (typically a string path or a small record).
+// A step that cannot do its work THROWS. It does not report "failed" and return, because the
+// runner would then carry on, later steps would run against nothing, and the run would end
+// "Done". The exception names the step, so the examiner sees which one stopped the run and
+// why. A step reports a row only for work it actually did.
 // =====================================================================================
 
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using Cinder.Core.Hashing;
+using Cinder.Filesystems;
+using Cinder.Imaging;
 using Cinder.Workflow;
 
 namespace Cinder.App.ViewModels.Tools;
 
 internal static class WorkflowHandlers
 {
-    public static WorkflowRunner BuildRunner(ObservableCollection<WorkflowExecutionRow> outputs)
+    /// <summary>Most files one carve step recovers. Reaching it is stated in the step's result.</summary>
+    private const int MaxCarved = 10_000;
+
+    /// <summary>The runner the Workflows tool uses: results are added to its list on the UI thread.</summary>
+    public static WorkflowRunner BuildRunner(ObservableCollection<WorkflowExecutionRow> outputs) =>
+        BuildRunner(row => Avalonia.Threading.Dispatcher.UIThread.Post(() => outputs.Add(row)));
+
+    /// <summary>Builds a runner that passes each completed step's result to <paramref name="report"/>.</summary>
+    public static WorkflowRunner BuildRunner(Action<WorkflowExecutionRow> report)
     {
         var runner = new WorkflowRunner();
 
-        // ---- open-image: record an input file path so later steps can consume it.
+        void Ok(WorkflowNode node, string result) => report(new WorkflowExecutionRow(node.Id, node.Kind, "ok", result));
+
+        // ---- open-image: check an input file exists so later steps can use it.
         runner.Register("open-image", async (node, _, ct) =>
         {
             var path = GetParam(node, "path");
             await Task.Yield();
             ct.ThrowIfCancellationRequested();
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            if (string.IsNullOrEmpty(path))
             {
-                Row(outputs, node.Id, "open-image", "failed", $"Missing or unreadable path: {path}");
-                return null;
+                throw Fail(node, "it has no \"path\" setting");
             }
-            var info = new FileInfo(path);
-            Row(outputs, node.Id, "open-image", "ok", $"{path} ({info.Length:N0} bytes)");
+            if (!File.Exists(path))
+            {
+                throw Fail(node, $"the file does not exist: {path}");
+            }
+            Ok(node, $"{path} ({new FileInfo(path).Length:N0} bytes)");
             return path;
         });
 
-        // ---- hash: SHA-256 over the file at "path" (or the previous open-image's result).
+        // ---- hash: SHA-256 of the file at "path", or of the file an earlier step produced.
         runner.Register("hash", async (node, priorOutputs, ct) =>
         {
-            var path = GetParam(node, "path") ?? FindPreviousPath(priorOutputs, node);
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                Row(outputs, node.Id, "hash", "failed", "no input file");
-                return null;
-            }
+            var path = InputFile(node, priorOutputs);
             var svc = new HashService();
             await using var fs = File.OpenRead(path);
             var r = await svc.ComputeAsync(fs, [HashAlgorithmKind.Sha256], progress: null, ct: ct);
-            Row(outputs, node.Id, "hash", "ok", $"SHA-256={r.Sha256}");
+            Ok(node, $"SHA-256={r.Sha256}");
             return r.Sha256;
         });
 
-        // ---- registry: open a hive and report the root subkey count.
+        // ---- registry: open a hive and report how many keys sit under its root.
         runner.Register("registry", async (node, priorOutputs, ct) =>
         {
-            var path = GetParam(node, "path") ?? FindPreviousPath(priorOutputs, node);
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                Row(outputs, node.Id, "registry", "failed", "no hive file");
-                return null;
-            }
+            var path = InputFile(node, priorOutputs);
             await Task.Yield();
             ct.ThrowIfCancellationRequested();
-            var hive = new global::Registry.RegistryHive(path);
-            hive.ParseHive();
+            global::Registry.RegistryHive hive;
+            try
+            {
+                hive = HiveReader.Open(path);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw Fail(node, ex.Message);
+            }
             var subkeyCount = hive.Root?.SubKeys.Count ?? 0;
-            Row(outputs, node.Id, "registry", "ok", $"root subkeys={subkeyCount} · hive={hive.HiveType}");
+            Ok(node, $"root subkeys={subkeyCount} · hive={hive.HiveType}");
             return subkeyCount;
         });
 
-        // ---- fs-enumerate: open a disk image and count discoverable filesystem entries.
+        // ---- fs-enumerate: count the files and folders in a disk image.
         runner.Register("fs-enumerate", async (node, priorOutputs, ct) =>
         {
-            var path = GetParam(node, "path") ?? FindPreviousPath(priorOutputs, node);
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                Row(outputs, node.Id, "fs-enumerate", "failed", "no image file");
-                return null;
-            }
+            var path = InputFile(node, priorOutputs);
             await Task.Yield();
             ct.ThrowIfCancellationRequested();
-            // Reuse the same FilesystemTool detection routine. We don't surface every row
-            // here — just the count, which is what the workflow audit trail wants.
-            var rows = new List<object>();
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            WalkResult result;
             try
             {
-                if (DiscUtils.Iso9660.CDReader.Detect(fs))
-                {
-                    fs.Position = 0;
-                    using var iso = new DiscUtils.Iso9660.CDReader(fs, joliet: true);
-                    EnumerateDirCount(iso.Root, rows, depthBudget: 6);
-                }
+                result = WalkImage(path, ct);
             }
-            catch { }
-            Row(outputs, node.Id, "fs-enumerate", "ok", $"entries={rows.Count:N0}");
-            return rows.Count;
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw Fail(node, $"the image could not be read: {ex.Message}");
+            }
+            if (result.Entries.Count == 0)
+            {
+                // Zero entries from a disk image means no filesystem was recognised. That is a
+                // failure to enumerate, not an empty disk, and must not be reported as "ok".
+                throw Fail(node, "no NTFS, FAT, ext or ISO 9660 filesystem was found in the image");
+            }
+            Ok(node, $"entries={result.Entries.Count:N0}" + (result.Truncated ? " (stopped at the listing limit; the image holds more)" : ""));
+            return result.Entries.Count;
         });
 
-        // ---- carve: invoke the FileCarver against the input.
+        // ---- carve: recover files by signature from the input.
         runner.Register("carve", async (node, priorOutputs, ct) =>
         {
-            var path = GetParam(node, "path") ?? FindPreviousPath(priorOutputs, node);
+            var path = InputFile(node, priorOutputs);
             var outDir = GetParam(node, "output") ?? Path.Combine(Path.GetTempPath(), "cinder-carve-" + Guid.NewGuid().ToString("N"));
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                Row(outputs, node.Id, "carve", "failed", "no input file");
-                return null;
-            }
             Directory.CreateDirectory(outDir);
             var carver = new Cinder.Carving.FileCarver();
             int n = 0;
+            var capped = false;
             await using var fs = File.OpenRead(path);
             await foreach (var _ in carver.CarveAsync(fs, outDir, ct: ct))
             {
-                n++;
-                if (n >= 10_000) break;
+                if (++n >= MaxCarved)
+                {
+                    capped = true;
+                    break;
+                }
             }
-            Row(outputs, node.Id, "carve", "ok", $"recovered={n} · out={outDir}");
+            Ok(node, $"recovered={n:N0}{(capped ? " (stopped at the limit; the input may hold more)" : "")} · out={outDir}");
             return outDir;
         });
 
-        // ---- report: emit a tiny placeholder report capturing the workflow's outputs.
+        // ---- report: write a short Markdown file listing what each earlier step returned.
         runner.Register("report", async (node, priorOutputs, ct) =>
         {
             var dest = GetParam(node, "path") ?? Path.Combine(Path.GetTempPath(), $"cinder-workflow-report-{Guid.NewGuid():N}.md");
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"# Workflow report");
+            sb.AppendLine("# Workflow report");
             sb.AppendLine();
             sb.AppendLine($"- **Generated:** {DateTimeOffset.UtcNow:u}");
             sb.AppendLine($"- **Steps executed:** {priorOutputs.Count}");
@@ -140,17 +146,17 @@ internal static class WorkflowHandlers
             {
                 sb.AppendLine($"## {kv.Key}");
                 sb.AppendLine();
-                sb.AppendLine($"```");
-                sb.AppendLine(kv.Value?.ToString() ?? "(null)");
-                sb.AppendLine($"```");
+                sb.AppendLine("```");
+                sb.AppendLine(kv.Value?.ToString() ?? "(nothing returned)");
+                sb.AppendLine("```");
                 sb.AppendLine();
             }
             await File.WriteAllTextAsync(dest, sb.ToString(), ct);
-            Row(outputs, node.Id, "report", "ok", $"wrote={dest}");
+            Ok(node, $"wrote={dest}");
             return dest;
         });
 
-        // ---- index: write each previous output as a CaseIndex document.
+        // ---- index: add each earlier step's result to a search index.
         runner.Register("index", async (node, priorOutputs, ct) =>
         {
             var indexDir = GetParam(node, "path") ?? Path.Combine(Path.GetTempPath(), "cinder-index-" + Guid.NewGuid().ToString("N"));
@@ -174,37 +180,60 @@ internal static class WorkflowHandlers
                 n++;
             }
             idx.Commit();
-            Row(outputs, node.Id, "index", "ok", $"indexed={n} · path={indexDir}");
+            Ok(node, $"indexed={n} · path={indexDir}");
             return indexDir;
         });
 
-        // ---- ai-summary: stub. Without an active AI provider we just announce.
-        runner.Register("ai-summary", (node, priorOutputs, _) =>
+        // ---- ai-summary: not implemented. Said plainly, and reported as skipped rather than ok.
+        runner.Register("ai-summary", (node, _, _) =>
         {
-            Row(outputs, node.Id, "ai-summary",
-                "skipped",
-                "AI summary step needs an AI provider configured in Settings → AI.");
+            report(new WorkflowExecutionRow(node.Id, node.Kind, "skipped",
+                "The AI summary step is not available yet, so nothing was summarised."));
             return Task.FromResult<object?>(null);
         });
 
         return runner;
     }
 
-    private static void EnumerateDirCount(DiscUtils.DiscDirectoryInfo dir, List<object> rows, int depthBudget)
+    /// <summary>The exception that stops a run: it names the step so the examiner knows which one and why.</summary>
+    private static InvalidOperationException Fail(WorkflowNode node, string reason) =>
+        new($"Step \"{node.Id}\" ({node.Kind}) stopped the workflow: {reason}.");
+
+    /// <summary>
+    /// The file a step works on: its own "path" setting, or the most recent earlier result that
+    /// is an existing file. Throws, naming the step, when there is none.
+    /// </summary>
+    private static string InputFile(WorkflowNode node, IDictionary<string, object?> priorOutputs)
     {
-        if (depthBudget < 0 || rows.Count > 25_000) return;
-        try
+        var own = GetParam(node, "path");
+        if (!string.IsNullOrEmpty(own))
         {
-            foreach (var e in dir.GetFileSystemInfos())
+            return File.Exists(own) ? own : throw Fail(node, $"the file does not exist: {own}");
+        }
+        foreach (var kv in priorOutputs.Reverse())
+        {
+            if (kv.Value is string s && File.Exists(s))
             {
-                rows.Add(e);
-                if (e is DiscUtils.DiscDirectoryInfo sub)
-                {
-                    EnumerateDirCount(sub, rows, depthBudget - 1);
-                }
+                return s;
             }
         }
-        catch { }
+        throw Fail(node, "it has no \"path\" setting and no earlier step produced a file");
+    }
+
+    /// <summary>Lists a disk image the way the Filesystem tool does: raw, E01 and AFF4 through one opener, VHD and VHDX as disks.</summary>
+    private static WalkResult WalkImage(string path, CancellationToken ct)
+    {
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        if (ext is ".vhd" or ".vhdx")
+        {
+            using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using DiscUtils.VirtualDisk disk = ext == ".vhd"
+                ? new DiscUtils.Vhd.Disk(file, DiscUtils.Streams.Ownership.None)
+                : new DiscUtils.Vhdx.Disk(file, DiscUtils.Streams.Ownership.None);
+            return DiscUtilsWalker.WalkDisk(disk, new WalkOptions(), ct);
+        }
+        using var stream = EvidenceOpener.Open(path);
+        return DiscUtilsWalker.Walk(stream, new WalkOptions(), ct);
     }
 
     private static string? GetParam(WorkflowNode node, string name)
@@ -213,32 +242,8 @@ internal static class WorkflowHandlers
         return el.ValueKind switch
         {
             JsonValueKind.String => el.GetString(),
-            JsonValueKind.Number => el.GetRawText(),
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
             _ => el.GetRawText(),
         };
-    }
-
-    /// <summary>
-    /// When a node doesn't supply its own "path" parameter, fall back to the most recent prior
-    /// output that looks like a file path. Lets workflows chain `open-image → hash → registry`
-    /// without restating the path on each step.
-    /// </summary>
-    private static string? FindPreviousPath(IDictionary<string, object?> outputs, WorkflowNode current)
-    {
-        foreach (var kv in outputs.Reverse())
-        {
-            if (kv.Value is string s && File.Exists(s))
-            {
-                return s;
-            }
-        }
-        return null;
-    }
-
-    private static void Row(ObservableCollection<WorkflowExecutionRow> outputs,
-                            string id, string kind, string status, string result)
-    {
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            outputs.Add(new WorkflowExecutionRow(id, kind, status, result)));
     }
 }

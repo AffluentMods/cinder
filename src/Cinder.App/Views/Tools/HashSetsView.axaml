@@ -29,7 +29,7 @@
         <Panel Grid.Row="1">
             <ScrollViewer IsVisible="{Binding HasDatabase}" VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="16">
-                    <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640"
+                    <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
                                Text="Paste a file hash to see whether it is in this hash set. A match on a known-good list (such as NSRL) means the file is standard software you can usually set aside; a match on your own known-bad list means it needs attention." />
                     <Grid ColumnDefinitions="120,Auto,*,Auto">
                         <TextBlock Text="Hash" Classes="label" />

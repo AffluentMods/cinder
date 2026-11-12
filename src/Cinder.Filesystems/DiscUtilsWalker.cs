@@ -28,7 +28,9 @@ public sealed record WalkOptions(
     bool HashFiles = false,
     long HashSizeLimitBytes = 64L * 1024 * 1024,
     long HashTotalLimitBytes = 8L * 1024 * 1024 * 1024,
-    Func<string, string, HashVerdict?>? Lookup = null);
+    Func<string, string, HashVerdict?>? Lookup = null,
+    int MaxDepth = 128,
+    int MaxPathLength = 4096);
 
 /// <summary>What a walk produced, with the truncation flags a caller must surface.</summary>
 public sealed class WalkResult
@@ -36,6 +38,14 @@ public sealed class WalkResult
     public List<FileEntry> Entries { get; } = new();
     public bool Truncated { get; set; }
     public bool DeletedTruncated { get; set; }
+
+    /// <summary>
+    /// True when at least one directory was listed but not descended into because it sat at
+    /// <see cref="WalkOptions.MaxDepth"/> or its path exceeded <see cref="WalkOptions.MaxPathLength"/>.
+    /// <see cref="Truncated"/> is set as well, so a caller that only checks that flag still
+    /// tells the user the listing is incomplete.
+    /// </summary>
+    public bool DepthTruncated { get; set; }
     public long HashedFiles { get; set; }
     public long HashedBytes { get; set; }
     public long HashSkipped { get; set; }
@@ -52,6 +62,23 @@ public sealed class WalkResult
 /// </summary>
 public static class DiscUtilsWalker
 {
+    /// <summary>
+    /// <see cref="FileEntry.Extras"/> key that says how an entry's timestamps relate to UTC.
+    /// Absent means they are UTC instants, as the field names say.
+    /// </summary>
+    public const string TimeBasisKey = "time_basis";
+
+    /// <summary>
+    /// <see cref="TimeBasisKey"/> value for FAT: the volume records local wall-clock time and
+    /// no zone. The entry's timestamp fields carry that wall-clock reading unchanged (offset
+    /// +00:00 is a placeholder, not a claim); converting it to an instant needs the zone of
+    /// the machine that wrote the volume, which the evidence does not record.
+    /// </summary>
+    public const string TimeBasisLocalUnknownZone = "local-unknown-zone";
+
+    /// <summary><see cref="FileEntry.Extras"/> key set on a directory that was listed but not walked.</summary>
+    public const string NotDescendedKey = "not_descended";
+
     public static WalkResult Walk(Stream image, WalkOptions? options = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(image);
@@ -134,9 +161,15 @@ public static class DiscUtilsWalker
         {
             s.Position = 0;
             if (!FatFileSystem.Detect(s)) return false;
-            using var fs = new FatFileSystem(s);
+
+            // FAT stores local wall-clock time with no zone. DiscUtils' default converter
+            // "fixes" that by assuming the zone of the machine doing the reading, so the same
+            // image produced different timestamps on different examiners' workstations. The
+            // identity converter hands back what is on disk; the entries are marked so nobody
+            // mistakes it for UTC.
+            using var fs = new FatFileSystem(s, DiscUtils.Streams.Ownership.None, static (time, _) => time);
             r.Detected.Add("fat");
-            WalkFileSystem(fs, prefix, r, o, ct);
+            WalkFileSystem(fs, prefix, r, o, ct, TimeBasisLocalUnknownZone);
             return true;
         }
         catch (OperationCanceledException) { throw; }
@@ -158,11 +191,17 @@ public static class DiscUtilsWalker
         catch { return false; }
     }
 
-    /// <summary>Breadth-first walk of the live directory tree.</summary>
-    internal static void WalkFileSystem(DiscFileSystem fs, string prefix, WalkResult r, WalkOptions o, CancellationToken ct)
+    /// <summary>
+    /// Breadth-first walk of the live directory tree. Bounded three ways, because the tree is
+    /// whatever the image says it is: by entry count, by depth and by path length. A directory
+    /// whose entry points back at one of its ancestors is an endless tree, and without the
+    /// last two it is walked until the entry budget runs out with every path longer than the
+    /// one before.
+    /// </summary>
+    internal static void WalkFileSystem(DiscFileSystem fs, string prefix, WalkResult r, WalkOptions o, CancellationToken ct, string? timeBasis = null)
     {
-        var queue = new Queue<DiscDirectoryInfo>();
-        queue.Enqueue(fs.Root);
+        var queue = new Queue<(DiscDirectoryInfo Dir, int Depth)>();
+        queue.Enqueue((fs.Root, 0));
 
         while (queue.Count > 0)
         {
@@ -173,7 +212,7 @@ public static class DiscUtilsWalker
                 return;
             }
 
-            var dir = queue.Dequeue();
+            var (dir, depth) = queue.Dequeue();
 
             // GetDirectories()/GetFiles() return typed infos; GetFileSystemInfos() returns the
             // base type, which would make `is DiscFileInfo` false for every entry and silently
@@ -195,32 +234,62 @@ public static class DiscUtilsWalker
                     r.Truncated = true;
                     return;
                 }
-                r.Entries.Add(LiveEntry(d, prefix, isDir: true, size: 0, extras: AttributesOf(d)));
-                queue.Enqueue(d);
+                var extras = AttributesOf(d, timeBasis);
+                var descend = true;
+                if (depth + 1 >= o.MaxDepth)
+                {
+                    extras[NotDescendedKey] = $"depth limit ({o.MaxDepth}) reached";
+                    descend = false;
+                }
+                else if (SafeFullNameLength(d) > o.MaxPathLength)
+                {
+                    extras[NotDescendedKey] = $"path longer than {o.MaxPathLength} characters";
+                    descend = false;
+                }
+                r.Entries.Add(LiveEntry(d, prefix, isDir: true, size: 0, extras));
+                if (descend)
+                {
+                    queue.Enqueue((d, depth + 1));
+                }
+                else
+                {
+                    r.DepthTruncated = true;
+                    r.Truncated = true;
+                }
             }
 
             foreach (var f in files)
             {
+                ct.ThrowIfCancellationRequested();
                 if (r.Entries.Count >= o.MaxEntries)
                 {
                     r.Truncated = true;
                     return;
                 }
-                var extras = AttributesOf(f);
+                var extras = AttributesOf(f, timeBasis);
                 var size = SafeLength(f);
                 if (o.HashFiles)
                 {
-                    HashFile(f, size, extras, r, o);
+                    HashFile(f, size, extras, r, o, ct);
                 }
                 r.Entries.Add(LiveEntry(f, prefix, isDir: false, size, extras));
             }
         }
     }
 
-    private static Dictionary<string, string> AttributesOf(DiscFileSystemInfo e)
+    private static int SafeFullNameLength(DiscFileSystemInfo e)
+    {
+        try { return e.FullName.Length; } catch { return int.MaxValue; }
+    }
+
+    private static Dictionary<string, string> AttributesOf(DiscFileSystemInfo e, string? timeBasis)
     {
         var extras = new Dictionary<string, string>(StringComparer.Ordinal);
         try { extras["attributes"] = e.Attributes.ToString(); } catch { }
+        if (timeBasis is not null)
+        {
+            extras[TimeBasisKey] = timeBasis;
+        }
         return extras;
     }
 
@@ -245,7 +314,7 @@ public static class DiscUtilsWalker
     /// MD5 + SHA-1 in one read, with the size and total-bytes caps applied first. The verdict
     /// callback (typically a hash-set lookup) is consulted with both digests.
     /// </summary>
-    private static void HashFile(DiscFileInfo fi, long size, Dictionary<string, string> extras, WalkResult r, WalkOptions o)
+    private static void HashFile(DiscFileInfo fi, long size, Dictionary<string, string> extras, WalkResult r, WalkOptions o, CancellationToken ct)
     {
         if (size > o.HashSizeLimitBytes)
         {
@@ -262,26 +331,30 @@ public static class DiscUtilsWalker
 
         try
         {
-            using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
-            using var sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
             using var s = fi.OpenRead();
-            var buffer = new byte[1 << 16];
-            long total = 0;
-            while (true)
+            var outcome = HashStream(s, o.HashSizeLimitBytes, o.HashTotalLimitBytes - r.HashedBytes, ct,
+                out var md5Hex, out var sha1Hex, out var bytesRead);
+
+            // Bytes read count against the walk's budget whether or not a digest came out of
+            // them; otherwise a volume full of files that lie about their size is read in
+            // full, one "skipped" file at a time.
+            r.HashedBytes += bytesRead;
+
+            switch (outcome)
             {
-                var n = s.Read(buffer, 0, buffer.Length);
-                if (n <= 0) break;
-                md5.AppendData(buffer, 0, n);
-                sha1.AppendData(buffer, 0, n);
-                total += n;
+                case HashOutcome.OverSizeLimit:
+                    extras["hash_skipped"] = $"over size limit ({o.HashSizeLimitBytes:N0} bytes): the data is longer than the {size:N0} bytes the directory entry records";
+                    r.HashSkipped++;
+                    return;
+                case HashOutcome.OverTotalBudget:
+                    extras["hash_skipped"] = "hashing budget for this walk exhausted";
+                    r.HashSkipped++;
+                    return;
             }
 
-            var md5Hex = Convert.ToHexStringLower(md5.GetHashAndReset());
-            var sha1Hex = Convert.ToHexStringLower(sha1.GetHashAndReset());
             extras["md5"] = md5Hex;
             extras["sha1"] = sha1Hex;
             r.HashedFiles++;
-            r.HashedBytes += total;
 
             if (o.Lookup is not null)
             {
@@ -294,11 +367,54 @@ public static class DiscUtilsWalker
                 }
             }
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             extras["hash_skipped"] = "unreadable: " + ex.Message;
             r.HashSkipped++;
         }
+    }
+
+    internal enum HashOutcome { Hashed, OverSizeLimit, OverTotalBudget }
+
+    /// <summary>
+    /// Hashes <paramref name="s"/> to its end, enforcing both caps on the bytes actually read.
+    /// The size a directory entry reports is evidence, not a promise: on NTFS it comes from
+    /// the index entry while the data comes from the file record, and nothing forces the two
+    /// to agree. Checking the reported size alone let a file that claims ten bytes and holds a
+    /// terabyte of sparse data be read to the end, with no way to cancel.
+    /// </summary>
+    internal static HashOutcome HashStream(Stream s, long sizeLimit, long budgetRemaining, CancellationToken ct,
+        out string md5Hex, out string sha1Hex, out long bytesRead)
+    {
+        md5Hex = "";
+        sha1Hex = "";
+        bytesRead = 0;
+
+        using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+        using var sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
+        var buffer = new byte[1 << 16];
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var n = s.Read(buffer, 0, buffer.Length);
+            if (n <= 0) break;
+            bytesRead += n;
+            if (bytesRead > sizeLimit)
+            {
+                return HashOutcome.OverSizeLimit;
+            }
+            if (bytesRead > budgetRemaining)
+            {
+                return HashOutcome.OverTotalBudget;
+            }
+            md5.AppendData(buffer, 0, n);
+            sha1.AppendData(buffer, 0, n);
+        }
+
+        md5Hex = Convert.ToHexStringLower(md5.GetHashAndReset());
+        sha1Hex = Convert.ToHexStringLower(sha1.GetHashAndReset());
+        return HashOutcome.Hashed;
     }
 
     /// <summary>
@@ -383,10 +499,22 @@ public static class DiscUtilsWalker
         try { return AsUtc(get()); } catch { return null; }
     }
 
-    private static DateTimeOffset? AsUtc(DateTime d)
+    /// <summary>
+    /// Wraps a timestamp DiscUtils returned from a <c>*Utc</c> accessor without moving it.
+    /// Only a value that is explicitly <see cref="DateTimeKind.Local"/> is converted. An
+    /// <see cref="DateTimeKind.Unspecified"/> value is already the reading the caller wants
+    /// (ext returns UTC that way; FAT, through the identity converter, the on-disk wall
+    /// clock) — calling <c>ToUniversalTime()</c> on it would subtract this workstation's zone
+    /// offset and make the result depend on where the examiner sits.
+    /// </summary>
+    internal static DateTimeOffset? AsUtc(DateTime d)
     {
         if (d == default || d.Year < 1601) return null;
-        try { return new DateTimeOffset(DateTime.SpecifyKind(d.ToUniversalTime(), DateTimeKind.Utc)); }
+        try
+        {
+            var utc = d.Kind == DateTimeKind.Local ? d.ToUniversalTime() : d;
+            return new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc));
+        }
         catch { return null; }
     }
 }
