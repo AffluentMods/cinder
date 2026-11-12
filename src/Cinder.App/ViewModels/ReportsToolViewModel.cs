@@ -310,7 +310,9 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
             var exporter = new ReportExporter();
             var actual = await exporter.ExportAsync(rb, fmt, path);
             LastExportPath = actual;
-            StatusLine = $"Exported to {actual}";
+            StatusLine = fmt == ReportFormat.PdfA
+                ? $"Exported to {actual} as PDF/A-2b."
+                : $"Exported to {actual}.";
 
             await Services.ActiveCaseContext.LogAsync(custodyCase, Cinder.Core.Custody.CustodyAction.ReportExported, new
             {
@@ -324,8 +326,49 @@ public sealed partial class ReportsToolViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusLine = $"Could not export the report: {ex.Message}";
+            StatusLine = DescribeExportFailure(fmt, path, ex);
         }
+    }
+
+    /// <summary>
+    /// The status line when an export fails: which file was not written, in which format, and
+    /// why, in words. For PDF it also says that nothing lesser was written in its place: a PDF
+    /// export is PDF/A-2b or it is an error, never a quiet fallback to an ordinary PDF.
+    /// </summary>
+    internal static string DescribeExportFailure(ReportFormat format, string path, Exception ex)
+    {
+        var what = format switch
+        {
+            ReportFormat.PdfA => "the PDF (PDF/A-2b)",
+            ReportFormat.Pdf => "the PDF",
+            ReportFormat.Docx => "the Word document",
+            ReportFormat.Html => "the HTML page",
+            ReportFormat.JsonPlaybook => "the JSON file",
+            _ => "the Markdown file",
+        };
+        var reason = ex switch
+        {
+            UnauthorizedAccessException => "Cinder is not allowed to write to that location. Choose a folder you can save to.",
+            DirectoryNotFoundException => "the folder no longer exists. Choose another location.",
+            IOException io when io.Message.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+                => "the file is open in another program. Close it there and export again.",
+            IOException io => io.Message,
+            // The exporter wraps the PDF engine's error; the innermost message is the cause.
+            _ => Innermost(ex).Message,
+        };
+        var tail = format == ReportFormat.PdfA
+            ? " Cinder does not fall back to an ordinary PDF, so there is no PDF to use. Export as Word or HTML if you need the report now."
+            : "";
+        return $"Could not write {what} to {path}: {reason.TrimEnd('.')}.{tail}";
+    }
+
+    private static Exception Innermost(Exception ex)
+    {
+        while (ex.InnerException is not null)
+        {
+            ex = ex.InnerException;
+        }
+        return ex;
     }
 }
 

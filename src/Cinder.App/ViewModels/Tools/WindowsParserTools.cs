@@ -256,24 +256,110 @@ public sealed partial class EventLogTool
 /// </summary>
 internal static class FolderScan
 {
-    public static readonly EnumerationOptions Recursive = new()
-    {
-        RecurseSubdirectories = true,
-        IgnoreInaccessible = true,
-        MatchCasing = MatchCasing.CaseInsensitive,
-    };
-
+    /// <summary>
+    /// One folder, no subfolders, nothing left out. The framework default skips hidden and
+    /// system entries, and evidence is full of those: everything in $Recycle.Bin is both.
+    /// </summary>
     public static readonly EnumerationOptions TopLevel = new()
     {
         RecurseSubdirectories = false,
         IgnoreInaccessible = true,
         MatchCasing = MatchCasing.CaseInsensitive,
+        AttributesToSkip = default,
     };
 
-    /// <summary>The status note for a folder scan: null when every file parsed.</summary>
-    public static string? Note(int files, int failed) => failed == 0
-        ? null
-        : $"Read {files - failed:N0} of {files:N0} files. {failed:N0} could not be parsed; each has a row with the reason in its Note column.";
+    /// <summary>Subfolders to descend into: all of them except links and junctions, which can loop.</summary>
+    private static readonly EnumerationOptions RealFolders = new()
+    {
+        RecurseSubdirectories = false,
+        IgnoreInaccessible = false,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+    };
+
+    private static readonly EnumerationOptions AllFiles = new()
+    {
+        RecurseSubdirectories = false,
+        IgnoreInaccessible = false,
+        AttributesToSkip = default,
+    };
+
+    /// <summary>How many subfolders a walk could not open. Filled in as the walk proceeds.</summary>
+    public sealed class Skips
+    {
+        public int Folders { get; set; }
+    }
+
+    /// <summary>
+    /// Every file under <paramref name="root"/>, subfolders included, hidden and system files
+    /// included. A subfolder that cannot be opened is counted in <paramref name="skips"/> and
+    /// the walk carries on: one protected folder must not hide everything else, and must not
+    /// go unmentioned either. If the root itself cannot be opened, that is thrown. The two
+    /// listing functions exist so tests can stand in for the file system.
+    /// </summary>
+    public static IEnumerable<string> FilesUnder(
+        string root, Skips skips, CancellationToken ct,
+        Func<string, IEnumerable<string>>? listFiles = null,
+        Func<string, IEnumerable<string>>? listFolders = null)
+    {
+        listFiles ??= dir => Directory.EnumerateFiles(dir, "*", AllFiles);
+        listFolders ??= dir => Directory.EnumerateDirectories(dir, "*", RealFolders);
+
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var dir = pending.Pop();
+            List<string> files, folders;
+            try
+            {
+                files = [.. listFiles(dir)];
+                folders = [.. listFolders(dir)];
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+            {
+                if (ReferenceEquals(dir, root))
+                {
+                    throw;
+                }
+                skips.Folders++;
+                continue;
+            }
+            files.Sort(StringComparer.OrdinalIgnoreCase);
+            folders.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in files)
+            {
+                yield return f;
+            }
+            for (var i = folders.Count - 1; i >= 0; i--)
+            {
+                pending.Push(folders[i]);
+            }
+        }
+    }
+
+    /// <summary>The status note for a folder scan: null when every file parsed and every subfolder opened.</summary>
+    public static string? Note(int files, int failed, int skippedFolders = 0)
+    {
+        var parts = new List<string>(2);
+        if (failed > 0)
+        {
+            parts.Add($"Read {files - failed:N0} of {files:N0} files; {failed:N0} could not be parsed and each has a row with the reason in its Note column.");
+        }
+        if (SkippedNote(skippedFolders) is { } skipped)
+        {
+            parts.Add(skipped);
+        }
+        return parts.Count == 0 ? null : string.Join(" ", parts);
+    }
+
+    /// <summary>The sentence for subfolders that could not be opened, or null when there were none.</summary>
+    public static string? SkippedNote(int skippedFolders) => skippedFolders switch
+    {
+        <= 0 => null,
+        1 => "1 subfolder could not be opened and was skipped, so anything in it is not shown.",
+        _ => $"{skippedFolders:N0} subfolders could not be opened and were skipped, so anything in them is not shown.",
+    };
 
     /// <summary>A path as shown in the grid: relative to the folder the examiner picked.</summary>
     public static string Display(string root, string file) => Path.GetRelativePath(root, file);
@@ -299,7 +385,7 @@ public sealed partial class PrefetchTool
             return new ParseResult(rows);
         }
 
-        int files = 0, failed = 0;
+        int files = 0, failed = 0, needsWindows = 0;
         foreach (var pf in Directory.EnumerateFiles(path, "*.pf", FolderScan.TopLevel))
         {
             ct.ThrowIfCancellationRequested();
@@ -312,6 +398,10 @@ public sealed partial class PrefetchTool
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 failed++;
+                if (ex is PlatformNotSupportedException)
+                {
+                    needsWindows++;
+                }
                 rows.Add(Row(FolderScan.Display(path, pf), "", 0, "", "", 0, 0, $"Could not parse: {ex.Message}"));
             }
         }
@@ -319,11 +409,44 @@ public sealed partial class PrefetchTool
         {
             throw new InvalidOperationException("This folder has no .pf files. Pick the Prefetch folder (Windows\\Prefetch) or a single .pf file.");
         }
+        if (needsWindows == files)
+        {
+            // Every file failed for the same reason: one clear error beats a grid of notes.
+            throw new PlatformNotSupportedException(
+                "Every Prefetch file in this folder is compressed the way Windows 10 and 11 write them, and unpacking them uses a part of Windows. " +
+                "Open the folder with Cinder running on Windows.");
+        }
         return ParseResult.WithBudget(rows, RowBudget, FolderScan.Note(files, failed));
     }
 
+    /// <summary>
+    /// Windows 10 and 11 store Prefetch files compressed ("MAM" header), and the only
+    /// decompressor is part of Windows. Elsewhere the library fails with a missing-DLL message;
+    /// this says what is actually going on.
+    /// </summary>
+    internal const string NeedsWindows =
+        "This Prefetch file is compressed the way Windows 10 and 11 write them, and unpacking it uses a part of Windows. " +
+        "Open it with Cinder running on Windows.";
+
+    /// <summary>True when the first bytes are the compressed-Prefetch header.</summary>
+    internal static bool IsCompressed(ReadOnlySpan<byte> head) =>
+        head.Length >= 4 && head[0] == (byte)'M' && head[1] == (byte)'A' && head[2] == (byte)'M' && (head[3] & 0x7F) == 0x04;
+
+    /// <summary>The message to show instead of parsing, or null when this file can be read here.</summary>
+    internal static string? PlatformProblem(ReadOnlySpan<byte> head, bool onWindows) =>
+        !onWindows && IsCompressed(head) ? NeedsWindows : null;
+
     private static object ParseOne(string path, string display)
     {
+        Span<byte> head = stackalloc byte[4];
+        using (var probe = File.OpenRead(path))
+        {
+            var read = probe.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
+            if (PlatformProblem(head[..read], OperatingSystem.IsWindows()) is { } problem)
+            {
+                throw new PlatformNotSupportedException(problem);
+            }
+        }
         var pf = Prefetch.PrefetchFile.Open(path);
         // Run times are most recent first.
         var runTimes = pf.LastRunTimes
@@ -375,7 +498,9 @@ public sealed partial class LnkTool
         }
 
         int files = 0, failed = 0;
-        foreach (var lnk in Directory.EnumerateFiles(path, "*.lnk", FolderScan.Recursive))
+        var skips = new FolderScan.Skips();
+        foreach (var lnk in FolderScan.FilesUnder(path, skips, ct)
+                     .Where(f => Path.GetExtension(f).Equals(".lnk", StringComparison.OrdinalIgnoreCase)))
         {
             ct.ThrowIfCancellationRequested();
             if (rows.Count >= RowBudget) break;
@@ -392,9 +517,11 @@ public sealed partial class LnkTool
         }
         if (files == 0)
         {
-            throw new InvalidOperationException("This folder has no .lnk files in it or in its subfolders.");
+            throw new InvalidOperationException(
+                "This folder has no .lnk files in it or in its subfolders." +
+                (FolderScan.SkippedNote(skips.Folders) is { } skipped ? " " + skipped : ""));
         }
-        return ParseResult.WithBudget(rows, RowBudget, FolderScan.Note(files, failed));
+        return ParseResult.WithBudget(rows, RowBudget, FolderScan.Note(files, failed, skips.Folders));
     }
 
     private static object ParseOne(string path, string display)
@@ -473,7 +600,8 @@ public sealed partial class JumplistsTool
         }
 
         int files = 0, failed = 0;
-        foreach (var f in Directory.EnumerateFiles(path, "*", FolderScan.Recursive).Where(IsJumpList))
+        var skips = new FolderScan.Skips();
+        foreach (var f in FolderScan.FilesUnder(path, skips, ct).Where(IsJumpList))
         {
             ct.ThrowIfCancellationRequested();
             if (rows.Count >= RowBudget) break;
@@ -491,9 +619,10 @@ public sealed partial class JumplistsTool
         if (files == 0)
         {
             throw new InvalidOperationException(
-                "This folder has no jump list files. Pick a Recent\\AutomaticDestinations or Recent\\CustomDestinations folder.");
+                "This folder has no jump list files. Pick a Recent\\AutomaticDestinations or Recent\\CustomDestinations folder." +
+                (FolderScan.SkippedNote(skips.Folders) is { } skipped ? " " + skipped : ""));
         }
-        return ParseResult.WithBudget(rows, RowBudget, FolderScan.Note(files, failed));
+        return ParseResult.WithBudget(rows, RowBudget, FolderScan.Note(files, failed, skips.Folders));
     }
 
     private static void ParseOne(string path, string display, List<object> rows)
@@ -572,21 +701,29 @@ public sealed partial class BrowserHistoryTool
         // Accept either a directory (browser profile, or the folder above several profiles) or a
         // History / places.sqlite file directly.
         var databases = new List<(string Path, string Display, string Browser)>();
+        var skips = new FolderScan.Skips();
         if (Directory.Exists(path))
         {
-            foreach (var f in Directory.EnumerateFiles(path, "History", FolderScan.Recursive))
+            // One walk for both names. A profile folder that cannot be opened is counted and
+            // reported; it must not end the search or go unmentioned.
+            foreach (var f in FolderScan.FilesUnder(path, skips, ct))
             {
-                databases.Add((f, FolderScan.Display(path, f), GuessBrowser(f)));
-            }
-            foreach (var f in Directory.EnumerateFiles(path, "places.sqlite", FolderScan.Recursive))
-            {
-                databases.Add((f, FolderScan.Display(path, f), "Firefox"));
+                var name = Path.GetFileName(f);
+                if (name.Equals("History", StringComparison.OrdinalIgnoreCase))
+                {
+                    databases.Add((f, FolderScan.Display(path, f), GuessBrowser(f)));
+                }
+                else if (name.Equals("places.sqlite", StringComparison.OrdinalIgnoreCase))
+                {
+                    databases.Add((f, FolderScan.Display(path, f), "Firefox"));
+                }
             }
             if (databases.Count == 0)
             {
                 throw new InvalidOperationException(
                     "No browser history database was found in this folder or its subfolders. " +
-                    "Chrome, Edge, Brave and Opera keep it in a file named History; Firefox uses places.sqlite.");
+                    "Chrome, Edge, Brave and Opera keep it in a file named History; Firefox uses places.sqlite." +
+                    (FolderScan.SkippedNote(skips.Folders) is { } skipped ? " " + skipped : ""));
             }
         }
         else
@@ -631,10 +768,16 @@ public sealed partial class BrowserHistoryTool
                     ? $"Could not read {failures[0]}"
                     : $"None of the {failures.Count} history databases could be read. First: {failures[0]}");
         }
-        var note = failures.Count == 0
-            ? null
-            : $"{failures.Count:N0} of {databases.Count:N0} history databases could not be read ({failures[0]}).";
-        return new ParseResult(rows, truncated, null, note);
+        var notes = new List<string>(2);
+        if (failures.Count > 0)
+        {
+            notes.Add($"{failures.Count:N0} of {databases.Count:N0} history databases could not be read ({failures[0]}).");
+        }
+        if (FolderScan.SkippedNote(skips.Folders) is { } skippedNote)
+        {
+            notes.Add(skippedNote);
+        }
+        return new ParseResult(rows, truncated, null, notes.Count == 0 ? null : string.Join(" ", notes));
     }
 
     /// <summary>

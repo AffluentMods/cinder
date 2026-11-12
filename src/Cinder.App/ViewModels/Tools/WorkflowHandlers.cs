@@ -50,7 +50,7 @@ internal static class WorkflowHandlers
             {
                 throw Fail(node, $"the file does not exist: {path}");
             }
-            Ok(node, $"{path} ({new FileInfo(path).Length:N0} bytes)");
+            Ok(node, $"Found {path} ({new FileInfo(path).Length:N0} bytes).");
             return path;
         });
 
@@ -61,7 +61,7 @@ internal static class WorkflowHandlers
             var svc = new HashService();
             await using var fs = File.OpenRead(path);
             var r = await svc.ComputeAsync(fs, [HashAlgorithmKind.Sha256], progress: null, ct: ct);
-            Ok(node, $"SHA-256={r.Sha256}");
+            Ok(node, $"SHA-256 of {Path.GetFileName(path)}: {r.Sha256}");
             return r.Sha256;
         });
 
@@ -81,7 +81,7 @@ internal static class WorkflowHandlers
                 throw Fail(node, ex.Message);
             }
             var subkeyCount = hive.Root?.SubKeys.Count ?? 0;
-            Ok(node, $"root subkeys={subkeyCount} · hive={hive.HiveType}");
+            Ok(node, $"Opened a {hive.HiveType} registry hive with {subkeyCount:N0} key{(subkeyCount == 1 ? "" : "s")} under its root.");
             return subkeyCount;
         });
 
@@ -106,7 +106,7 @@ internal static class WorkflowHandlers
                 // failure to enumerate, not an empty disk, and must not be reported as "ok".
                 throw Fail(node, "no NTFS, FAT, ext or ISO 9660 filesystem was found in the image");
             }
-            Ok(node, $"entries={result.Entries.Count:N0}" + (result.Truncated ? " (stopped at the listing limit; the image holds more)" : ""));
+            Ok(node, $"Listed {result.Entries.Count:N0} files and folders." + (result.Truncated ? " The listing stopped at its limit; the image holds more." : ""));
             return result.Entries.Count;
         });
 
@@ -128,7 +128,7 @@ internal static class WorkflowHandlers
                     break;
                 }
             }
-            Ok(node, $"recovered={n:N0}{(capped ? " (stopped at the limit; the input may hold more)" : "")} · out={outDir}");
+            Ok(node, $"Recovered {n:N0} file{(n == 1 ? "" : "s")} into {outDir}." + (capped ? " Carving stopped at its limit; the input may hold more." : ""));
             return outDir;
         });
 
@@ -152,7 +152,7 @@ internal static class WorkflowHandlers
                 sb.AppendLine();
             }
             await File.WriteAllTextAsync(dest, sb.ToString(), ct);
-            Ok(node, $"wrote={dest}");
+            Ok(node, $"Wrote the summary to {dest}.");
             return dest;
         });
 
@@ -180,7 +180,7 @@ internal static class WorkflowHandlers
                 n++;
             }
             idx.Commit();
-            Ok(node, $"indexed={n} · path={indexDir}");
+            Ok(node, $"Added {n:N0} result{(n == 1 ? "" : "s")} to the search index in {indexDir}.");
             return indexDir;
         });
 

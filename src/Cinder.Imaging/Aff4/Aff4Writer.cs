@@ -31,6 +31,13 @@ public sealed class Aff4Writer : IDisposable
         public string? Notes { get; init; }
         public string? Source { get; init; }
         public string Tool { get; init; } = "Cinder";
+
+        /// <summary>
+        /// False (the default): the writer refuses to start, with
+        /// <see cref="OutputExistsException"/>, when a file already exists at the path.
+        /// True replaces it.
+        /// </summary>
+        public bool Overwrite { get; init; }
     }
 
     public const string ZlibCompression = "https://www.ietf.org/rfc/rfc1950.txt";
@@ -76,7 +83,13 @@ public sealed class Aff4Writer : IDisposable
         MapUrn = "aff4://" + Guid.NewGuid().ToString("D");
         StreamUrn = "aff4://" + Guid.NewGuid().ToString("D");
 
-        _file = new FileStream(Path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 1 << 20);
+        if (!_o.Overwrite && File.Exists(Path))
+        {
+            throw new OutputExistsException(
+                $"AFF4: {Path} already exists. Nothing was written. Choose another name, move the existing file away, or ask for it to be overwritten.",
+                [Path]);
+        }
+        _file = new FileStream(Path, _o.Overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 1 << 20);
         _zip = new ZipArchive(_file, ZipArchiveMode.Create, leaveOpen: true);
         _zip.Comment = VolumeUrn;   // pyaff4 and libaff4 take the volume URN from the archive comment
         _pending = new byte[_o.ChunkSize];

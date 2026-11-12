@@ -163,11 +163,13 @@ This is usually the first thing you do with a disk image: list it and look aroun
 ## How to use it in Cinder
 1. Pick a disk image (.dd, .raw, .E01, .aff4, .vhd, .vhdx, .iso).
 2. Cinder detects the filesystem — or, for a whole-disk image, walks each partition —
-   and lists every file with its size and timestamps.
+   and lists every file and folder. The Kind column says which each row is; files
+   have a size and every entry has its timestamps.
 3. On NTFS volumes it then reads the $MFT for records that are no longer in use and
-   appends them with IsDeleted = true, under a `[deleted]/` path. Windows deletes a
-   file by clearing one bit; the name, size and timestamps stay in the record until
-   it is reused.
+   appends them under a `[deleted]/` path with "deleted" in the Deleted column and
+   their MFT record number in the Inode column. Windows deletes a file by clearing
+   one bit; the name, size and timestamps stay in the record until it is reused.
+   Type `deleted` in the filter box to see only these.
 4. The filter box narrows by any column. The Export menu writes the rows shown.
 5. Known-file filtering: turn on "Hash files during filesystem enumeration" in
    Settings and choose the hash-set database from the Hash sets tool. Every file
@@ -180,8 +182,17 @@ This is usually the first thing you do with a disk image: list it and look aroun
 ## Limits
 - The listing stops at a fixed number of entries on large volumes. A banner says so
   when it does, and the export then holds only the rows shown.
-- A few rows are notes rather than files: `[EWF metadata]`, `[deleted]` and
-  `[hashing]` rows carry information about the image or the run.
+- A few rows are notes rather than files, with "Note" in the Kind column:
+  `[image details]`, `[deleted entries]` and `[hashing]` rows carry information
+  about the image or the run.
+- A column appears only when it has something to show. Inode is listed when the
+  filesystem gives entries a record number Cinder can read: today that is deleted
+  NTFS entries only, so live files have an empty Inode cell. Verdict and Sha1
+  appear only when file hashing is switched on in Settings.
+- An empty cell means "not known" or "does not apply" (a folder has no size). It
+  never means zero.
+- On FAT volumes, times are the device's local clock with no time zone. They are
+  shown as written, marked "(local)", and are not UTC.
 - A deleted entry gives you the name and the timestamps, not the content. To get
   content back, run the File carver over the image.
 - An image with no filesystem Cinder recognises is reported as an error.
@@ -442,7 +453,7 @@ public sealed partial class SrumTool
     public override string HelpMarkdown => """
 ## What this is
 SRUM (System Resource Usage Monitor) is a Windows database that records, roughly
-hourly, how much processor time and network traffic each program used and under
+hourly, how much processor work, disk and network traffic each program used and under
 which user account. It lives at `Windows\System32\sru\SRUDB.dat` and keeps about a
 month of history.
 
@@ -453,9 +464,10 @@ gone — for example how many bytes a file-transfer tool sent.
 ## How to use it in Cinder
 1. Pick SRUDB.dat.
 2. Each row is one record from one of three tables, named in the Table column:
-   "app" (processor time in the foreground and background), "net" (bytes sent and
-   received) or "energy". The row gives the time (UTC), the user, the program and
-   the values.
+   "app" (processor cycles in the foreground and background, and bytes read and
+   written), "net" (bytes sent and received) or "energy" (battery capacity
+   readings). The row gives the time (UTC), the user, the program and the values.
+   Processor cycles are a count of work done, not a length of time.
 
 ## Limits
 - At most 25,000 rows are read from each table. A banner says so when a table holds
@@ -673,10 +685,14 @@ Seeing which addresses a computer talked to, on which ports and when.
 ## Limits
 - This is a packet list. Conversations are not reassembled, and web requests, name
   lookups and transferred files are not extracted.
-- The tool needs a packet-capture library installed on this computer: Npcap on
-  Windows, libpcap on Linux and macOS. Without it the tool says so.
-- At most 50,000 packets are shown; a banner says so if the capture holds more. If
-  the file is cut short or damaged, the status line says where reading stopped.
+- At most 50,000 packets are shown; a banner says so if the capture holds more.
+- If the file is cut short or damaged part-way, the packets before the damage are
+  shown under a banner that says how many were read and that the rest is missing.
+
+## What must be installed
+Reading a capture file uses the same library that records live traffic, and it is not
+part of Cinder. On Windows install Npcap (npcap.com). On Linux and macOS install
+libpcap with your package manager. Without it the tool says which one is missing.
 """;
 }
 
@@ -890,15 +906,27 @@ longer has it.
    with `#`, blank lines and `type,value` rows are accepted. Cinder works out what
    kind each line is and says how many of each it found.
 2. Pick the folder to scan: a triage collection, a mounted image, an export.
-3. Run the scan. Each match is a row: the indicator, its kind, where it matched
-   (hash, path, content or timeline), the file, and the offset or time.
-4. Filter, export, or bookmark a row as a finding.
+3. Run the scan. "Stop" ends it early; a stopped scan shows no matches, because it
+   did not look at everything. Each match is a row: the indicator, its kind, where
+   it matched (hash, path, content or timeline), the file, and the offset or time.
+4. The line under the toolbar says how many files were hashed and searched, and how
+   many could not be read. A file that could not be read may hold a match that was
+   missed. The same goes for an E01 or AFF4 image in the folder that has damaged
+   chunks: they are read as zeros, counted, and the image is named so you can
+   verify it.
+5. Filter, export, or bookmark a row as a finding.
+
+## What is recorded
+In the custody log the folder you scanned is the evidence, and the indicator list is
+recorded beside it as what the folder was checked with. A bookmarked match is
+attributed to the folder.
 
 ## Limits
 - Files over 256 MB are not hashed and files over 512 MB are not searched for text.
 - The scan stops at 200,000 files and 50,000 matches, and says so.
 - A hash indicator must be the exact hash.
-- Changing the list or the folder clears the results; run the scan again.
+- Changing the list or the folder stops a running scan and clears the results; run
+  the scan again.
 """;
 }
 
@@ -1275,6 +1303,12 @@ At the end of an examination, to produce the document you hand over.
    you open this tool, when you switch case, and again immediately before each
    export.
 4. "Update preview" shows the report as Markdown. Export writes the file.
+
+## About the PDF
+The PDF option writes PDF/A-2b, the archival form of PDF: fonts are embedded and the
+file does not depend on anything outside itself, so it should look the same wherever
+and whenever it is opened. If a PDF/A-2b file cannot be produced, the export fails
+and says why. Cinder does not write an ordinary PDF in its place.
 
 ## Limits
 - The custody log is not included in the report. Each export is recorded in the

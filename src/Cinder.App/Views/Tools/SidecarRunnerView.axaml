@@ -139,10 +139,26 @@
                         </ItemsControl>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-                        <Button Classes="accent" Height="30" Padding="14,0" Content="Pick file…"
-                                Click="OnPickFileClick" IsVisible="{Binding AcceptsFile}" />
+                        <!-- One primary action. Where a tool takes either, the folder is the usual
+                             case (a whole Prefetch or Recent folder) and a single file is the alternative. -->
                         <Button Classes="accent" Height="30" Padding="14,0" Content="Pick folder…"
                                 Click="OnPickFolderClick" IsVisible="{Binding AcceptsFolder}" />
+                        <Button Classes="accent" Height="30" Padding="14,0" Content="Pick file…" Click="OnPickFileClick">
+                            <Button.IsVisible>
+                                <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                    <Binding Path="AcceptsFile" />
+                                    <Binding Path="!AcceptsFolder" />
+                                </MultiBinding>
+                            </Button.IsVisible>
+                        </Button>
+                        <Button Classes="tb" Height="30" Padding="14,0" Content="Pick a single file…" Click="OnPickFileClick">
+                            <Button.IsVisible>
+                                <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                    <Binding Path="AcceptsFile" />
+                                    <Binding Path="AcceptsFolder" />
+                                </MultiBinding>
+                            </Button.IsVisible>
+                        </Button>
                     </StackPanel>
                     <TextBlock Text="{Binding DropHint}" Classes="dim" FontSize="12" HorizontalAlignment="Center" />
                 </StackPanel>

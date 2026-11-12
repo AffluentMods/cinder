@@ -653,7 +653,7 @@ public sealed partial class CustodyTool
             var signer = new CustodySigner(new CaseStore(CasePath));
             var a = await signer.SignTipAsync(caseId, Environment.UserName, ct);
             KeyFingerprint = a.KeyFingerprint;
-            StatusLine = $"Signed tip: sequence {a.Sequence}, hash {a.EntryHash[..16]}…, key {a.KeyFingerprint}. Export it to anchor the chain outside this file.";
+            StatusLine = $"Signed: the log up to entry {a.Sequence} is now covered by your key ({a.KeyFingerprint}). Export the signature and send it somewhere you cannot edit afterwards.";
 
             // Countersign with a Time-Stamp Authority when one is configured: the examiner
             // key says who, the TSA says no later than when, from a clock that is not ours.
@@ -664,18 +664,18 @@ public sealed partial class CustodyTool
                 {
                     using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
                     var stamped = await signer.TimestampAsync(a.Id, new Uri(tsaUrl), http, ct);
-                    StatusLine += $" Timestamped by {tsaUrl} at {stamped.TsaTime:u}.";
+                    StatusLine += $" Countersigned by the time-stamp service {tsaUrl} at {stamped.TsaTime:yyyy-MM-dd HH:mm:ss} UTC.";
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    StatusLine += $" Timestamp request to {tsaUrl} failed ({ex.Message}); the attestation is signed but not timestamped.";
+                    StatusLine += $" The time-stamp service {tsaUrl} could not be reached ({ex.Message}); the log is signed but carries no independent time.";
                 }
             }
             await ReloadAttestationsAsync(signer, caseId, ct);
         }
         catch (Exception ex)
         {
-            StatusLine = $"Signing failed: {ex.Message}";
+            StatusLine = $"Could not sign the log: {ex.Message}";
         }
     }
 
@@ -1072,6 +1072,7 @@ rule example_strings {
         StatusLine = "Scanning…";
         var found = new List<YaraHitRow>();
         var capped = false;
+        var scan = new YaraLiteScanInfo();
         try
         {
             // Parsing, compiling and the scan itself all run off the UI thread: a large image
@@ -1086,7 +1087,7 @@ rule example_strings {
             capped = await Task.Run(async () =>
             {
                 var ruleset = YaraLiteRuleset.Compile(parsed);
-                await foreach (var hit in ruleset.ScanAsync(path, ct).ConfigureAwait(false))
+                await foreach (var hit in ruleset.ScanAsync(path, scan, ct).ConfigureAwait(false))
                 {
                     if (found.Count >= MaxHits)
                     {
@@ -1130,8 +1131,12 @@ rule example_strings {
             {
                 StatusLine += $" {skipped:N0} rule{(skipped == 1 ? " was" : "s were")} skipped; see the rule summary for why.";
             }
+            if (scan.DamagedChunks > 0)
+            {
+                StatusLine += $" WARNING: {scan.DamagedChunks:N0} damaged chunk{(scan.DamagedChunks == 1 ? "" : "s")} in this image read as zeros, so a match there could have been missed.";
+            }
             await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.ParserRan,
-                new { Tool = Id, Evidence = path, Rules = parsed.Count, Matches = found.Count, StoppedEarly = capped }, CancellationToken.None);
+                new { Tool = Id, Evidence = path, Rules = parsed.Count, Matches = found.Count, StoppedEarly = capped, SourceDamagedChunks = scan.DamagedChunks }, CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
@@ -1772,6 +1777,9 @@ public sealed partial class ImagerTool
     [ObservableProperty] private string? _statusLine;
     [ObservableProperty] private long _bytesRead;
 
+    /// <summary>Off by default: an existing image (or the remains of a failed run) is never replaced silently.</summary>
+    [ObservableProperty] private bool _overwrite;
+
     /// <summary>Names as examiners write them, the same list the Convert tool shows.</summary>
     public IReadOnlyList<string> Formats { get; } = ["Raw", "E01", "AFF4", "VHD", "VHDX"];
 
@@ -1824,7 +1832,8 @@ public sealed partial class ImagerTool
             var job = new ImageJob(Source, Output, fmt,
                 ExaminerName: Environment.UserName,
                 CaseNumber: ActiveCaseContext.Current?.Name,
-                Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : EvidenceOpener.IsAff4(Source) ? "Decoded from AFF4" : null);
+                Description: EvidenceOpener.IsEwf(Source) ? "Decoded from EWF" : EvidenceOpener.IsAff4(Source) ? "Decoded from AFF4" : null,
+                Overwrite: Overwrite);
             var result = await new InProcessImager().ImageAsync(job, progress, ct);
 
             var lines = new List<string>
@@ -1861,6 +1870,14 @@ public sealed partial class ImagerTool
                 result.SourceDamagedChunks,
                 ElapsedSeconds = result.Elapsed.TotalSeconds,
             }, CancellationToken.None);
+        }
+        catch (OutputExistsException ex)
+        {
+            // Nothing was created or changed. An image is never replaced unless asked.
+            StatusLine = "Not started: there is already a file where the image would go ("
+                + string.Join(", ", ex.ExistingPaths.Select(p => System.IO.Path.GetFileName(p)))
+                + "). A name ending in .partial is what is left of an earlier run that failed. "
+                + "Choose another output name, or tick \"Replace an existing image\" if you are sure it is not needed.";
         }
         catch (OperationCanceledException)
         {
@@ -1914,15 +1931,15 @@ public sealed partial class VerifyTool
     /// tool ends up showing a red ✗ for an image that is merely missing a recorded hash — or,
     /// worse, a green ✓ for one that was never actually checked.</para>
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(IncludeCancelCommand = true)]
     private async Task PickAndRunAsync(CancellationToken ct)
     {
-        var path = await ToolDialog.PickFileAsync("Pick image to verify");
+        var path = await ToolDialog.PickFileAsync("Pick the image to verify");
         if (string.IsNullOrEmpty(path)) return;
 
         ImagePath = path;
         ResultText = null;
-        StatusLine = "Verifying — re-reading the whole image…";
+        StatusLine = "Verifying: reading the whole image again. Large images take a while.";
         try
         {
             if (EvidenceOpener.IsEwf(path))
@@ -1940,12 +1957,13 @@ public sealed partial class VerifyTool
         }
         catch (OperationCanceledException)
         {
-            StatusLine = "Cancelled.";
+            ResultText = null;
+            StatusLine = "Stopped before the whole image was read. Nothing was verified.";
         }
         catch (Exception ex)
         {
             ResultText = null;
-            StatusLine = $"Failed: {ex.Message}";
+            StatusLine = $"Could not verify {System.IO.Path.GetFileName(path)}: {ex.Message}";
         }
     }
 
@@ -1954,11 +1972,11 @@ public sealed partial class VerifyTool
         // Log to the case this work started under, even if the examiner switches case before it ends.
         var custodyCase = ActiveCaseContext.Current;
         using var reader = Cinder.Imaging.Ewf.EwfReader.Open(path);
-        var progress = new Progress<long>(b => StatusLine = $"Verifying — {b:N0} bytes read…");
+        var progress = new Progress<long>(b => StatusLine = $"Verifying: {b:N0} bytes read so far");
         var r = await reader.VerifyAsync(progress, ct);
 
         ResultText = $"""
-            Source            : EWF container, {reader.SegmentCount} segment(s)
+            Source            : E01 image, {reader.SegmentCount} segment file{(reader.SegmentCount == 1 ? "" : "s")}
             Bytes verified    : {r.BytesVerified:N0}
             Damaged chunks    : {r.DamagedChunkCount:N0}
 
@@ -1971,8 +1989,18 @@ public sealed partial class VerifyTool
             """;
 
         StatusLine = r.Md5Match is null && r.Sha1Match is null
-            ? "⚠ unverifiable — container records no acquisition hash"
-            : r.Verified ? "✓ verified against the acquisition hash" : "✗ VERIFICATION FAILED";
+            ? "Cannot be verified: this image records no acquisition hash to compare against."
+            : r.Verified ? "Verified: the image matches the hash recorded when it was acquired."
+            : "VERIFICATION FAILED: the image does not match the hash recorded when it was acquired.";
+        if (!reader.EndsWithDone)
+        {
+            StatusLine += " WARNING: the last segment file expects another one after it. The image is incomplete; a segment is missing.";
+        }
+        if (reader.IgnoredSegments.Count > 0)
+        {
+            StatusLine += $" Note: {reader.IgnoredSegments.Count} file{(reader.IgnoredSegments.Count == 1 ? "" : "s")} beside the image look like later segments but belong to a different image and were not read: "
+                + string.Join("; ", reader.IgnoredSegments) + ".";
+        }
 
         // A verification is the custody event that matters most — record the digests and the
         // verdict, not just that the tool ran.
@@ -2015,7 +2043,7 @@ public sealed partial class VerifyTool
             sha1.AppendData(buffer, 0, n);
             sha256.AppendData(buffer, 0, n);
             total += n;
-            StatusLine = $"Verifying — {total:N0} bytes read…";
+            StatusLine = $"Verifying: {total:N0} bytes read so far";
         }
         var cMd5 = Convert.ToHexStringLower(md5.GetHashAndReset());
         var cSha1 = Convert.ToHexStringLower(sha1.GetHashAndReset());
@@ -2042,8 +2070,9 @@ public sealed partial class VerifyTool
             {(!any ? "UNVERIFIABLE: the container records no hash." : verified ? "VERIFIED: every recorded digest reproduces." : "FAILED: a recorded digest does not reproduce, or chunks were damaged.")}
             """;
         StatusLine = !any
-            ? "⚠ unverifiable — container records no acquisition hash"
-            : verified ? "✓ verified against the acquisition hash" : "✗ VERIFICATION FAILED";
+            ? "Cannot be verified: this image records no acquisition hash to compare against."
+            : verified ? "Verified: the image matches the hash recorded when it was acquired."
+            : "VERIFICATION FAILED: the image does not match the hash recorded when it was acquired.";
 
         await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceHashed, new
         {
@@ -2067,7 +2096,7 @@ public sealed partial class VerifyTool
         // Log to the case this work started under, even if the examiner switches case before it ends.
         var custodyCase = ActiveCaseContext.Current;
         var hashes = new HashService();
-        var progress = new Progress<long>(b => StatusLine = $"Verifying — {b:N0} bytes read…");
+        var progress = new Progress<long>(b => StatusLine = $"Verifying: {b:N0} bytes read so far");
         var virtualDisk = EvidenceOpener.VirtualDiskKind(path);
         var computed = virtualDisk is null
             ? await hashes.ComputeFileAsync(path, [HashAlgorithmKind.Md5, HashAlgorithmKind.Sha1, HashAlgorithmKind.Sha256], progress, ct)
@@ -2080,7 +2109,7 @@ public sealed partial class VerifyTool
         {
             verdict = "Unverifiable — no .sha256 / .md5 companion file found next to the image. " +
                       "The digests above are this run's measurement, not a check against a reference.";
-            StatusLine = "⚠ unverifiable — no reference digest available";
+            StatusLine = "Cannot be verified: there is no hash file beside the image to compare against.";
         }
         else
         {
@@ -2092,7 +2121,9 @@ public sealed partial class VerifyTool
             verdict = match
                 ? $"Verified — matches the digest in {referenceSource}."
                 : $"VERIFICATION FAILED — {referenceSource} expects {reference}, which matches none of the computed digests.";
-            StatusLine = match ? "✓ verified against companion digest" : "✗ VERIFICATION FAILED";
+            StatusLine = match
+                ? "Verified: the image matches the hash file beside it."
+                : "VERIFICATION FAILED: the image does not match the hash file beside it.";
         }
 
         ResultText = $"""
@@ -2189,34 +2220,95 @@ public sealed partial class VerifyTool
 public sealed partial class MountTool
 {
     [ObservableProperty] private string? _imagePath;
-    [ObservableProperty] private string? _mountedAt;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsMounted))]
+    private string? _mountedAt;
+
     [ObservableProperty] private string? _statusLine;
+
+    private IImageMounter? _mounter;
+    private MountedImage? _handle;
+
+    public bool IsMounted => MountedAt is not null;
+
+    /// <summary>
+    /// The folder of helper scripts some mounters use. Beside the program when installed, a few
+    /// levels up when run from the source tree; the old code only knew the source-tree layout,
+    /// so an installed copy looked in a folder that did not exist.
+    /// </summary>
+    private static string ParsersDirectory()
+    {
+        var beside = System.IO.Path.Combine(AppContext.BaseDirectory, "parsers");
+        return Directory.Exists(beside)
+            ? beside
+            : System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers"));
+    }
 
     [RelayCommand]
     private async Task PickAndMountAsync(CancellationToken ct)
     {
         // Log to the case this work started under, even if the examiner switches case before it ends.
         var custodyCase = ActiveCaseContext.Current;
-        var path = await ToolDialog.PickFileAsync("Pick image to mount");
+        if (IsMounted)
+        {
+            StatusLine = "Unmount the current image first.";
+            return;
+        }
+        var path = await ToolDialog.PickFileAsync("Pick the image to mount read-only");
         if (string.IsNullOrEmpty(path)) return;
         ImagePath = path;
+        StatusLine = "Mounting…";
         try
         {
-            var parsers = System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "parsers");
-            var m = ImageMounterFactory.ForCurrentPlatform(parsers);
-            var handle = await m.MountReadOnlyAsync(path, ct);
-            MountedAt = handle.MountPoint;
-            StatusLine = $"Mounted at {handle.MountPoint}";
+            _mounter = ImageMounterFactory.ForCurrentPlatform(ParsersDirectory());
+            _handle = await _mounter.MountReadOnlyAsync(path, ct);
+            MountedAt = _handle.MountPoint;
+            StatusLine = "Mounted read-only. It stays mounted, even after Cinder closes, until you unmount it here.";
             await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceMounted, new
             {
                 Image = path,
-                handle.MountPoint,
+                _handle.MountPoint,
                 ReadOnly = true,
-            }, ct);
+            }, CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusLine = "Stopped.";
         }
         catch (Exception ex)
         {
-            StatusLine = $"Failed: {ex.Message}";
+            _handle = null;
+            MountedAt = null;
+            StatusLine = $"Could not mount {System.IO.Path.GetFileName(path)}: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task UnmountAsync(CancellationToken ct)
+    {
+        var custodyCase = ActiveCaseContext.Current;
+        if (_mounter is null || _handle is null)
+        {
+            return;
+        }
+        var handle = _handle;
+        StatusLine = "Unmounting…";
+        try
+        {
+            await _mounter.UnmountAsync(handle, ct);
+            _handle = null;
+            MountedAt = null;
+            StatusLine = "Unmounted.";
+            await ActiveCaseContext.LogAsync(custodyCase, CustodyAction.EvidenceUnmounted, new
+            {
+                Image = ImagePath,
+                handle.MountPoint,
+            }, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            StatusLine = $"Could not unmount {handle.MountPoint}: {ex.Message} Close any program that has files open on it and try again.";
         }
     }
 }
@@ -2227,6 +2319,9 @@ public sealed partial class ConvertTool
     [ObservableProperty] private string? _output;
     [ObservableProperty] private string _format = "Raw";
     [ObservableProperty] private string? _statusLine;
+
+    /// <summary>Off by default: an existing image (or the remains of a failed run) is never replaced silently.</summary>
+    [ObservableProperty] private bool _overwrite;
 
     /// <summary>Every target is written in-process; the source can be raw, E01, AFF4, VHD or VHDX.</summary>
     public IReadOnlyList<string> Formats { get; } = ["Raw", "E01", "AFF4", "VHD", "VHDX"];
@@ -2279,7 +2374,7 @@ public sealed partial class ConvertTool
         try
         {
             var progress = new Progress<ImageJobProgress>(p => BytesConverted = p.BytesRead);
-            var r = await ImageConverter.ConvertAsync(Source, Output, TargetFormat, Environment.UserName, progress: progress, ct: ct);
+            var r = await ImageConverter.ConvertAsync(Source, Output, TargetFormat, Environment.UserName, progress: progress, ct: ct, overwrite: Overwrite);
 
             var lines = new List<string>
             {
@@ -2331,6 +2426,14 @@ public sealed partial class ConvertTool
                 r.SourceDamagedChunks,
                 r.OutputDamagedChunks,
             }, CancellationToken.None);
+        }
+        catch (OutputExistsException ex)
+        {
+            // Nothing was created or changed. An image is never replaced unless asked.
+            StatusLine = "Not started: there is already a file where the image would go ("
+                + string.Join(", ", ex.ExistingPaths.Select(p => System.IO.Path.GetFileName(p)))
+                + "). A name ending in .partial is what is left of an earlier run that failed. "
+                + "Choose another output name, or tick \"Replace an existing image\" if you are sure it is not needed.";
         }
         catch (OperationCanceledException)
         {

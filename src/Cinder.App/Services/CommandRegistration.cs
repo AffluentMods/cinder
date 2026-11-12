@@ -234,6 +234,71 @@ public static class CommandRegistration
             }));
 
         registry.Register(new CommandDescriptor(
+            Id: "file.hash",
+            Title: "Hash a file…",
+            Subtitle: "MD5, SHA-1, SHA-256 and BLAKE3 of any file; recorded in the custody log when a case is open.",
+            Category: "File",
+            Invoke: async _ =>
+            {
+                var owner = ResolveMainWindow();
+                if (owner is null)
+                {
+                    return;
+                }
+                var picked = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Choose the file to hash",
+                    AllowMultiple = false,
+                }).ConfigureAwait(false);
+                var path = picked.FirstOrDefault()?.TryGetLocalPath();
+                if (string.IsNullOrEmpty(path))
+                {
+                    return;
+                }
+                Dispatcher.UIThread.Post(() =>
+                {
+                    // The dialog starts hashing as it opens and cancels the run if it is closed.
+                    var dialog = new HashDialog { DataContext = new HashDialogViewModel(path: path) };
+                    dialog.ShowDialog(owner);
+                });
+            }));
+
+        registry.Register(new CommandDescriptor(
+            Id: "app.update.check",
+            Title: "Check for updates",
+            Subtitle: "Asks GitHub for the latest release, now. Cinder never checks on its own, and nothing is downloaded.",
+            Category: "Help",
+            Invoke: async ct =>
+            {
+                // The only network request Cinder makes on its own account, and only because
+                // the examiner just asked for it. See UpdateChecker.
+                mainVm.Announce("Checking for updates…");
+                UpdateCheckResult result;
+                try
+                {
+                    result = await new UpdateChecker().CheckAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    mainVm.Announce("Update check cancelled.");
+                    return;
+                }
+                if (result.Status == UpdateStatus.UpToDate)
+                {
+                    mainVm.Announce(result.Message);
+                }
+                else if (result.Status == UpdateStatus.UpdateAvailable)
+                {
+                    // Not an error, but it carries an address the examiner needs time to read.
+                    mainVm.AnnounceNotice(result.Message);
+                }
+                else
+                {
+                    mainVm.AnnounceError(result.Message);
+                }
+            }));
+
+        registry.Register(new CommandDescriptor(
             Id: "app.exit",
             Title: "Exit Cinder",
             Subtitle: null,

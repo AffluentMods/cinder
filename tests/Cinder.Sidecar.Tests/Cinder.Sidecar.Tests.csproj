@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Tests for the sidecar boundary: the SidecarClient protocol itself, and the adapters that
+    turn sidecar replies into Cinder's types (imaging, filesystem, Linux / Windows artifacts,
+    memory).
+
+    Two kinds of test live here.
+      * Mapping tests feed the adapters canned JSON through a fake ISidecarChannel. They need
+        nothing but .NET.
+      * Protocol and contract tests start real Python workers. They are marked [PythonFact] and
+        are reported as skipped, with the reason, when no usable Python (3.12+ with pydantic)
+        is found. Set CINDER_TEST_PYTHON to point at a specific interpreter.
+
+    The workers under parsers/ are copied next to the test assembly so the tests run the same
+    way from any output or artifacts directory.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Cinder.Sidecar\Cinder.Sidecar.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Core\Cinder.Core.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Imaging\Cinder.Imaging.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Filesystems\Cinder.Filesystems.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Artifacts.Linux\Cinder.Artifacts.Linux.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Artifacts.Windows\Cinder.Artifacts.Windows.csproj" />
+    <ProjectReference Include="..\..\src\Cinder.Memory\Cinder.Memory.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Workers\*.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\parsers\**\*.py" Exclude="..\..\parsers\**\__pycache__\**" Link="parsers\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

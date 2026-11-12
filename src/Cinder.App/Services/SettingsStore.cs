@@ -10,6 +10,11 @@ public sealed record CinderSettings
     public string Density { get; init; } = "Comfortable";     // "Comfortable" | "Compact"
     public bool VimModeInHex { get; init; } = false;
     public bool RespectReduceMotion { get; init; } = true;
+    /// <summary>
+    /// Not read by anything. Cinder never checks for updates on its own — the only check is the
+    /// "Check for updates" command, run by hand — so there is nothing for this to switch. It is
+    /// kept so that settings files written by earlier builds round-trip unchanged.
+    /// </summary>
     public bool CheckForUpdates { get; init; } = true;
     public string? PythonExecutable { get; init; }
     public string? ParsersDirectory { get; init; }

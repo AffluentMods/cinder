@@ -34,5 +34,6 @@
     <Project Path="tests/Cinder.Imaging.Tests/Cinder.Imaging.Tests.csproj" />
     <Project Path="tests/Cinder.Libs.Tests/Cinder.Libs.Tests.csproj" />
     <Project Path="tests/Cinder.Native.Tests/Cinder.Native.Tests.csproj" />
+    <Project Path="tests/Cinder.Sidecar.Tests/Cinder.Sidecar.Tests.csproj" />
   </Folder>
 </Solution>

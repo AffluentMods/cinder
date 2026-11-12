@@ -219,7 +219,7 @@ public static class Vol3Runner
 
     private static string ResolvePython()
     {
-        // PythonBootstrap puts the per-user venv here; fall back to PATH otherwise.
+        // A per-user virtual environment, if one exists, lives here; fall back to PATH otherwise.
         var venv = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Cinder", "venv");
         var local = OperatingSystem.IsWindows()
             ? Path.Combine(venv, "Scripts", "python.exe")

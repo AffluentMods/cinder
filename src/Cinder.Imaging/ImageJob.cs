@@ -1,6 +1,14 @@
 namespace Cinder.Imaging;
 
-/// <summary>Configuration for a disk-imaging job. Passed to the imager sidecar verbatim.</summary>
+/// <summary>
+/// Configuration for a disk-imaging job. Passed to the imager sidecar verbatim.
+///
+/// <para><c>Overwrite</c> is false by default: the in-process imager then refuses to start,
+/// with <see cref="OutputExistsException"/>, when the output already exists — the image itself,
+/// its <c>.partial</c> working file, or for E01 any segment of the target chain — and touches
+/// nothing. True replaces the existing image; for E01 the segments of the old image that the new
+/// one does not reuse are removed when the new image is complete.</para>
+/// </summary>
 public sealed record ImageJob(
     string SourceDevice,
     string OutputPath,
@@ -17,7 +25,8 @@ public sealed record ImageJob(
     bool ComputeSha256 = true,
     bool ComputeBlake3 = false,
     bool ReadErrorRetry = true,
-    int ReadErrorRetries = 2);
+    int ReadErrorRetries = 2,
+    bool Overwrite = false);
 
 public sealed record ImageJobProgress(
     long BytesRead,

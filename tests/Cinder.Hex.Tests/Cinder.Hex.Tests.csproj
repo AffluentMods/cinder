@@ -9,6 +9,11 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="coverlet.collector" />
+    <!-- Hosts the real HexViewer control without a display, for input and layout tests. -->
+    <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="Avalonia.Headless.XUnit" />
+    <!-- A Window needs a theme to get a template, and so to host any content at all. -->
+    <PackageReference Include="Avalonia.Themes.Fluent" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cinder.Hex\Cinder.Hex.csproj" />

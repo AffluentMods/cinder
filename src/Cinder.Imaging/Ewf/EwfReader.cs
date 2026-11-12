@@ -71,12 +71,23 @@ public sealed class EwfReader : IDisposable
     /// </summary>
     private const int MaxHeaderAttempts = 8;
 
+    /// <summary>Length of an E01 <c>volume</c> / <c>data</c> section payload.</summary>
+    private const int GeometrySectionLength = 1052;
+
+    /// <summary>Offset of the 16-byte set identifier within that payload.</summary>
+    private const int SetIdentifierOffset = 64;
+
     /// <summary>Largest chunk geometry we will accept (sectors-per-chunk × bytes-per-sector).</summary>
     private const int MaxChunkSizeBytes = 64 * 1024 * 1024;
 
     private readonly List<Stream> _segments;
     private readonly bool _ownsStreams;
     private readonly List<int> _damagedChunks = [];
+    private readonly List<string> _ignoredSegments = [];
+    private byte[]? _setIdentifier;
+
+    /// <summary>How a segment's section chain ended, or why the segment was not taken.</summary>
+    private enum SegmentEnd { Continues, Done, Foreign }
 
     public string? CaseDescription { get; private set; }
     public string? AcquisitionDate { get; private set; }
@@ -89,6 +100,22 @@ public sealed class EwfReader : IDisposable
     public string? RecordedMd5 { get; private set; }
     public string? RecordedSha1 { get; private set; }
     public int SegmentCount => _segments.Count;
+
+    /// <summary>
+    /// Segment files that sit where the chain's next segments would be but are not part of this
+    /// image, each with the reason: the image had already ended (its last segment closed with
+    /// <c>done</c>), the file's header carries the wrong segment number, or its set identifier
+    /// is another acquisition's. They are left unread — typically the tail of an older, longer
+    /// image that was written to the same base name. Empty for a clean chain.
+    /// </summary>
+    public IReadOnlyList<string> IgnoredSegments => _ignoredSegments;
+
+    /// <summary>
+    /// True when the last segment read closes the image with a <c>done</c> section. False means
+    /// the chain stops at a segment that expected a successor: one or more segments are
+    /// missing, and reads past the chunks that are present will fail.
+    /// </summary>
+    public bool EndsWithDone { get; private set; }
 
     /// <summary>
     /// Chunks that failed to decompress and were zero-filled, in the order they were first
@@ -222,10 +249,38 @@ public sealed class EwfReader : IDisposable
         var globalChunkSeg = new List<int>();
         var globalChunkOff = new List<long>();
 
+        // Segment files are found by name, and a name proves nothing: the files after the
+        // real last segment may be left over from an earlier image. The chain therefore ends
+        // where the format says it ends (`done`), and a file that identifies itself as some
+        // other segment, or as part of another acquisition, is not stitched on.
+        var accepted = 0;
+        string? stopReason = null;
         for (int segIx = 0; segIx < _segments.Count; segIx++)
         {
-            ParseSegment(segIx, globalChunkSeg, globalChunkOff);
+            var end = ParseSegment(segIx, globalChunkSeg, globalChunkOff, out var foreignReason);
+            if (end == SegmentEnd.Foreign)
+            {
+                stopReason = foreignReason;
+                break;
+            }
+            accepted++;
+            if (end == SegmentEnd.Done)
+            {
+                EndsWithDone = true;
+                stopReason = "the image ends at the segment before it";
+                break;
+            }
         }
+        for (int i = accepted; i < _segments.Count; i++)
+        {
+            var name = (_segments[i] as FileStream)?.Name ?? $"segment #{i + 1}";
+            _ignoredSegments.Add($"{name}: {(i == accepted ? stopReason : "it follows a segment that was not accepted")}");
+            if (_ownsStreams)
+            {
+                try { _segments[i].Dispose(); } catch { }
+            }
+        }
+        _segments.RemoveRange(accepted, _segments.Count - accepted);
 
         if (BytesPerSector == 0)
         {
@@ -240,8 +295,9 @@ public sealed class EwfReader : IDisposable
         ChunkOffsets = [.. globalChunkOff];
     }
 
-    private void ParseSegment(int segIx, List<int> globalChunkSeg, List<long> globalChunkOff)
+    private SegmentEnd ParseSegment(int segIx, List<int> globalChunkSeg, List<long> globalChunkOff, out string? foreignReason)
     {
+        foreignReason = null;
         var file = _segments[segIx];
         var fileLength = file.Length;
 
@@ -252,6 +308,19 @@ public sealed class EwfReader : IDisposable
             throw new InvalidDataException(
                 $"EWF: bad magic in segment #{segIx} (expected EVF prefix).");
         }
+
+        // The header numbers the segment within its chain. A later file whose number is not
+        // the one its position calls for is some other segment that happens to carry the name.
+        var segmentNumber = BitConverter.ToUInt16(header, 9);
+        if (segIx > 0 && segmentNumber != segIx + 1)
+        {
+            foreignReason = $"its header says it is segment {segmentNumber}, not segment {segIx + 1}";
+            return SegmentEnd.Foreign;
+        }
+
+        // Nothing a segment contributes is kept until the whole segment has been accepted.
+        var end = SegmentEnd.Continues;
+        string? segMd5 = null, segSha1 = null, segCaseDescription = null;
 
         long pos = SegmentHeaderLength;
         var segTables = new List<List<long>>();
@@ -287,6 +356,7 @@ public sealed class EwfReader : IDisposable
             // 76, and such a descriptor must not be mistaken for a malformed section.
             if (type is "done" or "next")
             {
+                end = type == "done" ? SegmentEnd.Done : SegmentEnd.Continues;
                 goto SegmentDone;
             }
 
@@ -300,18 +370,37 @@ public sealed class EwfReader : IDisposable
             {
                 case "header2":
                 case "header":
-                    if (CaseDescription is null && dataLen > 0 && headerAttempts < MaxHeaderAttempts)
+                    if (CaseDescription is null && segCaseDescription is null && dataLen > 0 && headerAttempts < MaxHeaderAttempts)
                     {
                         headerAttempts++;
                         var raw = ReadAt(file, dataStart, (int)dataLen);
-                        try { CaseDescription = DecompressString(raw, type == "header2"); }
+                        try { segCaseDescription = DecompressString(raw, type == "header2"); }
                         catch { /* tolerate a broken header — it is metadata, not evidence */ }
                     }
                     break;
 
                 case "disk":
                 case "volume":
-                    if (BytesPerSector == 0 && dataLen >= 32)
+                case "data":
+                    // `data` opens every later segment with a copy of the volume section, set
+                    // identifier included — the GUID one acquisition stamps on all its segments.
+                    if (dataLen >= GeometrySectionLength)
+                    {
+                        var id = ReadAt(file, dataStart + SetIdentifierOffset, 16);
+                        if (id.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
+                        {
+                            if (_setIdentifier is null)
+                            {
+                                _setIdentifier = id;
+                            }
+                            else if (segIx > 0 && !id.AsSpan().SequenceEqual(_setIdentifier))
+                            {
+                                foreignReason = $"its set identifier {new Guid(id)} is not this image's {new Guid(_setIdentifier)}";
+                                return SegmentEnd.Foreign;
+                            }
+                        }
+                    }
+                    if (type != "data" && BytesPerSector == 0 && dataLen >= 32)
                     {
                         ParseVolume(ReadAt(file, dataStart, 32), segIx);
                     }
@@ -328,7 +417,7 @@ public sealed class EwfReader : IDisposable
                 case "hash":
                     if (dataLen >= 16)
                     {
-                        RecordedMd5 ??= HexUnlessZero(ReadAt(file, dataStart, 16));
+                        segMd5 ??= HexUnlessZero(ReadAt(file, dataStart, 16));
                     }
                     break;
 
@@ -336,8 +425,8 @@ public sealed class EwfReader : IDisposable
                     if (dataLen >= 36)
                     {
                         var h = ReadAt(file, dataStart, 36);
-                        RecordedMd5 ??= HexUnlessZero(h.AsSpan(0, 16));
-                        RecordedSha1 ??= HexUnlessZero(h.AsSpan(16, 20));
+                        segMd5 ??= HexUnlessZero(h.AsSpan(0, 16));
+                        segSha1 ??= HexUnlessZero(h.AsSpan(16, 20));
                     }
                     break;
             }
@@ -357,6 +446,10 @@ public sealed class EwfReader : IDisposable
         }
 
     SegmentDone:
+        CaseDescription ??= segCaseDescription;
+        RecordedMd5 ??= segMd5;
+        RecordedSha1 ??= segSha1;
+
         for (int t = 0; t < segTables.Count; t++)
         {
             var entries = segTables[t];
@@ -388,6 +481,7 @@ public sealed class EwfReader : IDisposable
                 globalChunkOff.Add(encoded);
             }
         }
+        return end;
     }
 
     /// <summary>

@@ -298,6 +298,7 @@ public sealed class FileCarver
             var source = new CarveSource(window, raw.ObjectStart, inWindow, seekable ? input : null, origin + relative, available, limit)
             {
                 Budget = budget,
+                CancellationToken = ct,
             };
             const string OutOfBudget = "not examined: this part of the source is dense with headers that lead nowhere, and the scan allowance for it is spent";
 

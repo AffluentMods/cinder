@@ -64,8 +64,8 @@ public sealed class ReportExporter
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw new InvalidOperationException(
-                $"PDF/A generation failed ({ex.Message}). No PDF/A-capable fallback exists; export as " +
-                "plain PDF instead if an archival file is not required.", ex);
+                $"The PDF could not be written ({ex.Message}). Cinder writes archival PDF/A and does not " +
+                "fall back to an ordinary PDF; export as Word or HTML instead, or fix the cause and try again.", ex);
         }
     }
 

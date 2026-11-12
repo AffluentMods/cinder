@@ -347,7 +347,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
         var x = 6.0;
 
         // Offset column
-        var offsetText = rowOffset.ToString("X" + OffsetColumnChars, CultureInfo.InvariantCulture);
+        var offsetText = FormatRowOffset(rowOffset);
         DrawText(context, offsetText, new Point(x, y), BrushOffset);
         x += OffsetColumnChars * _glyphAdvance + 12;
 
@@ -355,7 +355,6 @@ public sealed class HexViewer : Control, ILogicalScrollable
         DrawRowHighlights(context, rowOffset, bytesPerRow, x, y);
 
         var hexX = x;
-        var asciiX = TextColumnX;
 
         for (int i = 0; i < bytesPerRow; i++)
         {
@@ -368,7 +367,7 @@ public sealed class HexViewer : Control, ILogicalScrollable
             var isCaret = byteOffset == CaretOffset;
             var isHover = byteOffset == _hoverOffset && !isCaret;
             var hxPos = HexByteX(hexX, i);
-            var acPos = asciiX + i * _glyphAdvance;
+            var acPos = TextCellX(i);
 
             // Cell backgrounds: caret is an accent chip; hover is a faint wash across both panes.
             if (isCaret)
@@ -407,6 +406,43 @@ public sealed class HexViewer : Control, ILogicalScrollable
                 DrawText(context, c.ToString(), new Point(acPos, y), textBrush);
             }
         }
+    }
+
+    /// <summary>The gutter text for a row: 8 hex digits, or 16 once the buffer is larger than 4 GiB.</summary>
+    internal string FormatRowOffset(long rowOffset) => rowOffset.ToString("X" + OffsetColumnChars, CultureInfo.InvariantCulture);
+
+    /// <summary>X of text-pane cell <paramref name="column"/>; the one place both drawing and tests take it from.</summary>
+    private double TextCellX(int column) => TextColumnX + column * _glyphAdvance;
+
+    /// <summary>
+    /// Where the renderer draws the cell for the byte at <paramref name="offset"/> — its hex
+    /// digits, or its glyph in the text pane — in control coordinates. Null when that byte is
+    /// not on a row currently in view. Built from the same column functions as
+    /// <see cref="DrawRow"/>, so a test can aim the pointer at what is actually on screen.
+    /// </summary>
+    internal Rect? GetCellBounds(long offset, bool textPane)
+    {
+        MeasureGlyph();
+        var bytesPerRow = BytesPerRow;
+        if (Buffer is not { } buffer || bytesPerRow <= 0 || _rowHeight <= 0 || _glyphAdvance <= 0)
+        {
+            return null;
+        }
+        var scrollOffset = Math.Max(0, ScrollOffset);
+        if (offset < scrollOffset || offset >= buffer.Length)
+        {
+            return null;
+        }
+        var row = (offset - scrollOffset) / bytesPerRow;
+        var column = (int)((offset - scrollOffset) % bytesPerRow);
+        var y = HeaderHeight + row * _rowHeight;
+        if (y + _rowHeight > Bounds.Height)
+        {
+            return null;
+        }
+        return textPane
+            ? new Rect(TextCellX(column), y, _glyphAdvance, _rowHeight)
+            : new Rect(HexByteX(HexColumnX, column), y, 2 * _glyphAdvance, _rowHeight);
     }
 
     private double HexColumnX => 6.0 + OffsetColumnChars * _glyphAdvance + 12;

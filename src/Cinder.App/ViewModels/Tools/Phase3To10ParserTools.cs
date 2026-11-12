@@ -71,7 +71,7 @@ public sealed partial class FilesystemTool
     /// </summary>
     private static (List<object> Rows, bool Truncated) Parse(string path, CinderSettings settings, CancellationToken ct)
     {
-        var rows = new List<object>();
+        var cells = new List<FsCells>();
         var ext = Path.GetExtension(path).ToLowerInvariant();
 
         // Hash-set lookup is opt-in: it reads every file on the volume.
@@ -110,10 +110,11 @@ public sealed partial class FilesystemTool
                 // The hashes below are what the container records about itself — an assertion
                 // by whatever wrote the image, not a verification of it. Labelled so nobody
                 // reads the row as a checked result; Image verify re-hashes and compares.
-                rows.Add(MetadataRow("[EWF metadata]", "E01", ewf.MediaSize, ewf.AcquisitionDate ?? "",
-                    $"EWF media_size={ewf.MediaSize:N0} bytes · sectors={ewf.NumberOfSectors:N0} · " +
-                    $"segments={ewf.SegmentCount} · recorded (UNVERIFIED) MD5={ewf.RecordedMd5 ?? "none"} · " +
-                    $"SHA1={ewf.RecordedSha1 ?? "none"} — run Image verify to check them"));
+                cells.Add(NoteCells("[image details]",
+                    $"E01 image of {ewf.MediaSize:N0} bytes ({ewf.NumberOfSectors:N0} sectors) in {ewf.SegmentCount} segment file{(ewf.SegmentCount == 1 ? "" : "s")}" +
+                    (string.IsNullOrWhiteSpace(ewf.AcquisitionDate) ? ". " : $", acquired {ewf.AcquisitionDate}. ") +
+                    $"Recorded in the image and NOT yet checked: MD5 {ewf.RecordedMd5 ?? "none"}, SHA-1 {ewf.RecordedSha1 ?? "none"}. " +
+                    "Run Image verify to check them."));
                 result = DiscUtilsWalker.Walk(ewfStream, options, ct);
             }
             else if (ext is ".vhd" or ".vhdx")
@@ -139,25 +140,27 @@ public sealed partial class FilesystemTool
 
             foreach (var e in result.Entries)
             {
-                rows.Add(ToRow(e, options.HashFiles));
+                cells.Add(ToCells(e, options.HashFiles));
             }
 
             if (result.DeletedRecoveryError is { } err)
             {
-                rows.Add(MetadataRow("[deleted]", "(unavailable)", 0, "", $"Deleted-entry recovery failed: {err}"));
+                cells.Add(NoteCells("[deleted entries]", $"Could not list deleted entries: {err}"));
             }
             if (result.DeletedTruncated)
             {
-                rows.Add(MetadataRow("[deleted]", "…", 0, "", "Deleted-entry listing cut short — the volume has more not-in-use MFT records."));
+                cells.Add(NoteCells("[deleted entries]", "The list of deleted entries was cut short: the volume has more unused file records than Cinder lists."));
             }
             if (options.HashFiles)
             {
-                rows.Add(MetadataRow("[hashing]", "summary", result.HashedBytes, "",
-                    $"Hashed {result.HashedFiles:N0} files ({result.HashedBytes:N0} bytes), skipped {result.HashSkipped:N0}" +
-                    (hashSets is null ? " · no hash-set database configured, so verdicts are absent" : $" · verdicts from {Path.GetFileName(settings.HashSetDatabase)}")));
+                cells.Add(NoteCells("[hashing]",
+                    $"Hashed {result.HashedFiles:N0} files ({result.HashedBytes:N0} bytes) and skipped {result.HashSkipped:N0}. " +
+                    (hashSets is null
+                        ? "No hash-set database is chosen in Settings, so files have a SHA-1 but no verdict."
+                        : $"Verdicts come from {Path.GetFileName(settings.HashSetDatabase)}.")));
             }
 
-            return (rows, result.Truncated || result.DeletedTruncated);
+            return (BuildRows(cells, options.HashFiles), result.Truncated || result.DeletedTruncated);
         }
         finally
         {
@@ -165,58 +168,118 @@ public sealed partial class FilesystemTool
         }
     }
 
-    private static object ToRow(FileEntry e, bool hashed)
+    /// <summary>
+    /// Everything one row can show. A cell that is not known is null or empty, never a
+    /// placeholder number: a column of zeros in an evidence table reads as data.
+    /// </summary>
+    internal readonly record struct FsCells(
+        long? Inode, string Path, string Name, string Kind, long? Size, string Deleted,
+        string Verdict, string Sha1, string Modified, string Created, string Accessed, string Note);
+
+    /// <summary>What the Kind column says for a row that is a remark about the image or the run, not an entry in it.</summary>
+    internal const string KindNote = "Note";
+
+    /// <summary>A row that carries a remark (image details, a hashing summary) rather than a file or folder.</summary>
+    internal static FsCells NoteCells(string label, string note) =>
+        new(null, label, "", KindNote, null, "", "", "", "", "", "", note);
+
+    /// <summary>
+    /// The record number of an entry, when it is known: the MFT record number on NTFS, the inode
+    /// number on ext. The walker reports 0 for a live entry it has no number for, and 0 is not
+    /// shown as if it were one. A deleted NTFS entry always has its record number, because
+    /// that is where it was found.
+    /// </summary>
+    internal static long? KnownInode(FileEntry e)
+    {
+        long? inode = e.Inode;
+        if (inode is not { } n)
+        {
+            return null;
+        }
+        // Record 0 is real on NTFS (it is $MFT itself), so it is shown when the entry carries
+        // the rest of an MFT reference; a bare 0 on a live entry means "not supplied".
+        var hasReference = e.Extras is not null && e.Extras.ContainsKey("mft_sequence");
+        return e.IsDeleted || n != 0 || hasReference ? n : null;
+    }
+
+    internal static FsCells ToCells(FileEntry e, bool hashed)
     {
         var x = e.Extras;
         string Get(string k) => x is not null && x.TryGetValue(k, out var v) ? v : "";
 
-        var note = e.IsDeleted ? Get("note") : Get("attributes");
+        var notes = new List<string>(4);
         if (hashed)
         {
-            var skipped = Get("hash_skipped");
-            if (skipped.Length > 0) note = $"hash skipped: {skipped} · {note}";
             var set = Get("hash_set");
-            if (set.Length > 0) note = $"{Get("verdict")} in {set}{(Get("hash_label").Length > 0 ? " (" + Get("hash_label") + ")" : "")} · {note}";
+            if (set.Length > 0)
+            {
+                notes.Add($"{Get("verdict")} in {set}{(Get("hash_label").Length > 0 ? " (" + Get("hash_label") + ")" : "")}");
+            }
+            var skipped = Get("hash_skipped");
+            if (skipped.Length > 0)
+            {
+                notes.Add($"hash skipped: {skipped}");
+            }
+        }
+        if (Get(DiscUtilsWalker.NotDescendedKey) is { Length: > 0 } notDescended)
+        {
+            // The folder is listed but its contents are not. Without this the folder looks empty.
+            notes.Add($"contents not listed: {notDescended}");
+        }
+        if (e.TimesAreLocalWallClock)
+        {
+            // FAT stores the device's clock with no zone. Printing it with "Z" would claim UTC.
+            notes.Add("times are the device's local clock; time zone not recorded");
+        }
+        var own = e.IsDeleted ? Get("note") : Get("attributes");
+        if (own.Length > 0)
+        {
+            notes.Add(own);
         }
 
-        // One row shape for every row. The DataGrid derives its columns from the first item,
-        // and the EWF metadata row comes first — a second shape would hide Verdict / Sha1.
         var verdict = e.IsDirectory || e.IsDeleted || !hashed
             ? ""
             : Get("verdict").Length > 0 ? Get("verdict") : (Get("sha1").Length > 0 ? "Unknown" : "");
 
-        if (e.TimesAreLocalWallClock)
-        {
-            // FAT stores the device's clock with no zone. Printing it with "Z" would claim UTC.
-            const string basis = "times are the device's local clock; time zone not recorded";
-            note = note.Length > 0 ? $"{basis} · {note}" : basis;
-        }
-        return Row(e.Inode, e.Path, e.Name, e.Size, e.IsDirectory, e.IsDeleted, verdict, Get("sha1"),
-                   Fmt(e.ModifiedUtc, e.TimesAreLocalWallClock), Fmt(e.CreatedUtc, e.TimesAreLocalWallClock),
-                   Fmt(e.AccessedUtc, e.TimesAreLocalWallClock), e.Owner ?? "", note);
+        return new FsCells(
+            KnownInode(e),
+            e.Path,
+            e.Name,
+            e.IsDirectory ? "Folder" : "File",
+            // A folder has no size of its own; 0 would read as a measurement.
+            e.IsDirectory ? null : e.Size,
+            e.IsDeleted ? "deleted" : "",
+            verdict,
+            Get("sha1"),
+            Fmt(e.ModifiedUtc, e.TimesAreLocalWallClock),
+            Fmt(e.CreatedUtc, e.TimesAreLocalWallClock),
+            Fmt(e.AccessedUtc, e.TimesAreLocalWallClock),
+            string.Join(" · ", notes));
     }
 
-    private static object MetadataRow(string path, string name, long size, string modified, string note)
-        => Row(0L, path, name, size, true, false, "", "", modified, "", "", "", note);
-
-    private static object Row(long inode, string path, string name, long size, bool isDir, bool isDeleted,
-                              string verdict, string sha1, string modified, string created, string accessed,
-                              string owner, string note) => new
-                              {
-                                  Inode = inode,
-                                  Path = path,
-                                  Name = name,
-                                  Size = size,
-                                  IsDirectory = isDir,
-                                  IsDeleted = isDeleted,
-                                  Verdict = verdict,
-                                  Sha1 = sha1,
-                                  Modified = modified,
-                                  Created = created,
-                                  Accessed = accessed,
-                                  Owner = owner,
-                                  Note = note,
-                              };
+    /// <summary>
+    /// Turns cells into grid rows, leaving out the columns that would be empty on every row for
+    /// a reason the examiner cannot see: Inode when the filesystem supplied none (FAT and
+    /// ISO 9660 have no such number), and Verdict and Sha1 when files were not hashed. Every row
+    /// of one result has the same columns, which the grid and the export both rely on.
+    /// </summary>
+    internal static List<object> BuildRows(IReadOnlyList<FsCells> cells, bool hashed)
+    {
+        var withInode = cells.Any(c => c.Inode is not null);
+        Func<FsCells, object> shape = (withInode, hashed) switch
+        {
+            (true, true) => c => new { c.Inode, c.Path, c.Name, c.Kind, c.Size, c.Deleted, c.Verdict, c.Sha1, c.Modified, c.Created, c.Accessed, c.Note },
+            (true, false) => c => new { c.Inode, c.Path, c.Name, c.Kind, c.Size, c.Deleted, c.Modified, c.Created, c.Accessed, c.Note },
+            (false, true) => c => new { c.Path, c.Name, c.Kind, c.Size, c.Deleted, c.Verdict, c.Sha1, c.Modified, c.Created, c.Accessed, c.Note },
+            (false, false) => c => new { c.Path, c.Name, c.Kind, c.Size, c.Deleted, c.Modified, c.Created, c.Accessed, c.Note },
+        };
+        var rows = new List<object>(cells.Count);
+        foreach (var c in cells)
+        {
+            rows.Add(shape(c));
+        }
+        return rows;
+    }
 
     private static string Fmt(DateTimeOffset? t, bool localWallClock = false) =>
         t is not { } v ? ""
@@ -392,8 +455,23 @@ public sealed partial class SrumTool
     private const string AppResourceTable = "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA89}";
     private const string EnergyEstTable = "{FEE4E14F-02A9-4550-B5CE-5FA2DA202E37}";
 
+    /// <summary>
+    /// SRUDB.dat is read with the database engine that ships with Windows. On Linux and macOS
+    /// the library fails with a missing-DLL message; this says what is actually going on.
+    /// </summary>
+    internal const string NeedsWindows =
+        "SRUM can only be read when Cinder runs on Windows, because SRUDB.dat is opened with the database engine built into Windows. " +
+        "Copy the file to a Windows computer and open it there.";
+
+    /// <summary>The message to show instead of parsing, or null when SRUM can be read here.</summary>
+    internal static string? PlatformProblem(bool onWindows) => onWindows ? null : NeedsWindows;
+
     private static ParseResult Parse(string path, CancellationToken ct)
     {
+        if (PlatformProblem(OperatingSystem.IsWindows()) is { } platform)
+        {
+            throw new PlatformNotSupportedException(platform);
+        }
         var rows = new List<object>();
         var truncated = false;
         var problems = new List<string>();
@@ -428,7 +506,11 @@ public sealed partial class SrumTool
                 Table = "app",
                 User = ResolveId(cur, idMap, "UserId"),
                 App = ResolveId(cur, idMap, "AppId"),
-                Value = $"cpu_fg={TryGetLong(cur, "CpuForeground") ?? 0} ms · cpu_bg={TryGetLong(cur, "CpuBackground") ?? 0} ms · face_time={TryGetLong(cur, "FaceTime") ?? 0} ms",
+                // ForegroundCycleTime / BackgroundCycleTime are processor cycles, not a duration.
+                Value = string.Create(CultureInfo.InvariantCulture,
+                    $"foreground processor cycles {TryGetLong(cur, "ForegroundCycleTime") ?? TryGetLong(cur, "CpuForeground") ?? 0:N0} · " +
+                    $"background processor cycles {TryGetLong(cur, "BackgroundCycleTime") ?? TryGetLong(cur, "CpuBackground") ?? 0:N0} · " +
+                    $"bytes read {TryGetLong(cur, "ForegroundBytesRead") ?? 0:N0} · bytes written {TryGetLong(cur, "ForegroundBytesWritten") ?? 0:N0}"),
             });
             truncated |= ReadTable(db, NetworkDataTable, "network data usage", rows, problems, ct, cur => new
             {
@@ -436,7 +518,7 @@ public sealed partial class SrumTool
                 Table = "net",
                 User = ResolveId(cur, idMap, "UserId"),
                 App = ResolveId(cur, idMap, "AppId"),
-                Value = string.Create(CultureInfo.InvariantCulture, $"sent={TryGetLong(cur, "BytesSent") ?? 0:N0} B · recv={TryGetLong(cur, "BytesRecvd") ?? 0:N0} B"),
+                Value = string.Create(CultureInfo.InvariantCulture, $"sent {TryGetLong(cur, "BytesSent") ?? 0:N0} bytes · received {TryGetLong(cur, "BytesRecvd") ?? 0:N0} bytes"),
             });
             truncated |= ReadTable(db, EnergyEstTable, "energy estimate", rows, problems, ct, cur => new
             {
@@ -444,15 +526,16 @@ public sealed partial class SrumTool
                 Table = "energy",
                 User = ResolveId(cur, idMap, "UserId"),
                 App = ResolveId(cur, idMap, "AppId"),
-                Value = $"designed_capacity={TryGetLong(cur, "DesignedCapacity") ?? 0}",
+                Value = string.Create(CultureInfo.InvariantCulture,
+                    $"battery designed capacity {TryGetLong(cur, "DesignedCapacity") ?? 0:N0} · full charge capacity {TryGetLong(cur, "FullChargedCapacity") ?? 0:N0}"),
             });
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var hint = ex.Message.Contains("dirty", StringComparison.OrdinalIgnoreCase)
                 ? " The database was copied from a running system without a clean shutdown. Repair a copy with esentutl /p, then open the repaired copy."
-                : !OperatingSystem.IsWindows() ? " SRUM uses the Windows database engine and can only be read on Windows." : "";
-            throw new InvalidOperationException($"{Path.GetFileName(path)} could not be opened as a SRUM database: {ex.Message}.{hint}", ex);
+                : "";
+            throw new InvalidOperationException($"{Path.GetFileName(path)} could not be opened as a SRUM database: {ex.Message.TrimEnd('.')}.{hint}", ex);
         }
         finally
         {
@@ -629,14 +712,68 @@ public sealed partial class NetworkTool
     protected override Task<ParseResult> ParseAsync(string evidencePath, CancellationToken ct) =>
         Task.Run(() => Parse(evidencePath, ct), ct);
 
+    /// <summary>
+    /// What to tell the examiner when the capture library is not on this computer. Reading a
+    /// capture file goes through the same library that captures live traffic: Npcap on Windows,
+    /// libpcap elsewhere. Without it the framework reports a DLL that could not be loaded.
+    /// </summary>
+    internal static string MissingLibraryMessage(bool onWindows) => onWindows
+        ? "Npcap is not installed; Cinder needs it to read packet captures. Install Npcap from npcap.com, then open the capture again."
+        : "libpcap is not installed; Cinder needs it to read packet captures. Install it with your package manager (the package is usually named libpcap), then open the capture again.";
+
+    /// <summary>
+    /// What to say when the file is not a capture. The library's own text is wrapped in its
+    /// internal terms ("unable to open offline adapter: …"); only the part after the last
+    /// colon, which names the actual problem, is kept.
+    /// </summary>
+    internal static string NotACaptureMessage(string fileName, string libraryMessage)
+    {
+        var detail = libraryMessage[(libraryMessage.LastIndexOf(':') + 1)..].Trim().TrimEnd('.');
+        return $"{fileName} is not a packet capture Cinder can read" +
+               (detail.Length > 0 ? $" ({detail})" : "") +
+               ". Network reads .pcap and .pcapng files.";
+    }
+
+    /// <summary>True when the failure, at any depth, is a native library that could not be loaded.</summary>
+    internal static bool IsMissingLibrary(Exception? ex)
+    {
+        for (; ex is not null; ex = ex.InnerException)
+        {
+            if (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// How a read that stopped before the end of the file is reported: as a result that was cut
+    /// short, with the number of packets read, never as a complete capture. Returns null when
+    /// the capture simply ended.
+    /// </summary>
+    internal static string? DescribeBrokenEnd(bool endedNormally, int packetsRead, string status) => endedNormally
+        ? null
+        : packetsRead == 0
+            ? $"No packets could be read: the first record is damaged or the file is not a complete capture ({status})."
+            : $"Showing the {packetsRead:N0} packets read before a damaged record ({status}). The capture is cut short or corrupt at that point, " +
+              "so later packets, if there are any, are not shown. Export and bookmarks cover only the packets shown.";
+
     private static ParseResult Parse(string path, CancellationToken ct)
     {
         var rows = new List<object>();
-        string? note = null;
+        string? brokenEnd = null;
         try
         {
             using var reader = new CaptureFileReaderDevice(path);
-            reader.Open(new DeviceConfiguration());
+            try
+            {
+                reader.Open(new DeviceConfiguration());
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && !IsMissingLibrary(ex))
+            {
+                throw new InvalidOperationException(NotACaptureMessage(Path.GetFileName(path), ex.Message), ex);
+            }
             int packetIndex = 0;
             while (true)
             {
@@ -648,11 +785,8 @@ public sealed partial class NetworkTool
                 {
                     // Anything that isn't a successful read ends the walk: an error status
                     // repeats indefinitely rather than advancing. But an error is not the end
-                    // of the capture, and the examiner is told which one happened.
-                    if (status != GetPacketStatus.NoRemainingPackets)
-                    {
-                        note = $"The capture could not be read past packet {packetIndex:N0} ({status}). It may be cut short or damaged; later packets are not shown.";
-                    }
+                    // of the capture, and the result is marked as cut short when it happens.
+                    brokenEnd = DescribeBrokenEnd(status == GetPacketStatus.NoRemainingPackets, packetIndex, status.ToString());
                     break;
                 }
                 packetIndex++;
@@ -691,13 +825,19 @@ public sealed partial class NetworkTool
             }
             reader.Close();
         }
-        catch (Exception ex) when (ex is DllNotFoundException or TypeInitializationException)
+        catch (Exception ex) when (IsMissingLibrary(ex))
         {
-            throw new InvalidOperationException(
-                "Reading packet captures needs the packet-capture library, which is not installed on this computer: " +
-                "Npcap on Windows (npcap.com), libpcap on Linux and macOS. Install it, then open the capture again.", ex);
+            throw new InvalidOperationException(MissingLibraryMessage(OperatingSystem.IsWindows()), ex);
         }
-        return ParseResult.WithBudget(rows, RowBudget, note);
+        if (brokenEnd is not null)
+        {
+            if (rows.Count == 0)
+            {
+                throw new InvalidOperationException(brokenEnd);
+            }
+            return new ParseResult(rows, Truncated: true, TruncationReason: brokenEnd);
+        }
+        return ParseResult.WithBudget(rows, RowBudget);
     }
 }
 

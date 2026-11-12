@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Cinder.App.Tests;
 
+[Collection(ShellNoticeCollection.Name)]
 public class SettingsStoreTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "cinder-settings-" + Guid.NewGuid().ToString("N"));

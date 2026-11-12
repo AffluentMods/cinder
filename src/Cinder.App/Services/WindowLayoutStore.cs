@@ -12,7 +12,8 @@ public sealed record WindowLayout(
     double RailWidth,
     double InspectorWidth,
     bool RailOpen,
-    bool InspectorOpen);
+    bool InspectorOpen,
+    IReadOnlyList<string>? ExpandedSections = null);
 
 /// <summary>
 /// Persists <see cref="WindowLayout"/> to <c>&lt;LocalAppData&gt;/Cinder/window.json</c>. Kept out of

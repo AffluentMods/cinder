@@ -295,7 +295,7 @@ public static class DiscUtilsWalker
 
     private static FileEntry LiveEntry(DiscFileSystemInfo e, string prefix, bool isDir, long size, Dictionary<string, string> extras)
         => new(
-            Inode: 0,
+            Inode: RecordNumberOf(e, extras),
             Path: string.IsNullOrEmpty(prefix) ? e.FullName : prefix + e.FullName,
             Name: e.Name,
             Size: size,
@@ -309,6 +309,36 @@ public static class DiscUtilsWalker
             Group: null,
             UnixMode: null,
             Extras: extras);
+
+    /// <summary>
+    /// The file's record number in its file system: the MFT record on NTFS (the low 48 bits of
+    /// the file reference; the high 16 are the sequence number, kept in <c>mft_sequence</c>),
+    /// the inode on ext. FAT and ISO 9660 have no such number, and 0 is returned for them.
+    /// Live entries used to be given 0 unconditionally, so the table showed a column of zeros
+    /// and a deleted file's record could not be compared with the live file that reused it.
+    /// </summary>
+    private static long RecordNumberOf(DiscFileSystemInfo e, Dictionary<string, string> extras)
+    {
+        try
+        {
+            switch (e.FileSystem)
+            {
+                case NtfsFileSystem ntfs:
+                    var reference = ntfs.GetFileId(e.FullName);
+                    extras["mft_sequence"] = ((reference >> 48) & 0xFFFF).ToString(CultureInfo.InvariantCulture);
+                    return reference & 0x0000_FFFF_FFFF_FFFF;
+                case IUnixFileSystem unix:
+                    return unix.GetUnixFileInfo(e.FullName).Inode;
+                default:
+                    return 0;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A damaged entry must not stop the listing; it simply has no number.
+            return 0;
+        }
+    }
 
     /// <summary>
     /// MD5 + SHA-1 in one read, with the size and total-bytes caps applied first. The verdict

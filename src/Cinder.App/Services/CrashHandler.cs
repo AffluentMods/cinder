@@ -203,31 +203,33 @@ public static class CrashHandler
     }
 
     /// <summary>
-    /// Last words for an exception that is ending the process: a message box on Windows, standard
-    /// error everywhere. <paramref name="interactive"/> is false for unattended runs (the
-    /// screenshot harness), which must never block on a dialog.
+    /// Last words for an exception that is ending the process. The text always goes to standard
+    /// error. On an interactive desktop it is also shown on screen — a system message box on
+    /// Windows, a separate dialog process on Linux and macOS (see <see cref="FatalErrorDialog"/>)
+    /// — because a window that simply vanishes tells the examiner nothing. Neither depends on
+    /// Cinder's own UI, which is what just failed. <paramref name="interactive"/> is false for
+    /// unattended runs (the screenshot harness), which must never block on, or pop up, a dialog.
     /// </summary>
     public static void ReportFatal(Exception ex, string? bundle, bool interactive)
     {
         try
         {
-            var text =
-                "Cinder has stopped because of an unexpected error and cannot safely continue." + Environment.NewLine +
-                Environment.NewLine +
-                Describe(ex) + Environment.NewLine +
-                Environment.NewLine +
-                (bundle is null
-                    ? "The details could not be written to disk."
-                    : "The details were saved to:" + Environment.NewLine + bundle) + Environment.NewLine +
-                Environment.NewLine +
-                "Case files and custody logs are written as you work and are not affected. Nothing has been sent anywhere.";
-
+            var text = FatalMessage(ex, bundle);
             Console.Error.WriteLine(text);
-            if (interactive && OperatingSystem.IsWindows() && Environment.UserInteractive)
+            if (!interactive || !Environment.UserInteractive)
+            {
+                return;
+            }
+
+            if (OperatingSystem.IsWindows())
             {
                 const uint IconError = 0x10;
                 const uint TaskModal = 0x2000;
                 _ = MessageBoxW(IntPtr.Zero, text, "Cinder", IconError | TaskModal);
+            }
+            else if (!FatalErrorDialog.TryShow("Cinder", text))
+            {
+                Console.Error.WriteLine("(No dialog could be shown; the message above is the only notice.)");
             }
         }
         catch
@@ -235,6 +237,18 @@ public static class CrashHandler
             // Reporting is best effort; the bundle and the log already hold the facts.
         }
     }
+
+    /// <summary>What happened, in one sentence, and where the details are. The same on every platform.</summary>
+    internal static string FatalMessage(Exception ex, string? bundle) =>
+        "Cinder has stopped because of an unexpected error and cannot safely continue." + Environment.NewLine +
+        Environment.NewLine +
+        Describe(ex) + Environment.NewLine +
+        Environment.NewLine +
+        (bundle is null
+            ? "The details could not be written to disk."
+            : "The details were saved to:" + Environment.NewLine + bundle) + Environment.NewLine +
+        Environment.NewLine +
+        "Case files and custody logs are written as you work and are not affected. Nothing has been sent anywhere.";
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]

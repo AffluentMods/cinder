@@ -223,8 +223,17 @@ public sealed record ParseResult(
     IReadOnlyList<object> Rows,
     bool Truncated = false,
     long? AvailableRows = null,
-    string? Note = null)
+    string? Note = null,
+    string? TruncationReason = null,
+    object? CustodyDetail = null)
 {
+    // CustodyDetail: anything about the run that weakens or qualifies its result and so
+    // belongs in the custody log beside the row count: files that could not be read, damaged
+    // chunks read as zeros.
+    // TruncationReason: the sentence for the cut-short banner when the usual one would be
+    // wrong. A capture that ends in a damaged record did not hit a row limit, and saying
+    // "Cinder loaded only part of it" would blame the wrong thing.
+
     /// <summary>
     /// Flags truncation when the parser produced its whole budget. Landing exactly on the cap
     /// means it stopped there rather than running out of input. (An artifact with exactly
@@ -463,14 +472,14 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
             var json = System.Text.Json.JsonSerializer.Serialize(values);
 
             var store = new Cinder.Core.Cases.BookmarkStore(new Cinder.Core.Cases.CaseStore(session.Path));
-            var bm = await store.AddAsync(session.Id, Environment.UserName, Id, EvidencePath, title, BookmarkNote, json, ct);
+            var bm = await store.AddAsync(session.Id, Environment.UserName, Id, CustodyEvidence, title, BookmarkNote, json, ct);
 
             await Services.ActiveCaseContext.LogAsync(custodyCase, Cinder.Core.Custody.CustodyAction.Annotation, new
             {
                 Kind = "bookmark",
                 BookmarkId = bm.Id,
                 Tool = Id,
-                Evidence = EvidencePath,
+                Evidence = CustodyEvidence,
                 Title = title,
                 Note = BookmarkNote,
             }, ct);
@@ -558,11 +567,38 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
     protected abstract Task<ParseResult> ParseAsync(string evidencePath, CancellationToken ct);
 
     /// <summary>
-    /// A second thing the run was pointed at, recorded in the custody log beside the evidence
-    /// path. The indicator tool scans a folder with a list: the list is the evidence path and
-    /// the folder is this.
+    /// The evidence this tool examined, as written to the custody log and stored on bookmarks.
+    /// For nearly every tool that is the picked path. The indicator tool is the exception: it
+    /// is given a list and scans a folder, and the folder is the evidence.
     /// </summary>
-    protected virtual string? CustodyTarget => null;
+    protected virtual string? CustodyEvidence => EvidencePath;
+
+    /// <summary>
+    /// Something the run was given that is not evidence, recorded beside it so the entry says
+    /// what the evidence was examined with. The indicator tool's list is one.
+    /// </summary>
+    protected virtual string? CustodyInput => null;
+
+    /// <summary>The custody entry for one run: what was examined, with what, and how much of it was shown.</summary>
+    internal object DescribeRunForCustody(int rows, bool truncated, object? detail = null) => new
+    {
+        Tool = Id,
+        Evidence = CustodyEvidence,
+        Input = CustodyInput,
+        Rows = rows,
+        Truncated = truncated,
+        Detail = detail,
+    };
+
+    /// <summary>The heading of the error banner when a run fails.</summary>
+    protected virtual string FailureTitle(string path) =>
+        Directory.Exists(path) ? "Could not read this folder" : "Could not read this file";
+
+    /// <summary>The status line after the examiner stops a run.</summary>
+    protected virtual string StoppedStatus => "Stopped. Nothing was loaded.";
+
+    /// <summary>The status line when a run fails; the banner carries the reason.</summary>
+    protected virtual string FailureStatus(string name) => $"Could not read {name}.";
 
     /// <summary>
     /// Empties the grid and the banners, and makes any run still in flight a superseded one.
@@ -632,6 +668,16 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
         {
             return;
         }
+        await ExportToAsync(path, ext, custodyCase, ct);
+    }
+
+    /// <summary>
+    /// Writes the rows the grid shows to <paramref name="path"/>. A failure here is a failure
+    /// to save a file, not to read evidence, and the banner heading says so: the rows on screen
+    /// are still good.
+    /// </summary>
+    internal async Task ExportToAsync(string path, string ext, CaseSession? custodyCase, CancellationToken ct)
+    {
         if (_errorIsFromExport)
         {
             ErrorMessage = null;
@@ -661,7 +707,8 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
                 Format = ext,
                 Path = path,
                 Rows = written,
-                Evidence = EvidencePath,
+                Evidence = CustodyEvidence,
+                Input = CustodyInput,
                 Truncated = IsTruncated,
             }, ct);
         }
@@ -753,7 +800,7 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
 
             if (result.Truncated)
             {
-                TruncationNotice = DescribeTruncation(rows.Count, result.AvailableRows);
+                TruncationNotice = result.TruncationReason ?? DescribeTruncation(rows.Count, result.AvailableRows);
                 StatusLine = result.Note ?? TruncationNotice;
             }
             else
@@ -763,29 +810,23 @@ public abstract partial class SidecarToolViewModel : ToolViewModel
 
             // Every parser run against evidence is an evidential act — it goes in the custody
             // log with what was parsed and how much of it the examiner actually saw.
-            await Services.ActiveCaseContext.LogAsync(custodyCase, Cinder.Core.Custody.CustodyAction.ParserRan, new
-            {
-                Tool = Id,
-                Evidence = path,
-                Target = CustodyTarget,
-                Rows = rows.Count,
-                Truncated = result.Truncated,
-            }, CancellationToken.None);
+            await Services.ActiveCaseContext.LogAsync(custodyCase, Cinder.Core.Custody.CustodyAction.ParserRan,
+                DescribeRunForCustody(rows.Count, result.Truncated, result.CustodyDetail), CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
             if (run == _runSerial)
             {
-                StatusLine = "Stopped. Nothing was loaded.";
+                StatusLine = StoppedStatus;
             }
         }
         catch (Exception ex)
         {
             if (run == _runSerial)
             {
-                ErrorTitle = Directory.Exists(path) ? "Could not read this folder" : "Could not read this file";
+                ErrorTitle = FailureTitle(path);
                 ErrorMessage = ex.Message;
-                StatusLine = $"Could not read {name}.";
+                StatusLine = FailureStatus(name);
             }
         }
         finally

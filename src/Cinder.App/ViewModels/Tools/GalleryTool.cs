@@ -83,7 +83,8 @@ public sealed partial class GalleryTool : ToolViewModel
         SelectedItem = null;
         try
         {
-            var (paths, more) = await Task.Run(() => FindImages(folder, MaxImages, ct), ct);
+            var skips = new FolderScan.Skips();
+            var (paths, more) = await Task.Run(() => FindImages(folder, MaxImages, ct, skips), ct);
 
             // Decoding is the slow part and runs on the thread pool, a few images at a time, so
             // the window stays responsive and thumbnails appear as they are ready.
@@ -99,7 +100,7 @@ public sealed partial class GalleryTool : ToolViewModel
                 }
                 StatusLine = $"Loading thumbnails… {Items.Count:N0} of {paths.Count:N0}";
             }
-            StatusLine = DescribeLoad(Items.Count, more);
+            StatusLine = DescribeLoad(Items.Count, more, skips.Folders);
         }
         catch (OperationCanceledException)
         {
@@ -117,13 +118,14 @@ public sealed partial class GalleryTool : ToolViewModel
 
     /// <summary>
     /// The first <paramref name="max"/> image files under <paramref name="folder"/>, and whether
-    /// there are more than that. Subfolders that cannot be opened are skipped, not fatal.
+    /// there are more than that. Hidden files are included. A subfolder that cannot be opened is
+    /// counted in <paramref name="skips"/> rather than ending the search.
     /// </summary>
-    internal static (List<string> Paths, bool More) FindImages(string folder, int max, CancellationToken ct)
+    internal static (List<string> Paths, bool More) FindImages(
+        string folder, int max, CancellationToken ct, FolderScan.Skips? skips = null)
     {
         var found = new List<string>();
-        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true };
-        foreach (var f in System.IO.Directory.EnumerateFiles(folder, "*", options))
+        foreach (var f in FolderScan.FilesUnder(folder, skips ?? new FolderScan.Skips(), ct))
         {
             ct.ThrowIfCancellationRequested();
             if (!Extensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
@@ -140,11 +142,15 @@ public sealed partial class GalleryTool : ToolViewModel
     }
 
     /// <summary>The status line after a load. When the cap was reached it says so, and what to do about it.</summary>
-    internal static string DescribeLoad(int shown, bool more) => more
-        ? $"Showing the first {shown:N0} images. This folder holds more than that; pick a subfolder to see the others."
-        : shown == 0
-            ? "No images were found in this folder or its subfolders."
-            : $"{shown:N0} image{(shown == 1 ? "" : "s")}.";
+    internal static string DescribeLoad(int shown, bool more, int skippedFolders = 0)
+    {
+        var text = more
+            ? $"Showing the first {shown:N0} images. This folder holds more than that; pick a subfolder to see the others."
+            : shown == 0
+                ? "No images were found in this folder or its subfolders."
+                : $"{shown:N0} image{(shown == 1 ? "" : "s")}.";
+        return FolderScan.SkippedNote(skippedFolders) is { } skipped ? $"{text} {skipped}" : text;
+    }
 
     private static GalleryItem MakeItem(string path)
     {

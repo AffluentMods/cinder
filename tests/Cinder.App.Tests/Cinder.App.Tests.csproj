@@ -11,6 +11,9 @@
     <PackageReference Include="coverlet.collector" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\fixtures\ntfs-walker-fixture.img.gz" Link="fixtures\ntfs-walker-fixture.img.gz" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Cinder.App\Cinder.App.csproj" />
   </ItemGroup>
 </Project>

@@ -298,7 +298,10 @@ def _acquire(reader: _SourceReader, write: Any) -> tuple[int, dict[str, Any]]:
         written += len(buf)
         _progress.bytes_read = written
         _progress.bad_sectors = reader.bad_sectors
-        report_progress(bytes_read=written, total_bytes=reader.total_bytes, bad_sectors=reader.bad_sectors)
+        # The client turns these into the caller's progress display (the worker is serial, so a
+        # `progress` request sent while this runs is only answered after it has finished).
+        report_progress(bytes_read=written, total_bytes=reader.total_bytes, bad_sectors=reader.bad_sectors,
+                        throughput=_progress.throughput, phase=_progress.phase)
     return written, hashers
 
 

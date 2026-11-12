@@ -124,10 +124,6 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
         // gets a group header. Examine (where almost every session starts) opens by default.
         RailSections = new ObservableCollection<ToolSection>(Sections.Where(s => s.Title != "Home"));
         SettingsEntry = Sections.SelectMany(s => s.Tools).First(t => t.Kind == "settings");
-        foreach (var s in RailSections)
-        {
-            s.IsExpanded = s.Title == "Examine";
-        }
         ApplyRailFilter();
 
         // Home / Dashboard is selected by default — beginners never land on a blank parser.
@@ -183,6 +179,11 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
             // Reveal the selection: a tool picked from the palette must not hide in a collapsed group.
             if (value is not null && s.Tools.Contains(value))
             {
+                // Home and Settings sit outside the groups, so they have nothing to open.
+                if (RailSections?.Contains(s) == true)
+                {
+                    _expanded.Add(s.Title);
+                }
                 s.IsExpanded = true;
             }
         }
@@ -192,6 +193,39 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
 
     /// <summary>The collapsible groups (Examine / Analyze / Acquire / Case).</summary>
     public ObservableCollection<ToolSection> RailSections { get; }
+
+    /// <summary>
+    /// The groups the examiner has open, by title. Kept apart from <see cref="ToolSection.IsExpanded"/>
+    /// because filtering opens every group to show its matches: without a separate record,
+    /// clearing the filter left everything open and the examiner's own arrangement was lost.
+    /// Examine (where almost every session starts) is open by default.
+    /// </summary>
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal) { "Examine" };
+
+    /// <summary>Titles of the open groups, for saving with the window layout.</summary>
+    public IReadOnlyCollection<string> ExpandedSections => _expanded;
+
+    /// <summary>Restores a saved arrangement. The group holding the selected tool always stays open.</summary>
+    public void RestoreExpandedSections(IEnumerable<string>? titles)
+    {
+        if (titles is null)
+        {
+            return;
+        }
+        _expanded.Clear();
+        foreach (var t in titles)
+        {
+            if (RailSections.Any(s => s.Title == t))
+            {
+                _expanded.Add(t);
+            }
+        }
+        if (SelectedTool is { } selected && RailSections.FirstOrDefault(s => s.Tools.Contains(selected)) is { } home)
+        {
+            _expanded.Add(home.Title);
+        }
+        ApplyRailFilter();
+    }
 
     /// <summary>Settings, pinned at the foot of the rail.</summary>
     public ToolViewModel SettingsEntry { get; }
@@ -211,10 +245,9 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
         foreach (var s in RailSections)
         {
             s.ApplyFilter(RailFilter);
-            if (filtering)
-            {
-                s.IsExpanded = true;
-            }
+            // While filtering every group shows its matches; afterwards the examiner's own
+            // arrangement comes back.
+            s.IsExpanded = filtering || _expanded.Contains(s.Title);
         }
         HasRailMatches = RailSections.Any(s => !s.IsEmpty);
     }
@@ -225,6 +258,14 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
         if (section is not null)
         {
             section.IsExpanded = !section.IsExpanded;
+            if (section.IsExpanded)
+            {
+                _expanded.Add(section.Title);
+            }
+            else
+            {
+                _expanded.Remove(section.Title);
+            }
         }
     }
 

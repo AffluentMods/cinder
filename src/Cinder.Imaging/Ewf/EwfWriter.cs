@@ -53,6 +53,20 @@ public sealed class EwfWriter : IDisposable
         /// a finished image. Null (the default) writes straight to the segment paths.
         /// </summary>
         public string? PartialSuffix { get; init; }
+
+        /// <summary>
+        /// False (the default): the writer refuses to start, with
+        /// <see cref="OutputExistsException"/>, if any file already sits at any segment name of
+        /// the target chain (<c>.E01</c> … <c>.EZZ</c>) or at its partial-suffixed name. An
+        /// existing image is never replaced by accident, and a new, shorter image can never be
+        /// left with the tail of an older one behind it.
+        ///
+        /// <para>True: existing segments are replaced, and when the image is finished any
+        /// higher-numbered segments still following it — the rest of the image that was
+        /// overwritten — are deleted and listed in <see cref="RemovedStaleSegments"/>, so that
+        /// no reader can stitch them onto the new image.</para>
+        /// </summary>
+        public bool Overwrite { get; init; }
     }
 
     private const int SegmentHeaderLength = 13;
@@ -98,6 +112,10 @@ public sealed class EwfWriter : IDisposable
         _chunkSize = checked((int)(_o.BytesPerSector * _o.SectorsPerChunk));
         _pending = new byte[_chunkSize];
         Directory.CreateDirectory(Path.GetDirectoryName(_firstPath)!);
+        if (!_o.Overwrite)
+        {
+            RefuseIfChainExists();
+        }
         OpenSegment();
     }
 
@@ -243,7 +261,75 @@ public sealed class EwfWriter : IDisposable
         {
             foreach (var path in _segmentPaths)
             {
-                File.Move(WorkPath(path), path, overwrite: true);
+                File.Move(WorkPath(path), path, overwrite: _o.Overwrite);
+            }
+        }
+
+        if (_o.Overwrite)
+        {
+            RemoveStaleTail();
+        }
+    }
+
+    /// <summary>
+    /// Segments of an earlier image that followed the last segment of this one and were deleted
+    /// when it finished. Only ever non-empty with <see cref="Options.Overwrite"/> set.
+    /// </summary>
+    public IReadOnlyList<string> RemovedStaleSegments => _removedStale;
+
+    private readonly List<string> _removedStale = [];
+
+    /// <summary>Every existing file at a segment name of the target chain, or at its partial name.</summary>
+    private void RefuseIfChainExists()
+    {
+        var existing = new List<string>();
+        for (int n = 1; n <= MaxSegments; n++)
+        {
+            var path = SegmentPath(_firstPath, n);
+            if (File.Exists(path))
+            {
+                existing.Add(path);
+            }
+            var work = WorkPath(path);
+            if (work != path && File.Exists(work))
+            {
+                existing.Add(work);
+            }
+        }
+        if (existing.Count > 0)
+        {
+            throw new OutputExistsException(
+                $"EWF: {existing.Count} file(s) already exist at segment names of {_firstPath} (first: {existing[0]}). " +
+                "Nothing was written. Choose another name, move the existing image away, or ask for it to be overwritten.",
+                existing);
+        }
+    }
+
+    /// <summary>
+    /// Deletes the run of segment files that directly follows this image's last segment. They
+    /// belonged to the image the caller asked to overwrite; left in place they would be found
+    /// by name and read as part of this one. The run stops at the first missing name, so files
+    /// beyond a gap — which no reader would attach to this chain — are not touched.
+    /// </summary>
+    private void RemoveStaleTail()
+    {
+        for (int n = _segmentNumber + 1; n <= MaxSegments; n++)
+        {
+            var path = SegmentPath(_firstPath, n);
+            var work = WorkPath(path);
+            var found = false;
+            foreach (var candidate in work == path ? new[] { path } : new[] { path, work })
+            {
+                if (File.Exists(candidate))
+                {
+                    File.Delete(candidate);
+                    _removedStale.Add(candidate);
+                    found = true;
+                }
+            }
+            if (!found)
+            {
+                break;
             }
         }
     }

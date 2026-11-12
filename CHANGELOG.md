@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The whole codebase was read for defects (imaging, core and file systems, the hex
 control, the tool view-models, the shell and services, the smaller libraries and
 the Python sidecar) and the confirmed ones were fixed, each with a regression
-test where the logic can be tested. The .NET suite went from 269 to 1,141
-tests; the Python sidecar from 2 to 163.
+test where the logic can be tested. The .NET suite went from 269 to 1,474
+tests across eight projects; the Python sidecar from 2 to 164.
 
 **Evidence integrity**
 
@@ -125,11 +125,52 @@ tests; the Python sidecar from 2 to 163.
   their headers; tool descriptions, empty states and help were rewritten for
   examiners and now describe only what the code does.
 
+**Second round: gaps the first round left**
+
+- **Imaging refuses to overwrite.** An existing image, any segment of an
+  existing E01 chain, or the `.partial` left by a failed run stops a new
+  acquisition unless "Replace an existing image" is ticked. The E01 reader
+  ignores later segment files that belong to a different image and says when
+  a chain is incomplete; Verify reports both.
+- **Find continues past 1,000 hits.** Results are paged: "next" on the last
+  listed hit fetches the following page instead of wrapping to the first, and
+  the count gains a "+" until the end of the file has been reached.
+- **Hex Viewer.** The data inspector decodes from the start of a selection
+  rather than its last byte. The toolbar adapts to the window width instead of
+  cutting a chip in half, and the find field grows when there is room. The
+  control itself is now tested headlessly (selection, clicks, scrolling,
+  empty and over-4-GiB buffers).
+- **Filesystem.** Live files show their real MFT record number (the walker
+  discarded it, leaving a column of zeros). Columns that carried nothing were
+  removed and `Kind` / `Deleted` replace the True / False pair.
+- **Damaged containers are called out.** YARA and IOC results say when chunks
+  of the source image read as zeros, so "no match" is not taken as "not
+  present".
+- **Custody.** A custody entry that could not be written is reported in the
+  status bar (once per failure burst) instead of only in the log file.
+- **New commands.** "Hash a file…" and "Check for updates" in the command
+  palette. The update check runs only when asked; nothing calls out by itself.
+- **Mount** can unmount what it mounted. **Verify** can be stopped.
+- **Carver.** GIF and PDF are carved to their real end rather than the first
+  footer byte pattern.
+- **Tools.** IOC match logs the scanned folder as the evidence, clears stale
+  rows and can be stopped; Network says when Npcap / libpcap is missing; SRUM
+  and compressed Prefetch say they need Windows; folder walks no longer skip
+  hidden and system entries (which had hidden `$Recycle.Bin` contents) and
+  count subfolders they could not open.
+- **Sidebar.** Which groups are open is remembered with the window layout, and
+  clearing the filter restores the arrangement instead of leaving every group
+  open.
+- **Sidecar.** The C# wrappers use the paging, progress and error fields the
+  workers return, and the client has a test project (`Cinder.Sidecar.Tests`).
+- **Removed:** the unused crash-recovery and Python-bootstrap services. Cinder
+  never downloads or installs anything.
+
 **Changes that affect existing data**
 
 - Column renames in some parser tools (for example `KeyLastWrite`,
-  `VolumeSerial`, `Attachments`) change CSV headers and the keys in newly
-  stored bookmarks.
+  `VolumeSerial`, `Attachments`, and `Kind` / `Deleted` in Filesystem) change
+  CSV headers and the keys in newly stored bookmarks.
 - Plugins trusted through the old in-folder files must be trusted again.
 - Custody signatures made on another workstation show as "unknown key" until
   that examiner's public key is placed in the trusted-keys folder.

@@ -296,9 +296,10 @@ Advisories](https://github.com/AffluentMods/cinder/security/advisories/new) —
 ## Telemetry
 
 **None.** Cinder does not phone home. Ever. No analytics, no crash
-reporting that uploads to a server, no usage pings beyond a public
-GitHub API call (for update checks) that you can disable. Your evidence
-stays on your machine.
+reporting that uploads to a server, no usage pings, and no network call
+it makes by itself: the update check runs only when you choose "Check
+for updates" from the command palette. Your evidence stays on your
+machine.
 
 ## Contributing
 

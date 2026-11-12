@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Cinder.App.Tests;
 
+[Collection(ShellNoticeCollection.Name)]
 public class CrashPolicyTests
 {
     public static TheoryData<Exception> Operational => new()
@@ -114,6 +115,7 @@ public class CrashPolicyTests
     }
 }
 
+[Collection(ShellNoticeCollection.Name)]
 public class CaseCreationTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "cinder-cases-" + Guid.NewGuid().ToString("N"));

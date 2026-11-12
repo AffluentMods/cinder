@@ -65,7 +65,7 @@ public sealed partial class FindDialogViewModel : ViewModelBase
             {
                 0 => "No matches.",
                 1 => "1 match.",
-                >= 1000 => "1000+ matches (capped).",
+                >= 1000 => "More than 1,000 matches. The first 1,000 are listed; F3 in the Hex Viewer steps through the rest.",
                 var n => $"{n} matches.",
             };
             // The dialog lands on the first hit in the file (the inline find lands at the caret).

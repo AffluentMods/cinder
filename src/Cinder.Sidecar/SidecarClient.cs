@@ -33,7 +33,7 @@ namespace Cinder.Sidecar;
 /// the rights of this process. The sidecar is not a sandbox.
 /// </para>
 /// </summary>
-public sealed class SidecarClient : IAsyncDisposable
+public sealed class SidecarClient : ISidecarChannel
 {
     /// <summary>Inactivity timeout applied to calls that do not specify their own.</summary>
     public static readonly TimeSpan DefaultCallTimeout = TimeSpan.FromMinutes(10);
@@ -53,6 +53,7 @@ public sealed class SidecarClient : IAsyncDisposable
     private readonly Process _process;
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<long, TaskCompletionSource<Inbound>> _pending = new();
+    private readonly ConcurrentDictionary<long, IProgress<JsonObject>> _progressSinks = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly Queue<string> _stderrTail = new();
     private readonly Task _readLoop;
@@ -112,7 +113,31 @@ public sealed class SidecarClient : IAsyncDisposable
     /// nothing for <paramref name="timeout"/> while the call is pending. Pass
     /// <see cref="Timeout.InfiniteTimeSpan"/> to wait without limit.
     /// </summary>
-    public async Task<JsonNode?> InvokeAsync(string method, JsonNode? @params, TimeSpan timeout, CancellationToken ct = default)
+    public Task<JsonNode?> InvokeAsync(string method, JsonNode? @params, TimeSpan timeout, CancellationToken ct = default)
+        => InvokeCoreAsync(method, @params, null, timeout, ct);
+
+    /// <summary>
+    /// Invokes <paramref name="method"/> and hands every <c>$/progress</c> notification the
+    /// sidecar sends for this call to <paramref name="progress"/> (the notification's
+    /// <c>params</c> object: whatever fields the worker chose to report). A long job reports
+    /// about once a second; a job that reports nothing simply never calls it.
+    /// <para>
+    /// <paramref name="progress"/> is called on the client's read loop, so it must return
+    /// quickly and must not call back into this client synchronously. An exception it throws is
+    /// logged and otherwise ignored: progress is advisory and never fails the call.
+    /// </para>
+    /// </summary>
+    /// <param name="method">JSON-RPC method name.</param>
+    /// <param name="params">Request parameters.</param>
+    /// <param name="progress">Receives this call's progress notifications; null to ignore them.</param>
+    /// <param name="timeout">Inactivity timeout; this client's default when null.</param>
+    /// <param name="ct">Cancels this call only.</param>
+    public Task<JsonNode?> InvokeAsync(string method, JsonNode? @params, IProgress<JsonObject>? progress,
+        TimeSpan? timeout = null, CancellationToken ct = default)
+        => InvokeCoreAsync(method, @params, progress, timeout ?? _callTimeout, ct);
+
+    private async Task<JsonNode?> InvokeCoreAsync(string method, JsonNode? @params, IProgress<JsonObject>? progress,
+        TimeSpan timeout, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrEmpty(method);
         ValidateTimeout(timeout, nameof(timeout));
@@ -129,6 +154,10 @@ public sealed class SidecarClient : IAsyncDisposable
         {
             _pending.TryRemove(id, out _);
             throw new SidecarException(failure);
+        }
+        if (progress is not null)
+        {
+            _progressSinks[id] = progress;
         }
 
         var request = new JsonRpcRequest { Id = id, Method = method, Params = @params };
@@ -153,6 +182,7 @@ public sealed class SidecarClient : IAsyncDisposable
         finally
         {
             _pending.TryRemove(id, out _);
+            _progressSinks.TryRemove(id, out _);
             await watchdogCts.CancelAsync().ConfigureAwait(false);
             await watchdog.ConfigureAwait(false);
         }
@@ -297,7 +327,11 @@ public sealed class SidecarClient : IAsyncDisposable
                     continue;
                 }
 
-                if (!string.Equals(message.Method, ProgressMethod, StringComparison.Ordinal))
+                if (string.Equals(message.Method, ProgressMethod, StringComparison.Ordinal))
+                {
+                    DeliverProgress(message.Params);
+                }
+                else
                 {
                     _logger.LogDebug("Sidecar sent an unexpected message without an id: {Line}", Truncate(line));
                 }
@@ -424,6 +458,24 @@ public sealed class SidecarClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Routes a <c>$/progress</c> notification to the call it names in <c>params.id</c>.</summary>
+    private void DeliverProgress(JsonNode? @params)
+    {
+        if (@params is not JsonObject fields || SidecarJson.Int64(fields["id"]) is not { } id
+            || !_progressSinks.TryGetValue(id, out var sink))
+        {
+            return; // keep-alive only: nobody asked to see this call's progress
+        }
+        try
+        {
+            sink.Report(fields);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "A progress callback threw; ignored.");
+        }
+    }
+
     private void FailAllPending(string message)
     {
         foreach (var id in _pending.Keys)
@@ -503,5 +555,6 @@ public sealed class SidecarClient : IAsyncDisposable
         [JsonPropertyName("result")] public JsonNode? Result { get; init; }
         [JsonPropertyName("error")] public JsonRpcError? Error { get; init; }
         [JsonPropertyName("method")] public string? Method { get; init; }
+        [JsonPropertyName("params")] public JsonNode? Params { get; init; }
     }
 }

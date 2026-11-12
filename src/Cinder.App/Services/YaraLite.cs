@@ -67,10 +67,35 @@ public sealed class YaraLiteString
 /// <summary>One hit reported by the scanner.</summary>
 public sealed record YaraLiteMatch(string RuleName, string FilePath, long Offset, string MatchedString, string Identifier);
 
+/// <summary>
+/// What a scan learned about its source besides the matches. Pass one to
+/// <see cref="YaraLiteRuleset.ScanAsync(string, YaraLiteScanInfo, CancellationToken)"/>; it is
+/// kept up to date as the scan proceeds, so it is meaningful even if the caller stops early.
+/// </summary>
+public sealed class YaraLiteScanInfo
+{
+    /// <summary>Bytes of the source that were read and matched against.</summary>
+    public long BytesScanned { get; internal set; }
+
+    /// <summary>
+    /// Chunks of a forensic container (E01, AFF4) that could not be decoded and were therefore
+    /// read as zeros. When this is not zero, "no match" does not mean "not present": a pattern
+    /// that lay in a damaged chunk cannot have been found. Zero for plain files.
+    /// </summary>
+    public int DamagedChunks { get; internal set; }
+
+    /// <summary>
+    /// True when the scan read the source to its end. False when it stopped early — every
+    /// pattern had already been found, or the caller stopped enumerating — in which case
+    /// <see cref="DamagedChunks"/> covers only the part that was read.
+    /// </summary>
+    public bool ReachedEnd { get; internal set; }
+}
+
 /// <summary>The compiled rule set: one automaton for exact patterns, one for case-insensitive ones.</summary>
 public sealed class YaraLiteRuleset
 {
-    private const int DefaultBufferSize = 1 << 20;
+    internal const int DefaultBufferSize = 1 << 20;
 
     private sealed record PatternRef(int RuleIndex, YaraLiteString String);
 
@@ -173,10 +198,20 @@ public sealed class YaraLiteRuleset
     /// once that rule's condition is satisfied — a rule whose condition never becomes true
     /// reports nothing at all.
     /// </summary>
+    public IAsyncEnumerable<YaraLiteMatch> ScanAsync(string filePath, CancellationToken ct = default) =>
+        ScanAsync(filePath, new YaraLiteScanInfo(), ct);
+
+    /// <summary>
+    /// As <see cref="ScanAsync(string, CancellationToken)"/>, and also fills
+    /// <paramref name="info"/> — most importantly with the number of damaged container chunks,
+    /// without which an empty result over an E01 or AFF4 image cannot be read as a clean negative.
+    /// </summary>
     public async IAsyncEnumerable<YaraLiteMatch> ScanAsync(
         string filePath,
+        YaraLiteScanInfo info,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(info);
         if (_exact is null && _folded is null)
         {
             yield break;
@@ -184,7 +219,7 @@ public sealed class YaraLiteRuleset
 
         // Auto-detect .E01 chains so YARA can scan an EWF image directly without prior conversion.
         await using var fs = Cinder.Imaging.EvidenceOpener.Open(filePath);
-        await foreach (var match in ScanAsync(fs, filePath, DefaultBufferSize, ct).ConfigureAwait(false))
+        await foreach (var match in ScanAsync(fs, filePath, DefaultBufferSize, info, ct).ConfigureAwait(false))
         {
             yield return match;
         }
@@ -194,19 +229,30 @@ public sealed class YaraLiteRuleset
     /// Scan an already-open stream. Reading and matching both happen on the thread pool, one
     /// chunk at a time, so a caller on the UI thread stays responsive however large the input.
     /// </summary>
+    internal IAsyncEnumerable<YaraLiteMatch> ScanAsync(
+        Stream stream,
+        string filePath,
+        int bufferSize,
+        CancellationToken ct = default) =>
+        ScanAsync(stream, filePath, bufferSize, new YaraLiteScanInfo(), ct);
+
     internal async IAsyncEnumerable<YaraLiteMatch> ScanAsync(
         Stream stream,
         string filePath,
         int bufferSize,
+        YaraLiteScanInfo info,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(info);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bufferSize);
         if (_exact is null && _folded is null)
         {
             yield break;
         }
 
+        // A container stream reports the chunks it had to zero-fill; the list grows as we read.
+        var damage = stream as Cinder.Imaging.IEvidenceDamageSource;
         var session = new ScanSession(this, filePath);
         var buffer = new byte[bufferSize];
         var fresh = new List<YaraLiteMatch>();
@@ -220,7 +266,15 @@ public sealed class YaraLiteRuleset
                 if (n > 0)
                 {
                     session.Feed(buffer.AsSpan(0, n), fresh);
+                    info.BytesScanned += n;
                 }
+                else
+                {
+                    info.ReachedEnd = true;
+                }
+                // Updated before anything is yielded, so a caller that stops at the first
+                // match still sees the damage met on the way to it.
+                info.DamagedChunks = damage?.DamagedChunks.Count ?? 0;
                 return n;
             }, ct).ConfigureAwait(false);
 

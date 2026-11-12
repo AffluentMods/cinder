@@ -74,7 +74,9 @@ public sealed partial class PrefetchTool : SidecarToolViewModel
     public override string Subtitle => "Show which programs ran, how many times and when, from Windows Prefetch files.";
     public override string Phase => "4";
     public override string Kind => "prefetch";
-    public override string EmptyStateHint => "Pick the Prefetch folder (Windows\\Prefetch) or a single .pf file.";
+    public override string EmptyStateHint => OperatingSystem.IsWindows()
+        ? "Pick the Prefetch folder (Windows\\Prefetch) or a single .pf file."
+        : "Pick the Prefetch folder (Windows\\Prefetch) or a single .pf file. Files from Windows 10 and 11 need Cinder to be running on Windows.";
 }
 
 public sealed partial class ShellbagsTool : SidecarToolViewModel
@@ -148,10 +150,12 @@ public sealed partial class SrumTool : SidecarToolViewModel
     public override string Id => "srum";
     public override string Title => "SRUM";
     public override string Icon => "⏱";
-    public override string Subtitle => "Show the processor time, network traffic and energy use Windows recorded for each program and user.";
+    public override string Subtitle => "Show the processor use, disk and network traffic and battery readings Windows recorded for each program and user.";
     public override string Phase => "4";
     public override string Kind => "srum";
-    public override string EmptyStateHint => "Pick SRUDB.dat (Windows\\System32\\sru\\SRUDB.dat).";
+    public override string EmptyStateHint => OperatingSystem.IsWindows()
+        ? "Pick SRUDB.dat (Windows\\System32\\sru\\SRUDB.dat)."
+        : "Pick SRUDB.dat (Windows\\System32\\sru\\SRUDB.dat). Reading it needs Cinder to be running on Windows.";
 }
 
 public sealed partial class AmcacheTool : SidecarToolViewModel
@@ -271,7 +275,9 @@ public sealed partial class NetworkTool : SidecarToolViewModel
     public override string Subtitle => "List the packets in a capture file with their time, addresses, ports, protocol and TCP flags.";
     public override string Phase => "10";
     public override string Kind => "network";
-    public override string EmptyStateHint => "Pick a .pcap or .pcapng capture file.";
+    public override string EmptyStateHint => OperatingSystem.IsWindows()
+        ? "Pick a .pcap or .pcapng capture file. Npcap must be installed."
+        : "Pick a .pcap or .pcapng capture file. libpcap must be installed.";
 }
 
 public sealed partial class MobileTool : SidecarToolViewModel

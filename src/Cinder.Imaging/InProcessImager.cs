@@ -148,6 +148,8 @@ public sealed class InProcessImager : IDiskImager
             bad_sector_offsets = badSectorOffsets,
             bad_sector_list_truncated = badSectors > badSectorOffsets.Count,
             bad_sectors_not_recorded_in_container = sink.BadSectorsNotRecorded,
+            overwrite = job.Overwrite,
+            removed_stale_segments = sink.RemovedStaleSegments,
             source_damaged_chunks = sourceDamaged,
             examiner = job.ExaminerName,
             case_number = job.CaseNumber,
@@ -448,8 +450,31 @@ public sealed class InProcessImager : IDiskImager
         ImageFormat.Ewf => new EwfSink(job),
         ImageFormat.Aff4 => new Aff4Sink(job),
         ImageFormat.Vhd or ImageFormat.Vhdx => new VirtualDiskSink(job, sourceLength),
-        _ => new RawSink(job.OutputPath),
+        _ => new RawSink(job.OutputPath, job.Overwrite),
     };
+
+    /// <summary>
+    /// Refuses to start when the image, or the working file of an earlier run, is already
+    /// there and the job did not ask for it to be replaced. Called before anything is created.
+    /// </summary>
+    private static void RefuseIfExists(bool overwrite, string output)
+    {
+        if (overwrite)
+        {
+            return;
+        }
+        var existing = new[] { output, output + PartialSuffix }.Where(File.Exists).ToList();
+        if (existing.Count == 0)
+        {
+            return;
+        }
+        var what = existing[0].EndsWith(PartialSuffix, StringComparison.Ordinal) && existing.Count == 1
+            ? $"{existing[0]} already exists — the unfinished image of an earlier run"
+            : $"{existing[0]} already exists";
+        throw new OutputExistsException(
+            $"{what}. Nothing was written. Choose another output, move the existing file away, or set {nameof(ImageJob)}.{nameof(ImageJob.Overwrite)}.",
+            existing);
+    }
 
     /// <summary>
     /// A format writer. Everything is written to <see cref="PartialPaths"/>;
@@ -469,6 +494,9 @@ public sealed class InProcessImager : IDiskImager
 
         /// <summary>Bad sectors the container format had no way to record.</summary>
         public virtual long BadSectorsNotRecorded => 0;
+
+        /// <summary>Files of an overwritten image that were deleted because the new image did not reuse them.</summary>
+        public virtual IReadOnlyList<string> RemovedStaleSegments => [];
 
         public abstract ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct);
         public virtual void NoteBadSector(long sector) { }
@@ -496,6 +524,7 @@ public sealed class InProcessImager : IDiskImager
         private readonly DiscUtils.VirtualDisk _disk;
         private readonly Stream _content;
         private readonly string _path;
+        private readonly bool _overwrite;
 
         public VirtualDiskSink(ImageJob job, long? sourceLength)
         {
@@ -507,7 +536,9 @@ public sealed class InProcessImager : IDiskImager
             capacity = (capacity + 511) / 512 * 512;
 
             _path = job.OutputPath;
-            _file = new FileStream(_path + PartialSuffix, FileMode.Create, FileAccess.ReadWrite, FileShare.None, BlockSize);
+            _overwrite = job.Overwrite;
+            RefuseIfExists(_overwrite, _path);
+            _file = new FileStream(_path + PartialSuffix, _overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, BlockSize);
             _disk = job.Format == ImageFormat.Vhd
                 ? DiscUtils.Vhd.Disk.InitializeDynamic(_file, DiscUtils.Streams.Ownership.None, capacity)
                 : DiscUtils.Vhdx.Disk.InitializeDynamic(_file, DiscUtils.Streams.Ownership.None, capacity);
@@ -532,7 +563,7 @@ public sealed class InProcessImager : IDiskImager
             _disk.Dispose();
             _file.Flush();
             _file.Dispose();
-            File.Move(_path + PartialSuffix, _path, overwrite: true);
+            File.Move(_path + PartialSuffix, _path, overwrite: _overwrite);
         }
 
         public override void Dispose()
@@ -546,12 +577,16 @@ public sealed class InProcessImager : IDiskImager
     {
         private readonly Aff4.Aff4Writer _writer;
         private readonly string _path;
+        private readonly bool _overwrite;
 
         public Aff4Sink(ImageJob job)
         {
             _path = Path.GetFullPath(job.OutputPath);
+            _overwrite = job.Overwrite;
+            RefuseIfExists(_overwrite, _path);
             _writer = new Aff4.Aff4Writer(_path + PartialSuffix, new Aff4.Aff4Writer.Options
             {
+                Overwrite = _overwrite,
                 Compress = job.CompressionLevel > 0,
                 CaseNumber = job.CaseNumber,
                 EvidenceNumber = job.EvidenceNumber,
@@ -574,7 +609,7 @@ public sealed class InProcessImager : IDiskImager
         public override void Finish(byte[]? md5, byte[]? sha1, byte[]? sha256)
         {
             _writer.Finish(md5, sha1, sha256);
-            File.Move(_path + PartialSuffix, _path, overwrite: true);
+            File.Move(_path + PartialSuffix, _path, overwrite: _overwrite);
         }
 
         public override void Dispose() => _writer.Dispose();
@@ -584,11 +619,14 @@ public sealed class InProcessImager : IDiskImager
     {
         private readonly FileStream _out;
         private readonly string _path;
+        private readonly bool _overwrite;
 
-        public RawSink(string path)
+        public RawSink(string path, bool overwrite)
         {
             _path = path;
-            _out = new FileStream(path + PartialSuffix, FileMode.Create, FileAccess.Write, FileShare.None, BlockSize, FileOptions.SequentialScan);
+            _overwrite = overwrite;
+            RefuseIfExists(overwrite, path);
+            _out = new FileStream(path + PartialSuffix, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None, BlockSize, FileOptions.SequentialScan);
         }
 
         public override IReadOnlyList<string> Paths => [_path];
@@ -599,7 +637,7 @@ public sealed class InProcessImager : IDiskImager
         {
             _out.Flush();
             _out.Dispose();
-            File.Move(_path + PartialSuffix, _path, overwrite: true);
+            File.Move(_path + PartialSuffix, _path, overwrite: _overwrite);
         }
 
         public override void Dispose() => _out.Dispose();
@@ -625,6 +663,7 @@ public sealed class InProcessImager : IDiskImager
                 MediaFlags = IsDevicePath(job.SourceDevice) ? (byte)0x02 : (byte)0x01,
                 AcquisitionTool = "Cinder " + (typeof(InProcessImager).Assembly.GetName().Version?.ToString(3) ?? ""),
                 PartialSuffix = PartialSuffix,
+                Overwrite = job.Overwrite,
             });
         }
 
@@ -632,6 +671,7 @@ public sealed class InProcessImager : IDiskImager
         public override IReadOnlyList<string> PartialPaths => _writer.WorkingPaths;
         public override int SectorGranularity => SectorSize;
         public override long BadSectorsNotRecorded => _writer.BadSectorsNotRecorded;
+        public override IReadOnlyList<string> RemovedStaleSegments => _writer.RemovedStaleSegments;
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct)
         {
@@ -705,7 +745,7 @@ public static class ImageConverter
     public static async Task<ConversionResult> ConvertAsync(
         string source, string output, ImageFormat format, string? examiner = null,
         int compressionLevel = 1, long segmentSizeMiB = 1500, bool verify = true,
-        IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
+        IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default, bool overwrite = false)
     {
         if (!InProcessImager.Supports(format))
         {
@@ -716,7 +756,7 @@ public static class ImageConverter
         var sourceDamaged = 0;
         ImageJobResult result;
         var job = new ImageJob(source, output, format, CompressionLevel: compressionLevel, SegmentSizeMiB: segmentSizeMiB,
-            ExaminerName: examiner, Description: $"Converted from {Path.GetFileName(source)}");
+            ExaminerName: examiner, Description: $"Converted from {Path.GetFileName(source)}", Overwrite: overwrite);
 
         var ext = Path.GetExtension(source).ToLowerInvariant();
         if (ext is ".vhd" or ".vhdx")
@@ -842,13 +882,13 @@ public static class ImageConverter
 
     public static async Task<ConversionResult> EwfToRawAsync(
         string sourceE01, string outputRaw, string? examiner = null,
-        IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
+        IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default, bool overwrite = false)
     {
         using var ewf = EwfReader.Open(sourceE01);
         await using var stream = ewf.OpenStream();
 
         var job = new ImageJob(sourceE01, outputRaw, ImageFormat.Raw, ExaminerName: examiner,
-            Description: $"Converted from EWF ({ewf.SegmentCount} segment(s))");
+            Description: $"Converted from EWF ({ewf.SegmentCount} segment(s))", Overwrite: overwrite);
         var result = await new InProcessImager().ImageStreamAsync(stream, job, progress, ct).ConfigureAwait(false);
 
         bool? matches = null;
@@ -877,10 +917,10 @@ public static class ImageConverter
     /// </summary>
     public static async Task<ConversionResult> RawToEwfAsync(
         string sourceRaw, string outputE01, string? examiner = null, int compressionLevel = 1, long segmentSizeMiB = 1500,
-        bool verify = true, IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default)
+        bool verify = true, IProgress<ImageJobProgress>? progress = null, CancellationToken ct = default, bool overwrite = false)
     {
         var job = new ImageJob(sourceRaw, outputE01, ImageFormat.Ewf, CompressionLevel: compressionLevel, SegmentSizeMiB: segmentSizeMiB,
-            ExaminerName: examiner, Description: "Converted from raw");
+            ExaminerName: examiner, Description: "Converted from raw", Overwrite: overwrite);
         var result = await new InProcessImager().ImageAsync(job, progress, ct).ConfigureAwait(false);
         var sourceDamaged = (int)Math.Min(int.MaxValue, result.SourceDamagedChunks);
 

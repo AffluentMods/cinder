@@ -251,6 +251,7 @@ public partial class MainWindow : Window
         }
         _vm.IsRailOpen = l.RailOpen;
         _vm.IsInspectorOpen = l.InspectorOpen;
+        _vm.Workspace.RestoreExpandedSections(l.ExpandedSections);
         ApplyPaneLayout();
     }
 
@@ -270,7 +271,8 @@ public partial class MainWindow : Window
             Position.X, Position.Y,
             maximized ? Math.Max(Width, 1080) : Width,
             maximized ? Math.Max(Height, 640) : Height,
-            maximized, _railWidth, _inspectorWidth, _vm.IsRailOpen, _vm.IsInspectorOpen));
+            maximized, _railWidth, _inspectorWidth, _vm.IsRailOpen, _vm.IsInspectorOpen,
+            _vm.Workspace.ExpandedSections.ToArray()));
     }
 
     private void OnTitlePointerPressed(object? sender, PointerPressedEventArgs e)

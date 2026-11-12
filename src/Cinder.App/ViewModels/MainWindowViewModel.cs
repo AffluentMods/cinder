@@ -288,6 +288,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// </summary>
     public void AnnounceError(string headline) => Announce(headline, TimeSpan.FromSeconds(20));
 
+    /// <summary>
+    /// Announce something worth reading in full that is not an error (an available update and
+    /// where to get it). Stays up for a minute; the status bar tooltip shows the whole text.
+    /// </summary>
+    public void AnnounceNotice(string headline) => Announce(headline, TimeSpan.FromSeconds(60));
+
     private void Announce(string headline, TimeSpan visibleFor)
     {
         // Callable from any thread: continuations that left the UI context (ConfigureAwait(false))

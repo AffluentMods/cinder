@@ -330,6 +330,24 @@ def test_image_writes_companion_digests_and_verify_uses_them(tmp_path, source) -
     assert tampered["reason"]
 
 
+def test_imaging_reports_progress_the_client_can_show(spawn, tmp_path, source) -> None:
+    # The worker is serial: a `progress` request sent during `image` is answered only after
+    # the image is done. What the C# SidecarDiskImager shows comes from these notifications,
+    # so they have to carry every field of its progress record.
+    path, data = source
+    sc = spawn("-m", "imager.imager_worker")
+    result = sc.call("image", {"sourceDevice": str(path), "outputPath": str(tmp_path / "p.dd"), "format": 0})
+    assert result["bytes_written"] == len(data)
+    assert sc.notifications, "no progress notification during imaging"
+    note = sc.notifications[0]["params"]
+    assert note["id"] == 1
+    assert 0 < note["bytes_read"] <= len(data)
+    assert note["total_bytes"] == len(data)
+    assert note["bad_sectors"] == 0
+    assert note["phase"] == "imaging"
+    assert isinstance(note["throughput"], (int, float)) and note["throughput"] >= 0
+
+
 def test_verify_without_any_reference_hash_does_not_claim_a_match(tmp_path, source) -> None:
     path, data = source
     result = iw.verify({"image_path": str(path)})

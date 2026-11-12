@@ -43,6 +43,12 @@ public sealed class CarveSource
     /// <summary>The most this object may span: the signature's maximum, or <see cref="Available"/> if smaller.</summary>
     public long Limit { get; }
 
+    /// <summary>
+    /// The carve's cancellation token. Reads that go to the source observe it, so a probe
+    /// that walks a long structure stops when the carve is cancelled without having to check.
+    /// </summary>
+    public CancellationToken CancellationToken { get; internal set; }
+
     /// <summary>The object's leading bytes, already in memory.</summary>
     public ReadOnlySpan<byte> Head => _window.AsSpan(_windowStart, _inWindow);
 
@@ -98,6 +104,7 @@ public sealed class CarveSource
         {
             if (_cache is null || offset < _cacheOffset || offset >= _cacheOffset + _cacheLength)
             {
+                CancellationToken.ThrowIfCancellationRequested();
                 _cache ??= new byte[CacheSize];
                 _stream.Position = _streamBase + offset;
                 var want = (int)Math.Min(CacheSize, Available - offset);
@@ -164,6 +171,10 @@ public sealed class CarveSource
         if (pattern.Length == 0 || from < 0)
         {
             return -1;
+        }
+        if (!ct.CanBeCanceled)
+        {
+            ct = CancellationToken;
         }
         limit = Math.Min(limit, Available);
 

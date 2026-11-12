@@ -93,7 +93,8 @@
                     <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock Text="DATA INSPECTOR" Classes="section" VerticalAlignment="Center" />
-                            <TextBlock Text="times in UTC" Classes="dim" FontSize="10.5" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding InspectorBasis}" Classes="dim" FontSize="10.5" VerticalAlignment="Center"
+                                       ToolTip.Tip="Values are decoded starting at this byte. Timestamps are shown in UTC." />
                         </StackPanel>
                         <Border Grid.Column="1" Classes="seg">
                             <StackPanel Orientation="Horizontal">

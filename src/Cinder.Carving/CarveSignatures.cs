@@ -32,14 +32,14 @@ public static class CarveSignatures
         // ---- images -------------------------------------------------------------------------
         new("JPEG", "jpg", [0xFF, 0xD8, 0xFF], [0xFF, 0xD9], 30 * MiB) { Probe = ProbeJpeg },
         new("PNG", "png", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82], 80 * MiB) { FooterRequired = true },
-        new("GIF", "gif", "GIF8"u8.ToArray(), [0x00, 0x3B], 10 * MiB) { Probe = ProbeGif, FooterRequired = true },
+        new("GIF", "gif", "GIF8"u8.ToArray(), null, 10 * MiB) { Probe = ProbeGif },
         new("BMP", "bmp", "BM"u8.ToArray(), null, 50 * MiB) { Probe = ProbeBmp },
         new("TIFF", "tiff", [0x49, 0x49, 0x2A, 0x00], null, 100 * MiB) { Probe = ProbeTiff },
         new("WebP", "webp", "WEBPVP8"u8.ToArray(), null, 50 * MiB) { HeaderOffset = 8, Probe = ProbeRiff },
         new("HEIC", "heic", "ftypheic"u8.ToArray(), null, 100 * MiB) { HeaderOffset = 4, Probe = ProbeIsoBmff },
 
         // ---- documents ----------------------------------------------------------------------
-        new("PDF", "pdf", "%PDF-"u8.ToArray(), "%%EOF"u8.ToArray(), 100 * MiB) { Probe = ProbePdf, FooterRequired = true },
+        new("PDF", "pdf", "%PDF-"u8.ToArray(), null, 100 * MiB) { Probe = ProbePdf },
         new("RTF", "rtf", "{\\rtf"u8.ToArray(), null, 50 * MiB) { Probe = ProbeRtf },
         new("OLE Compound (DOC/XLS/PPT/MSG/MSI)", "doc", [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], null, 100 * MiB) { Probe = ProbeOle },
 
@@ -230,11 +230,79 @@ public static class CarveSignatures
         return -1;
     }
 
-    private static long ProbeGif(CarveSource src)
+    /// <summary>
+    /// Walks the GIF block structure to the trailer byte. The bytes <c>00 3B</c> — a block
+    /// terminator followed by the trailer — are what a GIF ends with, but the same two bytes
+    /// turn up inside compressed image data about once in every 64 KiB, so cutting at their
+    /// first occurrence truncates most images of any size. Image data is a chain of length-
+    /// prefixed sub-blocks; following the lengths steps over it without looking inside.
+    /// </summary>
+    internal static long ProbeGif(CarveSource src)
     {
         var h = src.Head;
-        // "GIF87a" or "GIF89a", followed by the 7-byte logical screen descriptor.
-        return h.Length >= 13 && (h[4] == 0x37 || h[4] == 0x39) && h[5] == 0x61 ? Unknown : No;
+        // "GIF87a" or "GIF89a", then the 7-byte logical screen descriptor.
+        if (h.Length < 13 || !(h[4] == 0x37 || h[4] == 0x39) || h[5] != 0x61)
+        {
+            return No;
+        }
+
+        long pos = 13;
+        if ((h[10] & 0x80) != 0)
+        {
+            pos += 3L << ((h[10] & 7) + 1);         // global colour table
+        }
+
+        var limit = src.Limit;
+        Span<byte> b = stackalloc byte[10];
+        var images = 0;
+        for (int blocks = 0; blocks < 1_000_000; blocks++)
+        {
+            if (pos >= limit || !src.TryRead(pos, b[..1]))
+            {
+                return Damaged;
+            }
+            switch (b[0])
+            {
+                case 0x3B:                          // trailer
+                    return images > 0 ? pos + 1 : Damaged;
+
+                case 0x21:                          // extension: introducer, label, sub-blocks
+                    pos += 2;
+                    break;
+
+                case 0x2C:                          // image: 10-byte descriptor, optional local colour table, LZW code size, sub-blocks
+                    if (!src.TryRead(pos, b))
+                    {
+                        return Damaged;
+                    }
+                    pos += 10;
+                    if ((b[9] & 0x80) != 0)
+                    {
+                        pos += 3L << ((b[9] & 7) + 1);
+                    }
+                    pos += 1;
+                    images++;
+                    break;
+
+                default:
+                    return Damaged;                 // not a block: the stream is cut off or overwritten
+            }
+
+            // Sub-blocks: a length byte, that many bytes, repeated until a zero length.
+            while (true)
+            {
+                if (pos >= limit || !src.TryRead(pos, b[..1]))
+                {
+                    return Damaged;
+                }
+                pos += 1 + b[0];
+                if (b[0] == 0)
+                {
+                    break;
+                }
+            }
+        }
+        return Damaged;
     }
 
     private static long ProbeBmp(CarveSource src)
@@ -403,10 +471,161 @@ public static class CarveSignatures
 
     // ---- documents and archives ---------------------------------------------------------------
 
-    private static long ProbePdf(CarveSource src)
+    /// <summary>
+    /// Finds the end-of-file marker that ends the document, which is often not the first one.
+    ///
+    /// <para>A PDF saved incrementally keeps its old content and appends a new section — more
+    /// objects, a cross-reference table, <c>startxref</c>, <c>%%EOF</c> — for every save; a
+    /// linearised ("fast web view") PDF has an <c>%%EOF</c> after its first-page section, a few
+    /// hundred bytes in; and a PDF attached inside another brings its own. Stopping at the
+    /// first marker carves, respectively, an outdated revision, a stub, or half a file.</para>
+    ///
+    /// <para>Each <c>%%EOF</c> is preceded by <c>startxref N</c>, where N is the offset, from
+    /// the start of the file, of that section's cross-reference data. A marker belongs to this
+    /// document when the bytes at N — counted from this object's first byte — are in fact a
+    /// cross-reference table or an object. The walk goes from marker to marker for as long as
+    /// what follows still reads as PDF syntax, and the document ends at the last marker that
+    /// belongs. The next file's <c>%PDF-</c> header, or anything that is not PDF, stops it.</para>
+    /// </summary>
+    internal static long ProbePdf(CarveSource src)
     {
         var h = src.Head;
-        return h.Length >= 8 && char.IsAsciiDigit((char)h[5]) && h[6] == (byte)'.' && char.IsAsciiDigit((char)h[7]) ? Unknown : No;
+        if (!(h.Length >= 8 && char.IsAsciiDigit((char)h[5]) && h[6] == (byte)'.' && char.IsAsciiDigit((char)h[7])))
+        {
+            return No;
+        }
+
+        var limit = src.Limit;
+        long first = -1;        // end of the first marker: the answer if none can be verified
+        long verified = -1;     // end of the last marker whose startxref points into this document
+        long from = 8;
+        for (int markers = 0; markers < 4096; markers++)
+        {
+            var at = src.IndexOf("%%EOF"u8, from, limit);
+            if (at < 0)
+            {
+                break;
+            }
+            var end = at + 5;
+            if (first < 0)
+            {
+                first = end;
+            }
+            if (PdfMarkerBelongs(src, at))
+            {
+                verified = end;
+            }
+            if (!PdfContinues(src, end))
+            {
+                break;
+            }
+            from = end;
+        }
+
+        if (first < 0)
+        {
+            return Damaged;     // a header and no end within the limit
+        }
+        return verified >= 0 ? verified : first;
+    }
+
+    private static bool IsPdfWhitespace(byte c) => c is 0x00 or 0x09 or 0x0A or 0x0C or 0x0D or 0x20;
+
+    /// <summary>True when the text at <paramref name="s"/> is "<c>N G obj</c>".</summary>
+    private static bool IsPdfObjectHeader(ReadOnlySpan<byte> s)
+    {
+        var i = 0;
+        var digits = 0;
+        while (i < s.Length && char.IsAsciiDigit((char)s[i])) { i++; digits++; }
+        if (digits is 0 or > 10 || i >= s.Length || s[i] != (byte)' ')
+        {
+            return false;
+        }
+        i++;
+        digits = 0;
+        while (i < s.Length && char.IsAsciiDigit((char)s[i])) { i++; digits++; }
+        if (digits is 0 or > 5 || i >= s.Length || s[i] != (byte)' ')
+        {
+            return false;
+        }
+        return s[(i + 1)..].StartsWith("obj"u8);
+    }
+
+    /// <summary>
+    /// The <c>%%EOF</c> at <paramref name="markerAt"/> is preceded by a <c>startxref</c> whose
+    /// offset, taken from the start of this object, lands on cross-reference data.
+    /// </summary>
+    private static bool PdfMarkerBelongs(CarveSource src, long markerAt)
+    {
+        Span<byte> tail = stackalloc byte[48];
+        var start = Math.Max(0, markerAt - tail.Length);
+        tail = tail[..(int)(markerAt - start)];
+        if (!src.TryRead(start, tail))
+        {
+            return false;
+        }
+        var keyword = tail.LastIndexOf("startxref"u8);
+        if (keyword < 0)
+        {
+            return false;
+        }
+
+        var i = keyword + 9;
+        while (i < tail.Length && IsPdfWhitespace(tail[i])) { i++; }
+        long offset = 0;
+        var digits = 0;
+        while (i < tail.Length && char.IsAsciiDigit((char)tail[i]) && digits < 15)
+        {
+            offset = offset * 10 + (tail[i] - '0');
+            i++;
+            digits++;
+        }
+        if (digits == 0)
+        {
+            return false;
+        }
+        while (i < tail.Length && IsPdfWhitespace(tail[i])) { i++; }
+        if (i != tail.Length || offset >= start + keyword)
+        {
+            return false;       // something else sits between the number and the marker, or it points past itself
+        }
+
+        Span<byte> target = stackalloc byte[24];
+        var got = src.Read(offset, target);
+        target = target[..got];
+        return target.StartsWith("xref"u8) || IsPdfObjectHeader(target);
+    }
+
+    /// <summary>
+    /// What follows an end-of-file marker still reads as the same PDF: an object, a
+    /// cross-reference section, the tail of a stream the marker was inside of, or a comment
+    /// that is not the header of another file.
+    /// </summary>
+    private static bool PdfContinues(CarveSource src, long pos)
+    {
+        Span<byte> next = stackalloc byte[40];
+        var got = src.Read(pos, next);
+        ReadOnlySpan<byte> s = next[..got];
+        var skipped = 0;
+        while (s.Length > 0 && IsPdfWhitespace(s[0]) && skipped < 8)
+        {
+            s = s[1..];
+            skipped++;
+        }
+        if (s.Length == 0)
+        {
+            return false;
+        }
+        if (s[0] == (byte)'%')
+        {
+            return !s.StartsWith("%PDF-"u8) && !s.StartsWith("%%EOF"u8);
+        }
+        return IsPdfObjectHeader(s)
+            || s.StartsWith("xref"u8)
+            || s.StartsWith("startxref"u8)
+            || s.StartsWith("trailer"u8)
+            || s.StartsWith("endstream"u8)
+            || s.StartsWith("endobj"u8);
     }
 
     /// <summary>An RTF document is one brace group; it ends where its first brace closes.</summary>

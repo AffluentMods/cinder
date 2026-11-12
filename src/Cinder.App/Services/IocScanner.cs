@@ -16,8 +16,31 @@ public sealed class IocScanStats
     public int FilesScanned { get; set; }
     public int TimelineEvents { get; set; }
     public int Errors { get; set; }
-    public override string ToString() =>
-        $"{Files:N0} files · {FilesHashed:N0} hashed · {FilesScanned:N0} content-scanned · {TimelineEvents:N0} timeline events · {Errors} errors";
+
+    /// <summary>
+    /// Chunks of forensic containers (E01, AFF4) that could not be decoded during the content
+    /// scan and were read as zeros, across all files. When this is not zero the scan is not a
+    /// clean negative for those files: an indicator that lay in a damaged chunk cannot have
+    /// been found.
+    /// </summary>
+    public int DamagedChunks { get; set; }
+
+    /// <summary>How many of the scanned files had at least one damaged chunk.</summary>
+    public int DamagedFiles { get; set; }
+
+    /// <summary>The files counted in <see cref="DamagedFiles"/> (the first hundred), so a tool can name them.</summary>
+    public List<string> DamagedFilePaths { get; } = [];
+
+    public override string ToString()
+    {
+        var text = $"{Files:N0} files · {FilesHashed:N0} hashed · {FilesScanned:N0} content-scanned · {TimelineEvents:N0} timeline events · {Errors} errors";
+        if (DamagedChunks > 0)
+        {
+            text += $" · WARNING: {DamagedChunks:N0} damaged chunk{(DamagedChunks == 1 ? "" : "s")} in {DamagedFiles:N0} container{(DamagedFiles == 1 ? "" : "s")} " +
+                    "read as zeros — no match there is not proof of absence";
+        }
+        return text;
+    }
 }
 
 /// <summary>
@@ -54,14 +77,16 @@ public static class IocScanner
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(indicators);
-        return Task.Run(() => ScanCoreAsync(indicators, folder, progress, maxRows, ct), ct);
+        return Task.Run(() => ScanCoreAsync(indicators, folder, progress, maxRows, Cinder.Imaging.EvidenceOpener.Open, ct), ct);
     }
 
-    private static async Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanCoreAsync(
+    /// <summary>The scan itself. <paramref name="open"/> is how a file's content is opened; tests substitute it.</summary>
+    internal static async Task<(List<IocMatchRow> Rows, IocScanStats Stats)> ScanCoreAsync(
         IReadOnlyList<Indicator> indicators,
         string folder,
         IProgress<string>? progress,
         int maxRows,
+        Func<string, Stream> open,
         CancellationToken ct)
     {
         var rows = new List<IocMatchRow>();
@@ -123,9 +148,14 @@ public static class IocScanner
 
             if (ruleset is not null && size > 0 && size <= MaxContentBytes)
             {
+                // Kept outside the try: damage met before a read error is still damage.
+                var info = new YaraLiteScanInfo();
                 try
                 {
-                    await foreach (var m in ruleset.ScanAsync(file, ct))
+                    // Opened through the evidence opener, so an E01 / AFF4 / VHD is scanned as
+                    // the media inside it — and reports the chunks it could not decode.
+                    await using var content = open(file);
+                    await foreach (var m in ruleset.ScanAsync(content, file, YaraLiteRuleset.DefaultBufferSize, info, ct))
                     {
                         if (rows.Count >= maxRows) break;
                         var ioc = textIocs[int.Parse(m.RuleName["ioc_".Length..], CultureInfo.InvariantCulture)];
@@ -137,6 +167,16 @@ public static class IocScanner
                 }
                 catch (OperationCanceledException) { throw; }
                 catch { stats.Errors++; }
+
+                if (info.DamagedChunks > 0)
+                {
+                    stats.DamagedChunks += info.DamagedChunks;
+                    stats.DamagedFiles++;
+                    if (stats.DamagedFilePaths.Count < 100)
+                    {
+                        stats.DamagedFilePaths.Add(file);
+                    }
+                }
             }
         }
 
