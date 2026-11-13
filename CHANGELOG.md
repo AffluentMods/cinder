@@ -7,12 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Design pass: no more empty screens
+
+- **Task pages.** Disk imager, Convert format, Image verify, Mount image and
+  VirusTotal each had a short form in one corner of an otherwise blank screen.
+  They now use one two-column layout: the inputs and the single action on the
+  left; what the job does, then its progress and result, on the right.
+- **Settings is a page.** It was a screen holding one button that opened a
+  dialog. The settings are now on the page itself, with Save settings and
+  Discard changes in a bar at the bottom. Ctrl+, goes to the page. The Cloud
+  sign-in section is gone with the tool it served (below); stored values are
+  kept.
+- **Home knows the open case.** With a case open, Home shows it at the top with
+  the next steps for it: browse a disk image, build a timeline, review
+  bookmarks, write the report, check the custody log.
+- **Chain of custody reads in words.** The table shows "Case opened" and
+  "Tool: filesystem · Evidence: … · Rows: 39" in place of action ids and raw
+  JSON. The stored entry is unchanged: it is still what is hashed, checked
+  and exported.
+- **RAM capture and Cloud pull are no longer listed.** Neither can do its job
+  yet, and a screen that only says so does not belong in the rail. The code
+  stays in the tree; see LIMITATIONS.md.
+- **One button, once.** Strings, Image gallery, Documents, Workflows and Shadow
+  copies showed the same button in the toolbar and in the empty screen below
+  it. The toolbar now appears once there is something to act on.
+- README screenshots retaken, and extended to show the tools at work.
+
 ### Full review pass — defects fixed, every tool view rebuilt
 
 The whole codebase was read for defects (imaging, core and file systems, the hex
 control, the tool view-models, the shell and services, the smaller libraries and
 the Python sidecar) and the confirmed ones were fixed, each with a regression
-test where the logic can be tested. The .NET suite went from 269 to 1,488
+test where the logic can be tested. The .NET suite went from 269 to 1,506
 tests across eight projects; the Python sidecar from 2 to 164.
 
 **Evidence integrity**

@@ -170,7 +170,9 @@ real thing:
   "do not overwrite" flag.
 - **Update check.** The "Check for updates" command was tested against a fake server, not
   the live GitHub API.
-- **Cloud pull and RAM capture** remain non-functional and say so on their screens.
+- **Cloud pull and RAM capture** remain non-functional. They are no longer listed in the
+  app; `CloudPullTool` and `RamCaptureTool` are still in the tree and are registered again
+  by adding them back to the Acquire section in `WorkspaceViewModel`.
 
 ## <a id="trademark-domains"></a> Trademark and domains
 

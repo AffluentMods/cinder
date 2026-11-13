@@ -21,7 +21,7 @@ namespace Cinder.App.Services;
 ///              [--seed-case path|name|examiner|evidencePath]
 ///              [--fresh-recents] [--recent-case "name|examiner|path"]… [--recent-evidence path]…
 ///              [--evidence file] [--row-filter text] [--hex-bookmark 0x200]…
-///              [--report-demo] [--custody-verify] [--filter text] [--no-rail]
+///              [--report-demo] [--imager-demo source|output] [--custody-verify] [--filter text] [--no-rail]
 ///              [--palette] [--help-open] [--diag] [--hold seconds]
 /// </code>
 ///
@@ -156,6 +156,10 @@ public static class DevScreenshot
                 {
                     await FillReportDemoAsync(vm, examiner);
                 }
+                if (Arg(args, "--imager-demo") is { } imagerDemo && vm.Workspace.FindByKind("imager") is ImagerTool imager)
+                {
+                    await RunImagerDemoAsync(imager, imagerDemo);
+                }
                 if (args.Contains("--custody-verify") && vm.Workspace.FindByKind("custody") is CustodyTool custody)
                 {
                     await custody.VerifyOpenCaseCommand.ExecuteAsync(null);
@@ -206,6 +210,30 @@ public static class DevScreenshot
             }
         };
         return true;
+    }
+
+    /// <summary>
+    /// Images a file into an E01 so the Disk imager can be shown with a finished result:
+    /// <c>source|output</c>. Like <c>--seed-case</c>, it only writes inside a folder named
+    /// cinder-demo.
+    /// </summary>
+    private static async Task RunImagerDemoAsync(ImagerTool imager, string spec)
+    {
+        if (spec.Split('|') is not [var source, var output])
+        {
+            throw new ArgumentException("--imager-demo expects source|output");
+        }
+        output = Path.GetFullPath(output);
+        if (!output.Split(Path.DirectorySeparatorChar).Contains("cinder-demo"))
+        {
+            throw new InvalidOperationException("--imager-demo only writes inside a folder named cinder-demo.");
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        imager.Source = Path.GetFullPath(source);
+        imager.Output = output;
+        imager.Format = "E01";
+        imager.Overwrite = true;
+        await imager.StartCommand.ExecuteAsync(null);
     }
 
     /// <summary>

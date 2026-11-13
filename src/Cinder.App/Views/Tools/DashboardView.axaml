@@ -11,7 +11,7 @@
         new to forensics. Accent is reserved for the one primary action.
     -->
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="True">
-        <Grid Margin="40,34,40,40" MaxWidth="1360" HorizontalAlignment="Left"
+        <Grid Margin="40,34,40,40" MaxWidth="1360" HorizontalAlignment="Stretch"
               ColumnDefinitions="*,40,400" RowDefinitions="Auto,Auto,28,Auto">
 
             <!-- ==================== Heading ==================== -->

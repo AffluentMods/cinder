@@ -72,13 +72,18 @@ are produced, and the rules for what may appear in them, are in
 
 | Home | Hex Viewer |
 |---|---|
-| <img src="assets/screenshots/home.png" alt="Home with the open case, recent cases and evidence, and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex Viewer on an NTFS image with a FILETIME selected and decoded in the data inspector" /> |
-| Start a case, reopen one, or look at a file without one. | Bytes coloured by class, an entropy overview strip, and a data inspector that decodes the selection. |
+| <img src="assets/screenshots/home.png" alt="Home showing the open case with its next steps, recent cases and evidence, and the first-time guide" /> | <img src="assets/screenshots/hex.png" alt="Hex Viewer on an NTFS image with a FILETIME selected and decoded in the data inspector" /> |
+| The open case and what to do next with it; start a case, reopen one, or look at a file without one. | Bytes coloured by class, an entropy overview strip, and a data inspector that decodes the selection. |
 
-| Filesystem | Reports |
+| Filesystem | Disk imager |
 |---|---|
-| <img src="assets/screenshots/filesystem.png" alt="Filesystem tool listing an NTFS volume with MFT record numbers and timestamps" /> | <img src="assets/screenshots/report.png" alt="Reports tool with a findings section and bookmarks loaded as exhibits" /> |
-| Every file and folder on a disk image, with its record number and times. Filter, bookmark, export. | Write the report in sections; bookmarks become numbered exhibits; export PDF/A, Word, HTML, Markdown or JSON. |
+| <img src="assets/screenshots/filesystem.png" alt="Filesystem tool listing an NTFS volume with MFT record numbers and timestamps" /> | <img src="assets/screenshots/imager.png" alt="Disk imager after imaging a volume to E01, showing the bytes written and the MD5 and SHA-256 hashes" /> |
+| Every file and folder on a disk image, with its record number and times. Filter, bookmark, export. | Image a disk or file to raw, E01, AFF4, VHD or VHDX. Every byte is hashed as it is read. |
+
+| Reports | Command palette |
+|---|---|
+| <img src="assets/screenshots/report.png" alt="Reports tool with a findings section and bookmarks loaded as exhibits" /> | <img src="assets/screenshots/palette.png" alt="Command palette open over the Hex Viewer, listing commands with their shortcuts" /> |
+| Write the report in sections; bookmarks become numbered exhibits; export PDF/A, Word, HTML, Markdown or JSON. | Ctrl+K reaches every command and tool by name, with its shortcut beside it. |
 
 </div>
 
