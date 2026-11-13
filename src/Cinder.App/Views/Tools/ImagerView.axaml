@@ -4,48 +4,80 @@
              xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.ImagerView"
              x:DataType="tools:ImagerTool">
-    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
-        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
-            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
-                       Text="Copies a disk, partition or image into a forensic image, hashing every byte as it reads (MD5, SHA-1, SHA-256). Unreadable sectors are retried, then zero-filled and listed in the acquisition log beside the image. Devices need Administrator (Windows) or root (Linux); attach source media through a hardware write-blocker." />
-            <Grid ColumnDefinitions="120,*">
-                <TextBlock Text="Source" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
-                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
-                    <TextBox Text="{Binding Source}" Watermark="\\.\PhysicalDrive1  ·  /dev/sdb  ·  image file" FontFamily="{DynamicResource CinderFontFamilyMono}" />
+    <!-- Task page: the inputs and the one action on the left; what it does, then its progress
+         and result, on the right. -->
+    <c:TaskPage>
+        <StackPanel Spacing="18">
+            <StackPanel>
+                <TextBlock Classes="field-label" Text="What to image" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding Source}" Watermark="\\.\PhysicalDrive1, /dev/sdb or an image file"
+                             FontFamily="{DynamicResource CinderFontFamilyMono}" />
                     <Button Grid.Column="1" Classes="tb" Margin="6,0,0,0" Height="28" Content="Pick…" Command="{Binding PickSourceCommand}" />
                 </Grid>
-            </Grid>
-            <Grid ColumnDefinitions="120,*">
-                <TextBlock Text="Output" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
-                <Grid Grid.Column="1" ColumnDefinitions="*,Auto">
-                    <TextBox Text="{Binding Output}" FontFamily="{DynamicResource CinderFontFamilyMono}" />
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Classes="field-label" Text="Save the image as" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding Output}" Watermark="A new file, not on the source drive"
+                             FontFamily="{DynamicResource CinderFontFamilyMono}" />
                     <Button Grid.Column="1" Classes="tb" Margin="6,0,0,0" Height="28" Content="Save as…" Command="{Binding PickOutputCommand}" />
                 </Grid>
-            </Grid>
-            <Grid ColumnDefinitions="120,*">
-                <TextBlock Text="Format" Classes="muted" FontSize="12.5" VerticalAlignment="Center" />
-                <ComboBox Grid.Column="1" ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" MinWidth="160" />
-            </Grid>
-            <CheckBox Margin="120,0,0,0" IsChecked="{Binding Overwrite}" Content="Replace an existing image at this path"
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Classes="field-label" Text="Image format" />
+                <ComboBox ItemsSource="{Binding Formats}" SelectedItem="{Binding Format}" MinWidth="160" />
+            </StackPanel>
+            <CheckBox IsChecked="{Binding Overwrite}" Content="Replace an existing image at this path"
                       ToolTip.Tip="Off by default. Without it, imaging refuses to start if a file is already there, including what is left of an earlier failed run." />
-            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Command="{Binding StartCommand}"
-                    Margin="120,0,0,0">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <c:CinderIcon Data="{x:Static c:Icons.Disk}" Width="15" Height="15" />
-                    <TextBlock Text="Start imaging" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
-            <Button Classes="tb" HorizontalAlignment="Left" Height="30" Margin="120,0,0,0" Content="Stop"
-                    Command="{Binding StartCancelCommand}" IsVisible="{Binding StartCommand.IsRunning}"
-                    ToolTip.Tip="Stops and deletes the unfinished output" />
-            <ProgressBar IsIndeterminate="True" IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />
-            <TextBlock Text="{Binding BytesRead, StringFormat='{}{0:N0} bytes read'}" Classes="mono dim" FontSize="12"
-                       IsVisible="{Binding !!BytesRead}" Margin="120,0,0,0" />
-            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
-                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
-            </Border>
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                <Button Classes="accent" Height="30" Padding="14,0" Command="{Binding StartCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <c:CinderIcon Data="{x:Static c:Icons.Disk}" Width="15" Height="15" />
+                        <TextBlock Text="Start imaging" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Classes="tb" Height="30" Padding="12,0" Content="Stop imaging"
+                        Command="{Binding StartCancelCommand}" IsVisible="{Binding StartCommand.IsRunning}"
+                        ToolTip.Tip="Stops and deletes the unfinished output" />
+            </StackPanel>
         </StackPanel>
-    </ScrollViewer>
+
+        <c:TaskPage.Aside>
+            <StackPanel>
+                <!-- Before a run: what the button will do. -->
+                <StackPanel IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNull}}">
+                    <TextBlock Classes="section" Text="WHAT HAPPENS" Margin="0,0,0,14" />
+                    <c:Step Number="1" Title="Reads the source once, from start to end"
+                            Text="A disk, a partition or an existing image. Sectors that cannot be read are retried, then filled with zeros and listed in the acquisition log saved beside the image." />
+                    <c:Step Number="2" Title="Hashes every byte as it is read"
+                            Text="MD5, SHA-1 and SHA-256 are worked out during the copy, so the hashes describe exactly what was written." />
+                    <c:Step Number="3" Title="Writes the image in the format you chose"
+                            Text="Raw, E01, AFF4, VHD or VHDX. The file only appears under its final name once it is complete, so an interrupted run cannot be mistaken for a finished image." />
+                    <c:Step Number="4" Title="Records the acquisition"
+                            Text="E01 and AFF4 carry their hashes inside the file; the other formats get a .sha256 file beside them, which Image verify reads. With a case open, the source, output and hashes go into its custody log." />
+                    <Border Classes="note" Margin="0,6,0,0">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <c:CinderIcon Data="{x:Static c:Icons.Shield}" Width="15" Height="15" Margin="0,2,10,0" VerticalAlignment="Top"
+                                          Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                            <TextBlock Grid.Column="1" Classes="muted" FontSize="12.5" LineHeight="18" TextWrapping="Wrap"
+                                       Text="Imaging a physical disk needs Cinder to be started as Administrator (Windows) or root (Linux). Attach the source through a hardware write-blocker: Cinder opens it read-only, but it cannot stop the operating system writing to it." />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- During and after a run. -->
+                <StackPanel Spacing="12" IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Classes="section" Text="RESULT" />
+                    <StackPanel Spacing="8" IsVisible="{Binding StartCommand.IsRunning}">
+                        <ProgressBar IsIndeterminate="True" />
+                        <TextBlock Text="{Binding BytesRead, StringFormat='{}{0:N0} bytes read so far'}" Classes="mono dim" FontSize="12" />
+                    </StackPanel>
+                    <Border Classes="result">
+                        <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19" />
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </c:TaskPage.Aside>
+    </c:TaskPage>
 </UserControl>

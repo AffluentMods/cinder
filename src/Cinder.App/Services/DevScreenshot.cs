@@ -22,7 +22,7 @@ namespace Cinder.App.Services;
 ///              [--fresh-recents] [--recent-case "name|examiner|path"]… [--recent-evidence path]…
 ///              [--evidence file] [--row-filter text] [--hex-bookmark 0x200]…
 ///              [--report-demo] [--custody-verify] [--filter text] [--no-rail]
-///              [--palette] [--help-open] [--dialog settings] [--diag] [--hold seconds]
+///              [--palette] [--help-open] [--diag] [--hold seconds]
 /// </code>
 ///
 /// The window is rendered through <see cref="RenderTargetBitmap"/>, i.e. the same visual tree
@@ -43,6 +43,10 @@ public static class DevScreenshot
         {
             mw.PersistLayout = false;
         }
+        // The Settings page gets a throwaway file: a render must never read or write the
+        // examiner's real settings.
+        var shotSettings = Path.Combine(Path.GetTempPath(), "cinder-shot-settings.json");
+        Cinder.App.ViewModels.Tools.SettingsTool.StoreFactory = () => new SettingsStore(shotSettings);
 
         if (Arg(args, "--size") is { } size && size.Split('x') is [var w, var h]
             && double.TryParse(w, NumberStyles.Float, CultureInfo.InvariantCulture, out var ww)
@@ -166,11 +170,6 @@ public static class DevScreenshot
                 }
 
                 Window target = window;
-                if (Arg(args, "--dialog") is { } dialog && CreateDialog(dialog) is { } dlg)
-                {
-                    dlg.Show(window);
-                    target = dlg;
-                }
 
                 await Task.Delay(delay);
                 await Dispatcher.UIThread.InvokeAsync(() => Render(target, shot, scale), DispatcherPriority.Background);
@@ -207,22 +206,6 @@ public static class DevScreenshot
             }
         };
         return true;
-    }
-
-    /// <summary>
-    /// The secondary windows, so they can be reviewed too. Settings is given a throwaway store:
-    /// a screenshot run must never read or write the examiner's real settings file.
-    /// </summary>
-    private static Window? CreateDialog(string name)
-    {
-        switch (name)
-        {
-            case "settings":
-                var path = Path.Combine(Path.GetTempPath(), "cinder-shot-settings.json");
-                return new Cinder.App.Views.SettingsDialog { DataContext = new SettingsDialogViewModel(new SettingsStore(path)) };
-            default:
-                return null;
-        }
     }
 
     /// <summary>

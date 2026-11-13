@@ -430,6 +430,26 @@
         <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
     </Style>
     <!-- Label column in forms and inline add-rows. -->
+    <!-- Task-page pieces: a label above its field, and the card a job writes its result into. -->
+    <Style Selector="TextBlock.field-label">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Margin" Value="0,0,0,6" />
+        <Setter Property="Foreground" Value="{DynamicResource CinderForegroundMutedBrush}" />
+    </Style>
+    <Style Selector="Border.result">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface2Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderStrongBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16,14" />
+    </Style>
+    <Style Selector="Border.note">
+        <Setter Property="Background" Value="{DynamicResource CinderSurface1Brush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CinderBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="14,12" />
+    </Style>
     <Style Selector="TextBlock.label">
         <Setter Property="FontSize" Value="12.5" />
         <Setter Property="VerticalAlignment" Value="Center" />

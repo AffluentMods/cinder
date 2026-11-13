@@ -3024,17 +3024,36 @@ public sealed partial class PluginsTool
 
 public sealed partial class SettingsTool
 {
-    [RelayCommand]
-    private void OpenSettings()
+    /// <summary>
+    /// Where the settings page reads and writes. The screenshot harness points this at a
+    /// throwaway file so a render never touches the examiner's own settings.
+    /// </summary>
+    public static Func<SettingsStore> StoreFactory { get; set; } = () => new SettingsStore();
+
+    private SettingsFormViewModel? _form;
+
+    /// <summary>Created on first use, so the file is not read until the page is opened.</summary>
+    public SettingsFormViewModel Form
     {
-        var owner = (Avalonia.Application.Current?.ApplicationLifetime
-            as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
-        if (owner is null) return;
-        var dialog = new Cinder.App.Views.SettingsDialog
-        {
-            DataContext = new SettingsDialogViewModel(new SettingsStore()),
-        };
-        dialog.ShowDialog(owner);
+        get => _form ??= new SettingsFormViewModel(StoreFactory());
+        private set => SetProperty(ref _form, value);
+    }
+    [ObservableProperty] private string? _statusLine;
+
+    [RelayCommand]
+    private void Save()
+    {
+        Form.SaveCommand.Execute(null);
+        // A failure is shown by the form itself (Form.SaveError), in place of this line.
+        StatusLine = Form.HasSaveError ? null : "Settings saved. They apply from now on.";
+    }
+
+    /// <summary>Throws away unsaved edits by reading the file again.</summary>
+    [RelayCommand]
+    private void Reload()
+    {
+        Form = new SettingsFormViewModel(StoreFactory());
+        StatusLine = Form.HasSaveError ? null : "Changes discarded. The fields show what is saved.";
     }
 }
 

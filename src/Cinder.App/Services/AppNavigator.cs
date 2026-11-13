@@ -21,4 +21,7 @@ public static class AppNavigator
 
     /// <summary>Close the case that is currently active.</summary>
     public static Action? CloseActiveCase { get; set; }
+
+    /// <summary>Shows the tool with this kind id ("bookmarks", "reports", and so on) in the workspace.</summary>
+    public static Action<string>? ShowTool { get; set; }
 }

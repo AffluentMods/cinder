@@ -1,12 +1,124 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="using:Cinder.App.Controls"
+             xmlns:vm="using:Cinder.App.ViewModels"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
              x:Class="Cinder.App.Views.Tools.SettingsView"
              x:DataType="tools:SettingsTool">
-    <c:EmptyState Icon="{x:Static c:Icons.Cog}" Title="Settings"
-                  Message="Theme, the hash-set database, the custody time-stamp service, the AI assistant's model, and cloud sign-in IDs.">
-        <Button Classes="accent" Height="30" Padding="14,0" Content="Open settings…" ToolTip.Tip="Ctrl+,"
-                Command="{Binding OpenSettingsCommand}" />
-    </c:EmptyState>
+    <!-- The settings themselves, on the page. This used to be a screen holding one button that
+         opened a dialog with the same content. Only settings that change something are shown. -->
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Padding="24,10" Background="{DynamicResource CinderSurface0Brush}"
+                BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="accent" Height="30" Padding="16,0" Content="Save settings" Command="{Binding SaveCommand}" />
+                <Button Classes="tb" Height="30" Padding="12,0" Content="Discard changes" Command="{Binding ReloadCommand}"
+                        ToolTip.Tip="Put every field back to what is saved" />
+                <TextBlock Text="{Binding StatusLine}" FontSize="12.5" VerticalAlignment="Center" Margin="10,0,0,0"
+                           TextWrapping="Wrap" MaxWidth="760"
+                           Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                           IsVisible="{Binding !Form.HasSaveError}" />
+                <TextBlock Text="{Binding Form.SaveError}" FontSize="12.5" VerticalAlignment="Center" Margin="10,0,0,0"
+                           TextWrapping="Wrap" MaxWidth="760"
+                           Foreground="{DynamicResource CinderDangerBrush}"
+                           IsVisible="{Binding Form.HasSaveError}" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+            <Grid ColumnDefinitions="*,*" MaxWidth="1240" HorizontalAlignment="Left" Margin="24,20,24,24"
+                  DataContext="{Binding Form}" x:DataType="vm:SettingsFormViewModel">
+
+                <StackPanel Grid.Column="0" Spacing="16" Margin="0,0,10,0">
+                    <Border Classes="note" Padding="18,16">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="APPEARANCE" Classes="section" />
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="Theme" />
+                                <ComboBox ItemsSource="{Binding ThemeOptions}" SelectedItem="{Binding Theme}" MinWidth="200" />
+                            </StackPanel>
+                            <TextBlock Classes="dim" FontSize="12" TextWrapping="Wrap"
+                                       Text="System follows the light or dark setting of this computer." />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Classes="note" Padding="18,16">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="HASH SETS" Classes="section" />
+                            <TextBlock Classes="muted" FontSize="12.5" LineHeight="18" TextWrapping="Wrap"
+                                       Text="The hash-set database used by the Hash sets tool. With hashing switched on, the Filesystem tool also hashes every file it lists and marks each one Known, Notable or Unknown, so you can filter out standard operating-system files." />
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="Database file" />
+                                <TextBox Text="{Binding HashSetDatabase}" Watermark="Choose it in the Hash sets tool"
+                                         FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                            </StackPanel>
+                            <CheckBox IsChecked="{Binding HashFilesOnEnumerate}"
+                                      Content="Hash files while listing a file system" />
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="Skip files larger than" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <NumericUpDown Value="{Binding HashSizeLimitMb}" Minimum="1" Maximum="4096" Increment="16" FormatString="0" Width="150" />
+                                    <TextBlock Text="megabytes" Classes="label" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Classes="note" Padding="18,16">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="CHAIN OF CUSTODY" Classes="section" />
+                            <TextBlock Classes="muted" FontSize="12.5" LineHeight="18" TextWrapping="Wrap"
+                                       Text="Optional. When an address is set, signing a custody log also asks this time-stamp service (RFC 3161) to countersign, so the time comes from a clock you do not control. Only a hash of your signature is sent, never case content." />
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="Time-stamp service address" />
+                                <TextBox Text="{Binding TimestampAuthorityUrl}" Watermark="https://freetsa.org/tsr"
+                                         FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                            </StackPanel>
+                            <TextBlock Classes="dim" FontSize="12" TextWrapping="Wrap" Text="Leave it empty to sign without a time stamp." />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Spacing="16" Margin="10,0,0,0">
+                    <Border Classes="note" Padding="18,16">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="AI ASSISTANT" Classes="section" />
+                            <TextBlock Classes="muted" FontSize="12.5" LineHeight="18" TextWrapping="Wrap"
+                                       Text="The model the AI Copilot tool starts with. Cinder ships no model: point it at one running on this computer (Ollama, LM Studio) or at a hosted service. Anything typed into the assistant is sent to that address." />
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="Where the model runs" />
+                                <ComboBox ItemsSource="{Binding AiProviderOptions}" SelectedItem="{Binding AiProviderId}" MinWidth="200" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="Address" />
+                                <TextBox Text="{Binding AiEndpoint}" Watermark="http://localhost:11434"
+                                         FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="Model name" />
+                                <TextBox Text="{Binding AiModel}" Watermark="llama3"
+                                         FontFamily="{DynamicResource CinderFontFamilyMono}" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Classes="field-label" Text="API key" />
+                                <TextBox Text="{Binding AiApiKey}" PasswordChar="•" Watermark="Only for a hosted service" />
+                            </StackPanel>
+                            <TextBlock Classes="dim" FontSize="12" LineHeight="17" TextWrapping="Wrap"
+                                       Text="The key is saved in your settings file, encrypted for your Windows account. On Linux and macOS it is only obscured, not securely encrypted." />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Classes="note" Padding="18,16">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="WHERE THESE ARE KEPT" Classes="section" />
+                            <SelectableTextBlock Text="{Binding SettingsPath}" Classes="mono" FontSize="12" TextWrapping="Wrap"
+                                                 Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                            <TextBlock Classes="dim" FontSize="12" LineHeight="17" TextWrapping="Wrap"
+                                       Text="One file for your user account on this computer. Cases do not carry settings with them." />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

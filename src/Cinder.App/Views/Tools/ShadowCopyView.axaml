@@ -5,7 +5,7 @@
              x:Class="Cinder.App.Views.Tools.ShadowCopyView"
              x:DataType="tools:ShadowCopyTool">
     <Grid RowDefinitions="Auto,*,Auto">
-        <Border Grid.Row="0" Classes="toolbar">
+        <Border Grid.Row="0" Classes="toolbar" IsVisible="{Binding !!Snapshots.Count}">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <Button Classes="tb" VerticalAlignment="Center" Command="{Binding RefreshCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">

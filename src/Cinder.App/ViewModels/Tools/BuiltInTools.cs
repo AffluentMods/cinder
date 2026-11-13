@@ -539,7 +539,7 @@ public sealed partial class SettingsTool : ToolViewModel
     public override string Id => "settings";
     public override string Title => "Settings";
     public override string Icon => "⚙";
-    public override string Subtitle => "Change the theme, the hash-set database, the custody time-stamp service, the AI model and cloud sign-in details.";
+    public override string Subtitle => "Change the theme, the hash-set database, the custody time-stamp service and the AI model.";
     public override string Phase => "0";
     public override string Kind => "settings";
 }

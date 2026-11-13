@@ -195,7 +195,7 @@ public class SettingsStoreTests : IDisposable
         var store = new SettingsStore(_path);
         store.Save(Configured());
 
-        var dialog = new SettingsDialogViewModel(store);
+        var dialog = new SettingsFormViewModel(store);
         dialog.AiApiKey.Should().Be("sk-secret-value");
         dialog.Theme = "Dark";
         dialog.AiModel = "gpt-4o-mini";
@@ -222,7 +222,7 @@ public class SettingsStoreTests : IDisposable
     public void The_dialog_writes_the_api_key_under_the_name_the_ai_tool_reads()
     {
         var store = new SettingsStore(_path);
-        var dialog = new SettingsDialogViewModel(store) { AiProviderId = "openai", AiApiKey = "sk-new" };
+        var dialog = new SettingsFormViewModel(store) { AiProviderId = "openai", AiApiKey = "sk-new" };
 
         dialog.SaveCommand.Execute(null);
 
@@ -235,7 +235,7 @@ public class SettingsStoreTests : IDisposable
     {
         var store = new SettingsStore(_path);
         store.Save(new CinderSettings());
-        var dialog = new SettingsDialogViewModel(store);
+        var dialog = new SettingsFormViewModel(store);
 
         // e.g. a plug-in enabled from its own tool while the dialog is up
         store.Save(store.Load() with { EnabledPlugins = ["added.meanwhile"] });
@@ -254,7 +254,7 @@ public class SettingsStoreTests : IDisposable
         ShellNotice.ErrorSink = notices.Add;
         try
         {
-            var dialog = new SettingsDialogViewModel(store);
+            var dialog = new SettingsFormViewModel(store);
             dialog.HasSaveError.Should().BeTrue("the dialog knows from the start that it is showing defaults");
             dialog.Theme = "Light";
 

@@ -133,6 +133,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         AppNavigator.OpenCase = () => OpenCaseFromPickerCommand.ExecuteAsync(null);
         AppNavigator.OpenCaseAtPath = OpenCaseFromPathAsync;
         AppNavigator.CloseActiveCase = () => CloseCaseCommand.Execute(ActiveCase);
+        AppNavigator.ShowTool = kind =>
+        {
+            if (Workspace.FindByKind(kind) is { } tool)
+            {
+                Workspace.SelectedTool = tool;
+            }
+        };
         AppNavigator.OpenInHex = (path, offset) =>
         {
             if (!OpenFileInNewBuffer(path))

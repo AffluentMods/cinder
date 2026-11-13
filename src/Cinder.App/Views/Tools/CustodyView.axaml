@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:svc="using:Cinder.App.Services"
              x:Class="Cinder.App.Views.Tools.CustodyView"
              x:DataType="tools:CustodyTool">
     <!-- Pick a case file (or use the open one); Cinder re-checks its log and says intact or altered. -->
@@ -59,9 +60,9 @@
                     <DataGridTextColumn Header="Time (UTC)" Binding="{Binding TimestampUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" Width="170"
                                         FontFamily="{StaticResource CinderFontFamilyMono}" />
                     <DataGridTextColumn Header="Examiner" Binding="{Binding Examiner}" Width="130" />
-                    <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="150" />
-                    <DataGridTextColumn Header="Details" Binding="{Binding DetailsJson}" Width="*"
-                                        FontFamily="{StaticResource CinderFontFamilyMono}" />
+                    <DataGridTextColumn Header="Action" Binding="{Binding Action, Converter={x:Static svc:CustodyText.ActionConverter}}" Width="150" />
+                    <!-- Shown in words; the stored JSON is what is hashed and what Export writes. -->
+                    <DataGridTextColumn Header="Details" Binding="{Binding DetailsJson, Converter={x:Static svc:CustodyText.DetailsConverter}}" Width="*" />
                     <DataGridTextColumn Header="Entry hash" Binding="{Binding EntryHash}" Width="180"
                                         FontFamily="{StaticResource CinderFontFamilyMono}" />
                 </DataGrid.Columns>

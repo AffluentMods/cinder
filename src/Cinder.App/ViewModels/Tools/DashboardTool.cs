@@ -67,8 +67,27 @@ custody log: without one, nothing you do is recorded.
 
     private RecentsStore? _store;
 
+    /// <summary>The case that is open, so Home can offer the next steps for it. Null when none is.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasOpenCase))]
+    private CaseSession? _openCase;
+
+    public bool HasOpenCase => OpenCase is not null;
+
+    /// <summary>Goes to a tool by its kind id. The buttons on the open-case panel use this.</summary>
+    [RelayCommand]
+    private static void ShowTool(string? kind)
+    {
+        if (!string.IsNullOrEmpty(kind))
+        {
+            AppNavigator.ShowTool?.Invoke(kind);
+        }
+    }
+
     public DashboardTool()
     {
+        ActiveCaseContext.Changed += session => OpenCase = session;
+        OpenCase = ActiveCaseContext.Current;
         RecentCases.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasHistory));
         RecentEvidence.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasHistory));
     }
