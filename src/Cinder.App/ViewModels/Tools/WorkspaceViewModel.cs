@@ -91,9 +91,9 @@ public sealed partial class WorkspaceViewModel : ViewModelBase
                     new MountTool(),
                     new ConvertTool(),
                     new ShadowCopyTool(),
-                    new RamCaptureTool(),
                     new CarverTool(),
-                    new CloudPullTool(),
+                    // RamCaptureTool and CloudPullTool are not listed: neither can do its job yet
+                    // (see LIMITATIONS.md), and a screen that only says so does not belong in the rail.
                 ],
             },
             new()

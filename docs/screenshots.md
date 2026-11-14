@@ -27,20 +27,22 @@ consistent, and so nothing in them can come back to bite the project.
 - **Format:** PNG. Strip metadata before committing — `exiftool -all= *.png`.
   A screenshot carries the capturing machine's details otherwise.
 
-## The four shots
+## The six shots
 
 | File | Tool | What must be visible |
 |---|---|---|
 | `home.png` | Home | An open case, three or four recent cases, recent evidence, the first-time guide. |
 | `hex.png` | Hex Viewer | An image open at a non-zero offset, a multi-byte selection with the data inspector decoding it (a FILETIME reads well), and at least one bookmark. |
 | `filesystem.png` | Filesystem | A volume listed with record numbers, sizes and timestamps. |
+| `imager.png` | Disk imager | A finished run: the source and output paths, and the result with bytes written and both hashes. |
 | `report.png` | Reports | A section with text, the Markdown preview, and bookmarks loaded as exhibits. |
+| `palette.png` | Command palette | The palette open over the Hex Viewer, with commands and their shortcuts listed. |
 
-An Event Log shot would be a natural fifth, but there is no synthetic `.evtx` to take it
+An Event Log shot would be a natural seventh, but there is no synthetic `.evtx` to take it
 from yet, and a log exported from a real machine carries its computer name and account SIDs,
 which rule 1 forbids.
 
-Save them to `assets/screenshots/`; the README shows them in a two-by-two table.
+Save them to `assets/screenshots/`; the README shows them in three two-column tables.
 
 ## How to produce them
 
@@ -57,8 +59,8 @@ one window (not the screen), so nothing else on your desktop can end up in a fra
 2. **Paths.** Map that folder's parent to a drive letter (`subst R: <folder>`) so no path in
    a frame contains your user name. Remove the mapping afterwards (`subst R: /D`).
 3. **Capture** with a Release build, on a display scaled to 150 % or 200 %. `--seed-case`
-   creates the demo case and its bookmarks (it only writes inside a folder named
-   `cinder-demo`); `--examiner` supplies the name shown instead of your account name.
+   creates the demo case and its bookmarks, and `--imager-demo` images the fixture to an
+   E01 (both only write inside a folder named `cinder-demo`); `--examiner` supplies the name shown instead of your account name.
 
 ```powershell
 $exe  = 'src\Cinder.App\bin\Release\net10.0\Cinder.exe'
@@ -87,7 +89,13 @@ Shot hex 9 @('--case-file', $case, '--tool', 'hex', '--open', $img,
 
 Shot filesystem 10 @('--case-file', $case, '--tool', 'filesystem', '--evidence', $img, '--delay', '4000')
 
+Shot imager 10 @('--case-file', $case, '--tool', 'imager',
+    '--imager-demo', "$img|R:\cinder-demo\images\WKS-014-USB.E01", '--delay', '2500')
+
 Shot report 8 @('--case-file', $case, '--tool', 'reports', '--report-demo', '--delay', '2500')
+
+Shot palette 9 @('--case-file', $case, '--tool', 'hex', '--open', $img,
+    '--caret', '0xD7C50', '--select', '0xD7C50:0xD7C57', '--palette', '--delay', '3500')
 ```
 
 4. **Downscale** each capture to 1600 wide (Lanczos) and save as PNG without metadata. Then

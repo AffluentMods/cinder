@@ -21,8 +21,8 @@ namespace Cinder.App.Services;
 ///              [--seed-case path|name|examiner|evidencePath]
 ///              [--fresh-recents] [--recent-case "name|examiner|path"]… [--recent-evidence path]…
 ///              [--evidence file] [--row-filter text] [--hex-bookmark 0x200]…
-///              [--report-demo] [--custody-verify] [--filter text] [--no-rail]
-///              [--palette] [--help-open] [--dialog settings] [--diag] [--hold seconds]
+///              [--report-demo] [--imager-demo source|output] [--custody-verify] [--filter text] [--no-rail]
+///              [--palette] [--help-open] [--diag] [--hold seconds]
 /// </code>
 ///
 /// The window is rendered through <see cref="RenderTargetBitmap"/>, i.e. the same visual tree
@@ -43,6 +43,10 @@ public static class DevScreenshot
         {
             mw.PersistLayout = false;
         }
+        // The Settings page gets a throwaway file: a render must never read or write the
+        // examiner's real settings.
+        var shotSettings = Path.Combine(Path.GetTempPath(), "cinder-shot-settings.json");
+        Cinder.App.ViewModels.Tools.SettingsTool.StoreFactory = () => new SettingsStore(shotSettings);
 
         if (Arg(args, "--size") is { } size && size.Split('x') is [var w, var h]
             && double.TryParse(w, NumberStyles.Float, CultureInfo.InvariantCulture, out var ww)
@@ -152,6 +156,10 @@ public static class DevScreenshot
                 {
                     await FillReportDemoAsync(vm, examiner);
                 }
+                if (Arg(args, "--imager-demo") is { } imagerDemo && vm.Workspace.FindByKind("imager") is ImagerTool imager)
+                {
+                    await RunImagerDemoAsync(imager, imagerDemo);
+                }
                 if (args.Contains("--custody-verify") && vm.Workspace.FindByKind("custody") is CustodyTool custody)
                 {
                     await custody.VerifyOpenCaseCommand.ExecuteAsync(null);
@@ -166,11 +174,6 @@ public static class DevScreenshot
                 }
 
                 Window target = window;
-                if (Arg(args, "--dialog") is { } dialog && CreateDialog(dialog) is { } dlg)
-                {
-                    dlg.Show(window);
-                    target = dlg;
-                }
 
                 await Task.Delay(delay);
                 await Dispatcher.UIThread.InvokeAsync(() => Render(target, shot, scale), DispatcherPriority.Background);
@@ -210,19 +213,27 @@ public static class DevScreenshot
     }
 
     /// <summary>
-    /// The secondary windows, so they can be reviewed too. Settings is given a throwaway store:
-    /// a screenshot run must never read or write the examiner's real settings file.
+    /// Images a file into an E01 so the Disk imager can be shown with a finished result:
+    /// <c>source|output</c>. Like <c>--seed-case</c>, it only writes inside a folder named
+    /// cinder-demo.
     /// </summary>
-    private static Window? CreateDialog(string name)
+    private static async Task RunImagerDemoAsync(ImagerTool imager, string spec)
     {
-        switch (name)
+        if (spec.Split('|') is not [var source, var output])
         {
-            case "settings":
-                var path = Path.Combine(Path.GetTempPath(), "cinder-shot-settings.json");
-                return new Cinder.App.Views.SettingsDialog { DataContext = new SettingsDialogViewModel(new SettingsStore(path)) };
-            default:
-                return null;
+            throw new ArgumentException("--imager-demo expects source|output");
         }
+        output = Path.GetFullPath(output);
+        if (!output.Split(Path.DirectorySeparatorChar).Contains("cinder-demo"))
+        {
+            throw new InvalidOperationException("--imager-demo only writes inside a folder named cinder-demo.");
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        imager.Source = Path.GetFullPath(source);
+        imager.Output = output;
+        imager.Format = "E01";
+        imager.Overwrite = true;
+        await imager.StartCommand.ExecuteAsync(null);
     }
 
     /// <summary>

@@ -11,8 +11,8 @@
         new to forensics. Accent is reserved for the one primary action.
     -->
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AllowAutoHide="True">
-        <Grid Margin="40,34,40,40" MaxWidth="1180" HorizontalAlignment="Left"
-              ColumnDefinitions="*,40,340" RowDefinitions="Auto,28,Auto">
+        <Grid Margin="40,34,40,40" MaxWidth="1360" HorizontalAlignment="Stretch"
+              ColumnDefinitions="*,40,400" RowDefinitions="Auto,Auto,28,Auto">
 
             <!-- ==================== Heading ==================== -->
             <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Spacing="4">
@@ -26,8 +26,77 @@
                 <TextBlock Text="What remains tells the story." Classes="muted" FontSize="13.5" />
             </StackPanel>
 
+            <!-- ==================== The open case: carry on from here ==================== -->
+            <!-- Built from a template when a case opens, so the text is measured with its real
+                 values; bound in place, the case name kept the width it was first measured at. -->
+            <ContentControl Grid.Row="1" Grid.ColumnSpan="3" Margin="0,24,0,0" Content="{Binding OpenCase}"
+                            IsVisible="{Binding HasOpenCase}" HorizontalContentAlignment="Stretch">
+              <ContentControl.ContentTemplate>
+                <DataTemplate DataType="vm:CaseSession">
+            <Border Padding="18,16" CornerRadius="10"
+                    Background="{DynamicResource CinderSurface2Brush}"
+                    BorderBrush="{DynamicResource CinderBorderStrongBrush}" BorderThickness="1">
+                <StackPanel Spacing="14">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Border Classes="starticon" VerticalAlignment="Top">
+                            <c:CinderIcon Data="{x:Static c:Icons.Folder}" Foreground="{DynamicResource CinderAccentBrush}" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Margin="12,0,0,0" Spacing="3">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="600" VerticalAlignment="Center" />
+                                <Border Classes="badge" VerticalAlignment="Center"><TextBlock Text="open case" /></Border>
+                            </StackPanel>
+                            <TextBlock Classes="muted" FontSize="12.5" TextTrimming="CharacterEllipsis">
+                                <Run Text="Examiner" /> <Run Text="{Binding Examiner}" Foreground="{DynamicResource CinderForegroundBrush}" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding Path}" Classes="mono dim" FontSize="11.5"
+                                       TextTrimming="PrefixCharacterEllipsis" ToolTip.Tip="{Binding Path}" />
+                        </StackPanel>
+                    </Grid>
+                    <WrapPanel Orientation="Horizontal">
+                        <Button Classes="tb casestep" Command="{Binding $parent[UserControl].((tools:DashboardTool)DataContext).ShowToolCommand}" CommandParameter="filesystem"
+                                ToolTip.Tip="List the files and folders inside a disk image">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:CinderIcon Data="{x:Static c:Icons.Folder}" Width="14" Height="14" />
+                                <TextBlock Text="Browse a disk image" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="tb casestep" Command="{Binding $parent[UserControl].((tools:DashboardTool)DataContext).ShowToolCommand}" CommandParameter="timeline"
+                                ToolTip.Tip="Put every timestamped event from a folder of evidence in one list">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:CinderIcon Data="{x:Static c:Icons.Clock}" Width="14" Height="14" />
+                                <TextBlock Text="Build a timeline" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="tb casestep" Command="{Binding $parent[UserControl].((tools:DashboardTool)DataContext).ShowToolCommand}" CommandParameter="bookmarks"
+                                ToolTip.Tip="The findings you bookmarked in this case">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:CinderIcon Data="{x:Static c:Icons.Bookmark}" Width="14" Height="14" />
+                                <TextBlock Text="Review bookmarks" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="tb casestep" Command="{Binding $parent[UserControl].((tools:DashboardTool)DataContext).ShowToolCommand}" CommandParameter="reports"
+                                ToolTip.Tip="Write the report and export it">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:CinderIcon Data="{x:Static c:Icons.Report}" Width="14" Height="14" />
+                                <TextBlock Text="Write the report" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="tb casestep" Command="{Binding $parent[UserControl].((tools:DashboardTool)DataContext).ShowToolCommand}" CommandParameter="custody"
+                                ToolTip.Tip="Check that the log of what was done has not been altered">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <c:CinderIcon Data="{x:Static c:Icons.Lock}" Width="14" Height="14" />
+                                <TextBlock Text="Check the custody log" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+                </DataTemplate>
+              </ContentControl.ContentTemplate>
+            </ContentControl>
             <!-- ==================== Left: start + recents ==================== -->
-            <StackPanel Grid.Row="2" Grid.Column="0" Spacing="30">
+            <StackPanel Grid.Row="3" Grid.Column="0" Spacing="30">
 
                 <!-- Start -->
                 <StackPanel Spacing="6">
@@ -134,7 +203,7 @@
             </StackPanel>
 
             <!-- ==================== Right: first-time guide ==================== -->
-            <StackPanel Grid.Row="2" Grid.Column="2" Spacing="6">
+            <StackPanel Grid.Row="3" Grid.Column="2" Spacing="6">
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
                     <TextBlock Text="NEW TO FORENSICS?" Classes="section" VerticalAlignment="Center" />
                 </StackPanel>
@@ -195,6 +264,12 @@
         <Style Selector="Border.starticon > c|CinderIcon">
             <Setter Property="Width" Value="17" />
             <Setter Property="Height" Value="17" />
+        </Style>
+        <Style Selector="Button.casestep">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="FontSize" Value="12.5" />
         </Style>
         <Style Selector="Button.recentrow">
             <Setter Property="HorizontalAlignment" Value="Stretch" />

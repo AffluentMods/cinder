@@ -97,21 +97,12 @@ public static class CommandRegistration
 
         registry.Register(new CommandDescriptor(
             Id: "app.settings",
-            Title: "Settings…",
-            Subtitle: "Theme, hash-set database, custody time-stamp service, AI model, cloud sign-in.",
+            Title: "Settings",
+            Subtitle: "Theme, hash-set database, custody time-stamp service, AI model.",
             Category: "App",
             Invoke: _ =>
             {
-                Dispatcher.UIThread.Post(() =>
-                {
-                    var owner = ResolveMainWindow();
-                    if (owner is null)
-                    {
-                        return;
-                    }
-                    var dialog = new SettingsDialog { DataContext = new SettingsDialogViewModel(new SettingsStore()) };
-                    dialog.ShowDialog(owner);
-                });
+                Dispatcher.UIThread.Post(() => mainVm.Workspace.SelectedTool = mainVm.Workspace.SettingsEntry);
                 return Task.CompletedTask;
             }));
 
@@ -345,6 +336,11 @@ public static class CommandRegistration
             foreach (var tool in section.Tools)
             {
                 var t = tool;
+                if (t.Kind == "settings")
+                {
+                    // Already listed as the Settings command, which carries the Ctrl+, shortcut.
+                    continue;
+                }
                 registry.Register(new CommandDescriptor(
                     Id: "tool." + t.Id,
                     Title: t.Title,

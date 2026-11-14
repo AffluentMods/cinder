@@ -4,35 +4,59 @@
              xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.VerifyView"
              x:DataType="tools:VerifyTool">
-    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
-        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
-            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
-                       Text="Re-reads every byte of an image and compares the result with the digest recorded when it was acquired — inside the container for E01 and AFF4, or a .sha256 / .md5 companion file for raw, VHD and VHDX. There are three outcomes: verified, failed, or unverifiable (nothing to compare against). The result is written to the custody log." />
-            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Command="{Binding PickAndRunCommand}">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <c:CinderIcon Data="{x:Static c:Icons.Check}" Width="15" Height="15" />
-                    <TextBlock Text="Pick image and verify…" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
-            <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding PickAndRunCommand.IsRunning}">
-                <Button Classes="tb" Height="30" Content="Stop" Command="{Binding PickAndRunCancelCommand}" />
-                <ProgressBar IsIndeterminate="True" Width="200" VerticalAlignment="Center" />
+    <!-- Task page: the one action on the left; what it does, then its result, on the right. -->
+    <c:TaskPage>
+        <StackPanel Spacing="18">
+            <StackPanel>
+                <TextBlock Classes="field-label" Text="Image to verify" />
+                <Border Classes="note" Padding="12,10">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14" Margin="0,0,9,0"
+                                      Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBlock Grid.Column="1" Text="{Binding ImagePath, TargetNullValue='No image chosen yet'}"
+                                   Classes="mono muted" FontSize="12.5" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ImagePath}" />
+                    </Grid>
+                </Border>
             </StackPanel>
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14"
-                              Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBlock Text="{Binding ImagePath, TargetNullValue='No image selected'}" Classes="mono muted" FontSize="12.5"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <Button Classes="accent" Height="30" Padding="14,0" Command="{Binding PickAndRunCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <c:CinderIcon Data="{x:Static c:Icons.Check}" Width="15" Height="15" />
+                        <TextBlock Text="Pick image and verify…" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+                <Button Classes="tb" Height="30" Padding="12,0" Content="Stop verifying"
+                        Command="{Binding PickAndRunCancelCommand}" IsVisible="{Binding PickAndRunCommand.IsRunning}" />
             </StackPanel>
-            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="16,14"
-                    IsVisible="{Binding ResultText, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <SelectableTextBlock Text="{Binding ResultText}" Classes="mono" FontSize="12.5" TextWrapping="Wrap" LineHeight="19" />
-            </Border>
-            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
-                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
-            </Border>
         </StackPanel>
-    </ScrollViewer>
+
+        <c:TaskPage.Aside>
+            <StackPanel>
+                <StackPanel IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNull}}">
+                    <TextBlock Classes="section" Text="WHAT HAPPENS" Margin="0,0,0,14" />
+                    <c:Step Number="1" Title="Reads every byte of the image again"
+                            Text="Large images take a while: the whole file is read, not a sample of it." />
+                    <c:Step Number="2" Title="Compares the result with the hash recorded at acquisition"
+                            Text="E01 and AFF4 keep that hash inside the file. Raw, VHD and VHDX images are compared with the .sha256 or .md5 file saved beside them." />
+                    <c:Step Number="3" Title="Tells you one of three things"
+                            Text="Verified: the image still matches. Failed: it does not, so it has changed or is damaged. Cannot be verified: there is no recorded hash to compare against." />
+                    <c:Step Number="4" Title="Records the outcome"
+                            Text="With a case open, the result is written to its custody log." />
+                </StackPanel>
+
+                <StackPanel Spacing="12" IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Classes="section" Text="RESULT" />
+                    <ProgressBar IsIndeterminate="True" IsVisible="{Binding PickAndRunCommand.IsRunning}" />
+                    <Border Classes="result">
+                        <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19" />
+                    </Border>
+                    <Border Classes="result"
+                            IsVisible="{Binding ResultText, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <SelectableTextBlock Text="{Binding ResultText}" Classes="mono" FontSize="12.5" TextWrapping="Wrap" LineHeight="19" />
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </c:TaskPage.Aside>
+    </c:TaskPage>
 </UserControl>

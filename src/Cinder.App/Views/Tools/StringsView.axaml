@@ -6,7 +6,7 @@
              x:DataType="tools:StringsTool">
     <Grid RowDefinitions="Auto,Auto,*,Auto">
         <!-- Primary action bar -->
-        <Border Grid.Row="0" Classes="toolbar">
+        <Border Grid.Row="0" Classes="toolbar" IsVisible="{Binding Path, Converter={x:Static ObjectConverters.IsNotNull}}">
             <Grid ColumnDefinitions="Auto,*">
                 <Button Classes="tb" VerticalAlignment="Center" Command="{Binding PickCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">

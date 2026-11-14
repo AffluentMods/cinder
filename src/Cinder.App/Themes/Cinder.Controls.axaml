@@ -32,4 +32,50 @@
             </ControlTemplate>
         </Setter>
     </ControlTheme>
+
+    <!-- Task page: a short form on the left, and what the job does / its progress / its result
+         filling the rest. Used by the tools that run one job from a few inputs. -->
+    <ControlTheme x:Key="{x:Type c:TaskPage}" TargetType="c:TaskPage">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Grid ColumnDefinitions="Auto,*">
+                    <ScrollViewer Width="{TemplateBinding FormWidth}" VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+                        <ContentPresenter Name="PART_ContentPresenter" Margin="24,22,24,24"
+                                          Content="{TemplateBinding Content}"
+                                          ContentTemplate="{TemplateBinding ContentTemplate}" />
+                    </ScrollViewer>
+                    <Border Grid.Column="1" Background="{DynamicResource CinderSurface0Brush}"
+                            BorderBrush="{DynamicResource CinderBorderBrush}" BorderThickness="1,0,0,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
+                            <ContentPresenter Margin="32,22,32,24" MaxWidth="720" HorizontalAlignment="Left"
+                                              Content="{TemplateBinding Aside}" />
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </ControlTheme>
+
+    <!-- One numbered step: accent number, short title, one or two sentences. -->
+    <ControlTheme x:Key="{x:Type c:Step}" TargetType="c:Step">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Margin" Value="0,0,0,16" />
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Grid ColumnDefinitions="28,*">
+                    <TextBlock Text="{TemplateBinding Number}" FontSize="12.5" FontWeight="600" Margin="0,1,0,0"
+                               FontFamily="{DynamicResource CinderFontFamilyMono}"
+                               Foreground="{DynamicResource CinderAccentBrush}" />
+                    <StackPanel Grid.Column="1" Spacing="3">
+                        <TextBlock Text="{TemplateBinding Title}" FontSize="13" FontWeight="600" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource CinderForegroundBrush}" />
+                        <TextBlock Text="{TemplateBinding Text}" FontSize="12.5" LineHeight="18" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource CinderForegroundMutedBrush}"
+                                   IsVisible="{TemplateBinding Text, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </StackPanel>
+                </Grid>
+            </ControlTemplate>
+        </Setter>
+    </ControlTheme>
 </ResourceDictionary>

@@ -1426,16 +1426,16 @@ public sealed partial class SettingsTool
 {
     public override string HelpMarkdown => """
 ## What this is
-Where Cinder's preferences are kept: appearance, where Python is, which language
-model the AI Copilot uses, the client IDs for cloud sign-in, the hash-set database
-and file-hashing options used by the Filesystem tool, and the time-stamp service
-used when signing the custody log.
+Where Cinder's preferences are kept: the theme, the hash-set database and the
+file-hashing options used by the Filesystem tool, the time-stamp service used when
+signing the custody log, and which language model the AI Copilot uses.
 
 ## When you'd use it
 Once on first use, and whenever you add something Cinder needs to know about.
 
 ## Good to know
-Ctrl+, opens Settings from anywhere. On Windows, API keys saved in Settings are
-stored encrypted for your user account.
+Ctrl+, opens Settings from anywhere. Nothing changes until you choose Save settings;
+Discard changes puts the fields back to what is saved. On Windows, an API key saved
+here is stored encrypted for your user account.
 """;
 }

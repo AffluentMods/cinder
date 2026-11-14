@@ -4,39 +4,60 @@
              xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.MountView"
              x:DataType="tools:MountTool">
-    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
-        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
-            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
-                       Text="Attaches an image read-only so other programs can browse it: VHD, VHDX and ISO through Windows' built-in Mount-DiskImage; raw images through a loop device on Linux. E01 needs Arsenal Image Mounter installed. Nothing is written to the image." />
+    <!-- Task page: the one action and the current mount on the left; what it does, then its
+         result, on the right. -->
+    <c:TaskPage>
+        <StackPanel Spacing="18">
+            <StackPanel>
+                <TextBlock Classes="field-label" Text="Image to mount" />
+                <Border Classes="note" Padding="12,10">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14" Margin="0,0,9,0"
+                                      Foreground="{DynamicResource CinderForegroundMutedBrush}" />
+                        <TextBlock Grid.Column="1" Text="{Binding ImagePath, TargetNullValue='No image chosen yet'}"
+                                   Classes="mono muted" FontSize="12.5" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ImagePath}" />
+                    </Grid>
+                </Border>
+            </StackPanel>
             <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Command="{Binding PickAndMountCommand}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <c:CinderIcon Data="{x:Static c:Icons.Mount}" Width="15" Height="15" />
                     <TextBlock Text="Pick image and mount read-only…" VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <c:CinderIcon Data="{x:Static c:Icons.Doc}" Width="14" Height="14"
-                              Foreground="{DynamicResource CinderForegroundMutedBrush}" />
-                <TextBlock Text="{Binding ImagePath, TargetNullValue='No image selected'}" Classes="mono muted" FontSize="12.5"
-                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
-                    IsVisible="{Binding IsMounted}">
+            <Border Classes="result" IsVisible="{Binding IsMounted}">
                 <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="4">
                         <TextBlock Text="MOUNTED AT" Classes="section" />
                         <SelectableTextBlock Text="{Binding MountedAt}" Classes="mono" FontSize="13" />
                     </StackPanel>
-                    <Button Grid.Column="1" Classes="tb" Height="30" VerticalAlignment="Center" Content="Unmount"
+                    <Button Grid.Column="1" Classes="tb" Height="30" Padding="12,0" VerticalAlignment="Center" Content="Unmount image"
                             Command="{Binding UnmountCommand}"
                             ToolTip.Tip="Detach the image. Close any program that has files open on it first." />
                 </Grid>
             </Border>
-            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
-                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
-            </Border>
         </StackPanel>
-    </ScrollViewer>
+
+        <c:TaskPage.Aside>
+            <StackPanel>
+                <StackPanel IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNull}}">
+                    <TextBlock Classes="section" Text="WHAT HAPPENS" Margin="0,0,0,14" />
+                    <c:Step Number="1" Title="Attaches the image to this computer, read-only"
+                            Text="It shows up as a drive or folder that other programs can browse. Nothing is written to the image." />
+                    <c:Step Number="2" Title="Uses what the operating system provides"
+                            Text="On Windows, VHD, VHDX and ISO images are mounted by Windows itself. On Linux, raw images are attached through a loop device. E01 images need Arsenal Image Mounter to be installed." />
+                    <c:Step Number="3" Title="Stays mounted until you unmount it here"
+                            Text="Closing Cinder does not detach the image. Come back to this screen and choose Unmount image when you are done." />
+                </StackPanel>
+
+                <StackPanel Spacing="12" IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Classes="section" Text="RESULT" />
+                    <Border Classes="result">
+                        <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19" />
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </c:TaskPage.Aside>
+    </c:TaskPage>
 </UserControl>

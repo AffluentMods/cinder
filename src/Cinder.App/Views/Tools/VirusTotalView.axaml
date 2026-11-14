@@ -1,53 +1,70 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:c="using:Cinder.App.Controls"
              xmlns:tools="using:Cinder.App.ViewModels.Tools"
+             xmlns:c="using:Cinder.App.Controls"
              x:Class="Cinder.App.Views.Tools.VirusTotalView"
              x:DataType="tools:VirusTotalTool">
-    <!-- Action form: what will happen, the inputs, one primary action, the result. -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto" AllowAutoHide="True">
-        <StackPanel Margin="28,24" MaxWidth="760" HorizontalAlignment="Left" Spacing="18">
-            <TextBlock Classes="muted" FontSize="13" TextWrapping="Wrap" LineHeight="19" MaxWidth="640" HorizontalAlignment="Left"
-                       Text="Asks VirusTotal what antivirus engines say about a file, using only its hash. The file itself is never uploaded." />
-            <Border Background="{DynamicResource CinderWarnSoftBrush}" BorderBrush="{DynamicResource CinderWarnBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="14,12">
-                <Grid ColumnDefinitions="Auto,*">
-                    <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
-                                  Foreground="{DynamicResource CinderWarnBrush}" />
-                    <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="12.5" LineHeight="18"
-                               Text="This is the one tool that contacts the internet. The hash you look up and your API key are sent to virustotal.com, which records the query. Do not use it where the case forbids revealing that a file exists." />
-                </Grid>
-            </Border>
-            <Grid ColumnDefinitions="120,*">
-                <TextBlock Text="API key" Classes="label" />
-                <TextBox Grid.Column="1" Text="{Binding ApiKey}" PasswordChar="•"
-                         Watermark="Your VirusTotal API key (kept in memory only, never saved)" />
-            </Grid>
-            <Grid ColumnDefinitions="120,*">
-                <TextBlock Text="File hash" Classes="label" />
-                <TextBox Grid.Column="1" Text="{Binding Hash}" Watermark="MD5, SHA-1 or SHA-256"
+    <!-- Task page: the inputs and the one action on the left; what leaves this computer, then
+         the answer, on the right. -->
+    <c:TaskPage>
+        <StackPanel Spacing="18">
+            <StackPanel>
+                <TextBlock Classes="field-label" Text="Your VirusTotal API key" />
+                <TextBox Text="{Binding ApiKey}" PasswordChar="•" Watermark="Kept in memory only, never saved" />
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Classes="field-label" Text="Hash of the file to look up" />
+                <TextBox Text="{Binding Hash}" Watermark="MD5, SHA-1 or SHA-256"
                          FontFamily="{DynamicResource CinderFontFamilyMono}">
                     <TextBox.KeyBindings>
                         <KeyBinding Gesture="Return" Command="{Binding LookupCommand}" />
                     </TextBox.KeyBindings>
                 </TextBox>
-            </Grid>
-            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Margin="120,0,0,0"
+            </StackPanel>
+            <Button Classes="accent" HorizontalAlignment="Left" Height="30" Padding="14,0" Margin="0,4,0,0"
                     Command="{Binding LookupCommand}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <c:CinderIcon Data="{x:Static c:Icons.Globe}" Width="15" Height="15" />
                     <TextBlock Text="Look up on VirusTotal" VerticalAlignment="Center" />
                 </StackPanel>
             </Button>
-            <ProgressBar IsIndeterminate="True" Margin="120,0,0,0" IsVisible="{Binding LookupCommand.IsRunning}" />
-            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="16,14"
-                    IsVisible="{Binding ResultText, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <SelectableTextBlock Text="{Binding ResultText}" Classes="mono" FontSize="12.5" TextWrapping="Wrap" LineHeight="19" />
-            </Border>
-            <Border Background="{DynamicResource CinderSurface2Brush}" CornerRadius="8" Padding="14,12"
-                    IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" />
-            </Border>
         </StackPanel>
-    </ScrollViewer>
+
+        <c:TaskPage.Aside>
+            <StackPanel Spacing="18">
+                <Border Background="{DynamicResource CinderWarnSoftBrush}" BorderBrush="{DynamicResource CinderWarnBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="14,12">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <c:CinderIcon Data="{x:Static c:Icons.Alert}" Width="15" Height="15" VerticalAlignment="Top" Margin="0,1,10,0"
+                                      Foreground="{DynamicResource CinderWarnBrush}" />
+                        <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="12.5" LineHeight="18"
+                                   Text="This is the one tool that contacts the internet. The hash you look up and your API key are sent to virustotal.com, which records the query. Do not use it where the case forbids revealing that a file exists." />
+                    </Grid>
+                </Border>
+
+                <StackPanel IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNull}}">
+                    <TextBlock Classes="section" Text="WHAT HAPPENS" Margin="0,0,0,14" />
+                    <c:Step Number="1" Title="Sends the hash, never the file"
+                            Text="VirusTotal is asked whether it has seen a file with this hash before. The file itself stays on this computer." />
+                    <c:Step Number="2" Title="Shows what the antivirus engines said"
+                            Text="How many engines flagged the file, and what they called it. A hash VirusTotal has never seen is reported as unknown, which is not the same as clean." />
+                    <c:Step Number="3" Title="Records the lookup"
+                            Text="With a case open, the lookup is written to its custody log." />
+                </StackPanel>
+
+                <StackPanel Spacing="12" IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock Classes="section" Text="RESULT" />
+                    <ProgressBar IsIndeterminate="True" IsVisible="{Binding LookupCommand.IsRunning}" />
+                    <Border Classes="result"
+                            IsVisible="{Binding StatusLine, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <SelectableTextBlock Text="{Binding StatusLine}" TextWrapping="Wrap" FontSize="12.5" LineHeight="19" />
+                    </Border>
+                    <Border Classes="result"
+                            IsVisible="{Binding ResultText, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <SelectableTextBlock Text="{Binding ResultText}" Classes="mono" FontSize="12.5" TextWrapping="Wrap" LineHeight="19" />
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+        </c:TaskPage.Aside>
+    </c:TaskPage>
 </UserControl>

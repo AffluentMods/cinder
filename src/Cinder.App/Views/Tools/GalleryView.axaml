@@ -7,7 +7,7 @@
     <Grid RowDefinitions="Auto,*">
 
         <!-- Toolbar -->
-        <Border Grid.Row="0" Classes="toolbar">
+        <Border Grid.Row="0" Classes="toolbar" IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNotNull}}">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <Button Classes="tb" VerticalAlignment="Center" Command="{Binding PickFolderCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">

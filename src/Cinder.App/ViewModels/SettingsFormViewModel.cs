@@ -4,7 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Cinder.App.ViewModels;
 
-public sealed partial class SettingsDialogViewModel : ViewModelBase
+public sealed partial class SettingsFormViewModel : ViewModelBase
 {
     private readonly SettingsStore _store;
 
@@ -60,12 +60,15 @@ public sealed partial class SettingsDialogViewModel : ViewModelBase
 
     public bool HasSaveError => !string.IsNullOrEmpty(SaveError);
 
+    /// <summary>The settings file these values are read from and saved to.</summary>
+    public string SettingsPath => _store.Path;
+
     public IReadOnlyList<string> ThemeOptions { get; } = ["Dark", "Light", "System"];
     public IReadOnlyList<string> DensityOptions { get; } = ["Comfortable", "Compact"];
     public IReadOnlyList<string> AiProviderOptions { get; } =
         ["disabled", "ollama", "lm-studio", "openai-compatible", "openai", "mistral"];
 
-    public SettingsDialogViewModel(SettingsStore store)
+    public SettingsFormViewModel(SettingsStore store)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         if (!_store.TryLoad(out var s, out var error))
