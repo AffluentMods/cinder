@@ -49,7 +49,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.0" />
-    <PackageVersion Include="Serilog" Version="4.3.1" />
+    <PackageVersion Include="Serilog" Version="4.4.0" />
     <PackageVersion Include="Serilog.Extensions.Hosting" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageVersion Include="Serilog.Sinks.Async" Version="2.1.0" />
@@ -81,7 +81,7 @@
       formats with no good C# equivalent (libpff PST, vol3 memory).
     -->
     <PackageVersion Include="Registry" Version="2026.5.0" />
-    <PackageVersion Include="evtx" Version="1.5.2" />
+    <PackageVersion Include="evtx" Version="2026.10.0" />
     <PackageVersion Include="Lnk" Version="2026.5.3" />
     <PackageVersion Include="Prefetch" Version="2026.5.2" />
     <PackageVersion Include="JumpList" Version="2026.5.2" />
