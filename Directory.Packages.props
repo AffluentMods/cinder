@@ -82,9 +82,9 @@
     -->
     <PackageVersion Include="Registry" Version="2026.5.0" />
     <PackageVersion Include="evtx" Version="1.5.2" />
-    <PackageVersion Include="Lnk" Version="2026.5.3" />
+    <PackageVersion Include="Lnk" Version="2026.10.11" />
     <PackageVersion Include="Prefetch" Version="2026.5.2" />
-    <PackageVersion Include="JumpList" Version="2026.5.2" />
+    <PackageVersion Include="JumpList" Version="2026.10.10" />
 
     <!-- Email / message formats — .msg + .eml + MIME. PST/OST still needs a sidecar. -->
     <PackageVersion Include="MsgReader" Version="6.0.11" />
