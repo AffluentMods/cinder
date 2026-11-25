@@ -15,21 +15,21 @@
     <PackageVersion Include="Microsoft.Build.Tasks.Git" Version="10.0.401" />
 
     <!-- Avalonia -->
-    <PackageVersion Include="Avalonia" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Desktop" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Themes.Fluent" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Fonts.Inter" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Diagnostics" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.ReactiveUI" Version="11.2.1" />
+    <PackageVersion Include="Avalonia" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Diagnostics" Version="11.3.23" />
+    <PackageVersion Include="Avalonia.ReactiveUI" Version="11.3.8" />
     <PackageVersion Include="FluentAvaloniaUI" Version="2.1.0" />
-    <PackageVersion Include="Avalonia.Controls.DataGrid" Version="11.2.1" />
+    <PackageVersion Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
 
     <!--
       Avalonia.FreeDesktop transitively pulls Tmds.DBus.Protocol 0.20.0 which
       has a known high-severity vulnerability (GHSA-xrw6-gwf8-vvr9). We pin a
       patched version explicitly so Release builds don't fail NU1903.
     -->
-    <PackageVersion Include="Tmds.DBus.Protocol" Version="0.21.3" />
+    <PackageVersion Include="Tmds.DBus.Protocol" Version="0.94.1" />
 
     <!--
       Microsoft.Data.Sqlite transitively pulls SQLitePCLRaw.* 2.1.11, whose
@@ -143,7 +143,7 @@
 
     <!-- Branding icon generator (tools/icons). Dev-time only. -->
     <PackageVersion Include="Svg.Skia" Version="4.9.0" />
-    <PackageVersion Include="SkiaSharp" Version="3.119.2" />
+    <PackageVersion Include="SkiaSharp" Version="3.119.4" />
 
     <!-- Testing -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
@@ -154,7 +154,7 @@
     <PackageVersion Include="Bogus" Version="35.6.1" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <!-- Headless Avalonia host for control tests (Cinder.Hex.Tests). Keep in step with the Avalonia version above. -->
-    <PackageVersion Include="Avalonia.Headless" Version="11.2.1" />
-    <PackageVersion Include="Avalonia.Headless.XUnit" Version="11.2.1" />
+    <PackageVersion Include="Avalonia.Headless" Version="12.2.0" />
+    <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.2.0" />
   </ItemGroup>
 </Project>
